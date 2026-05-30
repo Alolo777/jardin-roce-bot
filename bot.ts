@@ -177,14 +177,17 @@ function getFechaActual(): string {
 // ════════════════════════════════════════════════════════════════
 
 async function procesarMensaje(message: any): Promise<void> {
+  // 1. EL FILTRO SALVA-VIDAS: Ignorar grupos, estados y mensajes fantasma (@lid)
   if (message.isGroupMsg) return
   if (!message.body?.trim()) return
+  if (message.from === 'status@broadcast' || message.from.includes('@lid')) return
 
   const clienteId: string = message.from
   const textoCliente: string = message.body.trim()
 
   console.log(`[${new Date().toLocaleTimeString('es-MX')}] 📨 ${clienteId}: ${textoCliente.substring(0, 80)}`)
 
+  // 2. EL PARACAÍDAS: Si falla algo aquí, capturamos el error sin reiniciar
   try {
     const chat = await message.getChat()
     await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 700))
@@ -206,14 +209,12 @@ async function procesarMensaje(message: any): Promise<void> {
           .join('\n')
 
         if (!yaSeEnviaronFotos(clienteId)) {
-          // Primera vez — enviar fotos
           contextoExtra +=
             `\n\nINVENTARIO HOY:\n${resumen}\n` +
             `INSTRUCCION: Responde en maximo 1 linea confirmando que hay opciones y que ya van las fotos.`
           arreglosParaEnviar = arreglos
           enviarFotos = true
         } else {
-          // Ya se enviaron — solo texto con nombres
           contextoExtra +=
             `\n\nINVENTARIO HOY (fotos ya enviadas anteriormente):\n${resumen}\n` +
             `INSTRUCCION: El cliente ya vio las fotos. Menciona los arreglos por nombre y precio en maximo 2 lineas.`
@@ -270,9 +271,8 @@ async function procesarMensaje(message: any): Promise<void> {
     if (enviarFotos && arreglosParaEnviar.length > 0) {
       await new Promise(resolve => setTimeout(resolve, 1200))
       await enviarFotosArreglos(whatsappClient, clienteId, arreglosParaEnviar)
-      marcarFotosEnviadas(clienteId)
+      marcorFotosEnviadas(clienteId)
 
-      // Inyectar en historial que fotos se enviaron (contexto para IA)
       const resumenEnviado = arreglosParaEnviar
         .map((a, i) => `Foto ${i + 1}: ${a.nombre} ($${a.precio} MXN)`)
         .join(', ')
@@ -282,7 +282,6 @@ async function procesarMensaje(message: any): Promise<void> {
         `[Sistema] Fotos enviadas al cliente: ${resumenEnviado}`
       )
 
-      // Mensaje de cierre
       await new Promise(resolve => setTimeout(resolve, 1500))
       await simularEscritura(chat, 1800)
       await whatsappClient.sendMessage(
@@ -294,12 +293,13 @@ async function procesarMensaje(message: any): Promise<void> {
     console.log(`[${new Date().toLocaleTimeString('es-MX')}] ✅ Listo para ${clienteId}`)
 
   } catch (error) {
-    console.error(`[bot] Error con ${clienteId}:`, error)
+    // 3. EL ATERRIZAJE SEGURO: Reportar error sin explotar la app
+    console.error(`[bot] Error procesando mensaje de ${clienteId}:`, error)
     try {
       const chat = await message.getChat()
       await chat.clearState()
-      await message.reply('Lo siento, tuve un problema tecnico. Intenta de nuevo en un momento. 🌸')
-    } catch { /* ignorar */ }
+      await message.reply('Disculpa, tuve un pequeño mareo digital 🌸. ¿Me lo puedes repetir?')
+    } catch { /* Ignorar si no pudo ni enviar el mensaje de error */ }
   }
 }
 
@@ -312,7 +312,7 @@ const whatsappClient = new Client({
   puppeteer: {
     headless: true,
     timeout: 60000,
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined, // 👈 AGREGAR ESTA LÍNEA
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -326,10 +326,7 @@ const whatsappClient = new Client({
 })     
 
 whatsappClient.on('qr', async (qr) => {
-  // 1. Mostrar mensaje en la terminal
   console.log('\n📱 Se generó un nuevo Código QR. Subiendo a Supabase...')
-  
-  // 2. Guardar el texto puro del QR en la base de datos
   try {
     const { error } = await supabaseAdmin
       .from('configuracion_agente')
@@ -343,7 +340,6 @@ whatsappClient.on('qr', async (qr) => {
   }
 })
 
-// 3. Cuando el bot se conecte con éxito, limpiar el QR de la base de datos
 whatsappClient.on('ready', async () => {
   console.log('\n✅ Bot de Jardin RoCe conectado y listo!')
   console.log('🌸 Flora está escuchando mensajes...\n')
@@ -356,11 +352,6 @@ whatsappClient.on('ready', async () => {
   } catch (err) {
     console.error('[bot] Error al limpiar QR:', err)
   }
-})
-
-whatsappClient.on('ready', () => {
-  console.log('\n✅ Bot de Jardin RoCe listo!')
-  console.log('🌸 Flora esta escuchando...\n')
 })
 
 whatsappClient.on('auth_failure', (msg) => {
@@ -376,10 +367,9 @@ whatsappClient.on('disconnected', (reason) => {
   }, 5000)
 })
 
-// UN SOLO manejador
 whatsappClient.on('message_create', (message: any) => {
   if (message.fromMe) return
-  procesarMensaje(message).catch(err => console.error('[bot] Error:', err))
+  procesarMensaje(message).catch(err => console.error('[bot] Error de promesas no capturadas:', err))
 })
 
 // ════════════════════════════════════════════════════════════════
@@ -402,7 +392,7 @@ process.on('uncaughtException', (err) => console.error('❌ Excepcion:', err))
 process.on('unhandledRejection', (r) => console.error('❌ Rechazo:', r))
 
 // ════════════════════════════════════════════════════════════════
-// SERVIDOR WEB (Obligatorio para que Render no apague el bot)
+// SERVIDOR WEB
 // ════════════════════════════════════════════════════════════════
 import express from 'express'
 const app = express()
