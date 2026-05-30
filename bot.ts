@@ -371,3 +371,18 @@ process.on('SIGINT', async () => {
 
 process.on('uncaughtException', (err) => console.error('❌ Excepcion:', err))
 process.on('unhandledRejection', (r) => console.error('❌ Rechazo:', r))
+
+// ════════════════════════════════════════════════════════════════
+// SERVIDOR WEB (Obligatorio para que Render no apague el bot)
+// ════════════════════════════════════════════════════════════════
+import express from 'express'
+const app = express()
+
+app.get('/', (req, res) => {
+  res.send('🌸 Bot de Jardin RoCe está en línea y funcionando 24/7.')
+})
+
+const port = process.env.PORT || 3000
+app.listen(port, () => {
+  console.log(`🌐 Servidor web escuchando en el puerto ${port}`)
+})
