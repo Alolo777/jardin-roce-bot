@@ -1,5 +1,5 @@
 # 1. Usar una imagen oficial de Node.js ligera
-FROM node:20-bullseye-slim
+FROM node:22-bullseye-slim
 
 # 2. Instalar Chromium nativo de Linux y sus dependencias gráficas
 RUN apt-get update && apt-get install -y \
