@@ -45,6 +45,29 @@ function agregarAlHistorial(
 
 const FOTOS_YA_ENVIADAS = new Set<string>()
 
+// ── Monitor de memoria cada 5 minutos ────────────────────────────────────────
+setInterval(() => {
+  const mem = process.memoryUsage()
+  const rss = Math.round(mem.rss / 1024 / 1024)
+  const heap = Math.round(mem.heapUsed / 1024 / 1024)
+  console.log(`[RAM] RSS: ${rss}MB | Heap: ${heap}MB`)
+
+  if (rss > 400) {
+    console.warn('[RAM] ⚠️ Memoria alta, limpiando historiales...')
+    limpiarHistorialesViejos()
+  }
+}, 5 * 60 * 1000)
+
+function limpiarHistorialesViejos(): void {
+  const clientes = Array.from(HISTORIAL_POR_CLIENTE.keys())
+  const aClear = Math.floor(clientes.length * 0.3)
+  for (let i = 0; i < aClear; i++) {
+    HISTORIAL_POR_CLIENTE.delete(clientes[i])
+  }
+  FOTOS_YA_ENVIADAS.clear()
+  console.log(`[RAM] 🧹 Limpié ${aClear} historiales`)
+}
+
 function yaSeEnviaronFotos(clienteId: string): boolean {
   return FOTOS_YA_ENVIADAS.has(clienteId)
 }
@@ -271,7 +294,7 @@ async function procesarMensaje(message: any): Promise<void> {
     if (enviarFotos && arreglosParaEnviar.length > 0) {
       await new Promise(resolve => setTimeout(resolve, 1200))
       await enviarFotosArreglos(whatsappClient, clienteId, arreglosParaEnviar)
-      marcorFotosEnviadas(clienteId)
+      marcarFotosEnviadas(clienteId)
 
       const resumenEnviado = arreglosParaEnviar
         .map((a, i) => `Foto ${i + 1}: ${a.nombre} ($${a.precio} MXN)`)
@@ -308,22 +331,67 @@ async function procesarMensaje(message: any): Promise<void> {
 // ════════════════════════════════════════════════════════════════
 
 const whatsappClient = new Client({
-  authStrategy: new LocalAuth({ clientId: 'jardin-roce-bot' }),
+  authStrategy: new LocalAuth({
+    clientId: 'jardin-roce-bot',
+    dataPath: '/app/.wwebjs_auth',
+  }),
   puppeteer: {
     headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
     timeout: 60000,
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     args: [
+      // Sandbox — obligatorio en Docker
       '--no-sandbox',
       '--disable-setuid-sandbox',
+
+      // Proceso único — ahorra ~100MB en entorno controlado
+      '--single-process',
+
+      // Memoria compartida — usa /tmp en vez de /dev/shm
       '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--no-first-run',
-      '--no-zygote',
+
+      // GPU — desactivar todo lo gráfico
       '--disable-gpu',
+      '--disable-gpu-sandbox',
+      '--use-gl=swiftshader',
+      '--disable-software-rasterizer',
+
+      // Features innecesarias
+      '--disable-extensions',
+      '--disable-plugins',
+      '--disable-default-apps',
+      '--disable-sync',
+      '--disable-background-networking',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--disable-ipc-flooding-protection',
+
+      // UI y medios
+      '--disable-notifications',
+      '--disable-speech-api',
+      '--disable-print-preview',
+      '--mute-audio',
+      '--hide-scrollbars',
+
+      // Misceláneos
+      '--disable-client-side-phishing-detection',
+      '--disable-hang-monitor',
+      '--disable-prompt-on-repost',
+      '--disable-breakpad',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--no-pings',
+      '--password-store=basic',
+      '--use-mock-keychain',
+      '--metrics-recording-only',
+
+      // Limitar heap de V8 dentro de Chromium
+      '--js-flags=--max-old-space-size=256',
+      '--disable-features=TranslateUI,BlinkGenPropertyTrees,AudioServiceOutOfProcess',
     ],
   },
-})     
+})    
 
 whatsappClient.on('qr', async (qr) => {
   console.log('\n📱 Se generó un nuevo Código QR. Subiendo a Supabase...')
@@ -341,16 +409,44 @@ whatsappClient.on('qr', async (qr) => {
 })
 
 whatsappClient.on('ready', async () => {
-  console.log('\n✅ Bot de Jardin RoCe conectado y listo!')
-  console.log('🌸 Flora está escuchando mensajes...\n')
-  
+  console.log('\n✅ Bot de Jardin RoCe conectado!')
+  console.log('🌸 Flora está escuchando...\n')
+
+  // Limpiar QR de Supabase
+  await supabaseAdmin
+    .from('configuracion_agente')
+    .update({ qr_code: null })
+    .eq('id', 1)
+    .catch(console.error)
+
+  // Interceptar y bloquear recursos que no necesita WhatsApp Web
   try {
-    await supabaseAdmin
-      .from('configuracion_agente')
-      .update({ qr_code: null })
-      .eq('id', 1)
+    const page = whatsappClient.pupPage
+    if (page) {
+      await page.setRequestInterception(true)
+      page.on('request', (request) => {
+        const tipo = request.resourceType()
+        const url = request.url()
+
+        const bloquear =
+          tipo === 'image' ||
+          tipo === 'media' ||
+          tipo === 'font' ||
+          url.includes('google-analytics') ||
+          url.includes('doubleclick') ||
+          url.includes('crashlogs') ||
+          url.includes('sentry.io')
+
+        if (bloquear) {
+          request.abort()
+        } else {
+          request.continue()
+        }
+      })
+      console.log('🛡️ Interceptor de requests activado — ahorrando RAM')
+    }
   } catch (err) {
-    console.error('[bot] Error al limpiar QR:', err)
+    console.warn('[bot] Interceptor no disponible:', err)
   }
 })
 

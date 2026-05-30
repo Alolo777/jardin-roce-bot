@@ -1,29 +1,39 @@
-# 1. Usar una imagen oficial de Node.js ligera
 FROM node:22-bullseye-slim
 
-# 2. Instalar Chromium nativo de Linux y sus dependencias gráficas
+# Solo dependencias mínimas de Chromium
 RUN apt-get update && apt-get install -y \
     chromium \
-    fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 \
+    libglib2.0-0 \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. Carpeta de trabajo
 WORKDIR /app
 
-# 4. Copiar e instalar dependencias
 COPY package*.json ./
-RUN npm install
+# npm ci es más rápido y reproducible que npm install
+RUN npm ci
 
-# 5. Copiar el resto de tu código
 COPY . .
 
-# 6. Variables de entorno CLAVE para decirle a WhatsApp dónde está el navegador
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+# Limitar Node.js a 380MB para que el OS no lo mate sin aviso
+ENV NODE_OPTIONS="--max-old-space-size=380"
 
-# 7. Exponer el puerto
-EXPOSE 3000
+EXPOSE 10000
 
-# 8. El comando de arranque
-CMD ["npx", "tsx", "bot.ts"]
+# --expose-gc permite llamar global.gc() manualmente si es necesario
+CMD ["node", "--expose-gc", "-r", "tsx/cjs", "bot.ts"]
