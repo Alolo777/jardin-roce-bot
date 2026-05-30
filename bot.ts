@@ -312,6 +312,7 @@ const whatsappClient = new Client({
   puppeteer: {
     headless: true,
     timeout: 60000,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined, // 👈 AGREGAR ESTA LÍNEA
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
