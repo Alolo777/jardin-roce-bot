@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Secretos y Sesiones
+.env.local
+.env
+.wwebjs_auth/
+.wwebjs_cache/
