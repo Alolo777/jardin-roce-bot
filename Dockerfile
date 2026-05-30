@@ -1,4 +1,4 @@
-# 1. Usar la imagen oficial que ya trae Linux y Chrome instalados
+# 1. Usar la imagen base
 FROM ghcr.io/puppeteer/puppeteer:latest
 
 # 2. Permisos de administrador
@@ -11,11 +11,14 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install
 
-# 5. Copiar el resto del código del bot
+# 5. EL PARCHE MÁGICO: Forzar la descarga de Chrome en la carpeta exacta que pide WhatsApp
+RUN npx puppeteer browsers install chrome
+
+# 6. Copiar el resto del código del bot
 COPY . .
 
-# 6. Exponer el puerto para que Render sepa que estamos vivos
+# 7. Exponer el puerto
 EXPOSE 3000
 
-# 7. El comando de arranque
+# 8. El comando de arranque
 CMD ["npx", "tsx", "bot.ts"]
