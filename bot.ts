@@ -323,11 +323,39 @@ const whatsappClient = new Client({
       '--disable-gpu',
     ],
   },
+})     
+
+whatsappClient.on('qr', async (qr) => {
+  // 1. Mostrar mensaje en la terminal
+  console.log('\n📱 Se generó un nuevo Código QR. Subiendo a Supabase...')
+  
+  // 2. Guardar el texto puro del QR en la base de datos
+  try {
+    const { error } = await supabaseAdmin
+      .from('configuracion_agente')
+      .update({ qr_code: qr })
+      .eq('id', 1)
+
+    if (error) throw error
+    console.log('✅ QR guardado exitosamente. Ábrelo desde tu Dashboard o lee la base de datos.')
+  } catch (error) {
+    console.error('❌ Error al subir el QR a Supabase:', error)
+  }
 })
 
-whatsappClient.on('qr', (qr) => {
-  console.log('\n📱 Escanea este QR:\n')
-  qrcode.generate(qr, { small: true })
+// 3. Cuando el bot se conecte con éxito, limpiar el QR de la base de datos
+whatsappClient.on('ready', async () => {
+  console.log('\n✅ Bot de Jardin RoCe conectado y listo!')
+  console.log('🌸 Flora está escuchando mensajes...\n')
+  
+  try {
+    await supabaseAdmin
+      .from('configuracion_agente')
+      .update({ qr_code: null })
+      .eq('id', 1)
+  } catch (err) {
+    console.error('[bot] Error al limpiar QR:', err)
+  }
 })
 
 whatsappClient.on('ready', () => {
