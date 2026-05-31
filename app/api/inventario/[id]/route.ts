@@ -4,11 +4,11 @@ import { supabaseAdmin } from '@/lib/supabase'
 // PATCH /api/inventario/[id] — Actualizar estado u otros campos
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> } // <-- Cambio: Ahora es una Promesa
 ) {
   try {
     const body = await request.json()
-    const { id } = params
+    const { id } = await params // <-- Cambio: Agregamos await
 
     // Solo permitir actualizar campos seguros
     const camposPermitidos = ['estado', 'precio', 'descripcion', 'nombre']
@@ -49,10 +49,10 @@ export async function PATCH(
 // DELETE /api/inventario/[id]
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> } // <-- Cambio: Ahora es una Promesa
 ) {
   try {
-    const { id } = params
+    const { id } = await params // <-- Cambio: Agregamos await
 
     // Obtener el registro primero para borrar la foto de Storage
     const { data: arreglo } = await supabaseAdmin
