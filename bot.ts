@@ -531,7 +531,11 @@ function manejarMensajeEntrante(message: any): void {
 
   if (message.fromMe) return
   if (message.isGroupMsg) return
-  if (!message.from || message.from === 'status@broadcast' || message.from.includes('@lid')) return
+  // ✅ Solo bloquear broadcast, no @lid (son mensajes reales en modo multi-device)
+  if (!message.from || message.from === 'status@broadcast') return
+
+  // Bloquear solo mensajes @lid que son internos del sistema (sin body real)
+  if (message.from.includes('@lid') && (!message.body || message.body.trim() === '')) return
 
   const clienteId: string = message.from
 
