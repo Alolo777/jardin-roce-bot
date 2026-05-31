@@ -415,8 +415,10 @@ const whatsappClient = new Client({
       '--no-sandbox',
       '--disable-setuid-sandbox',
 
-      // Proceso único — ahorra ~100MB en entorno controlado
-      '--single-process',
+      // NOTA: Se QUITÓ '--single-process'. Ahorraba ~100MB pero rompe los hooks
+      // que whatsapp-web.js inyecta en la página para detectar mensajes nuevos:
+      // el cliente conectaba (ready) pero NUNCA emitía el evento de mensaje
+      // entrante, así que el bot no respondía nada.
 
       // Memoria compartida — usa /tmp en vez de /dev/shm
       '--disable-dev-shm-usage',
@@ -520,6 +522,13 @@ whatsappClient.on('disconnected', (reason) => {
 
 // Punto de entrada de cada mensaje: filtros baratos + media + rate limit + cola.
 function manejarMensajeEntrante(message: any): void {
+  // ── Log de diagnóstico: muestra TODO mensaje que llega, antes de filtrar ──
+  // Si esta línea no aparece al escribirle al bot, el problema es que el evento
+  // no se está emitiendo (página rota). Si aparece pero no responde, es un filtro.
+  console.log(
+    `[DIAG] msg recibido — from: ${message.from} | type: ${message.type} | fromMe: ${message.fromMe}`
+  )
+
   if (message.fromMe) return
   if (message.isGroupMsg) return
   if (!message.from || message.from === 'status@broadcast' || message.from.includes('@lid')) return
