@@ -12,32 +12,31 @@ import {
   enviarAlertaVentaCerrada,
   enviarAlertaPedidoWeb,
   enviarAlertaCotizacion,
+  enviarAlertaClienteFrustrado,
 } from './lib/telegram'
 import { supabaseAdmin } from './lib/supabase'
 import type { MensajeChat } from './lib/ai'
 
 // ════════════════════════════════════════════════════════════════
-// HISTORIAL DE CONVERSACIONES (últimos 10 turnos por cliente)
+// HISTORIAL DE CONVERSACIONES
 // ════════════════════════════════════════════════════════════════
 
 const HISTORIAL_POR_CLIENTE = new Map<string, MensajeChat[]>()
 const MAX_TURNOS_HISTORIAL  = 10
 
-function obtenerHistorial(clienteId: string): MensajeChat[] {
-  if (!HISTORIAL_POR_CLIENTE.has(clienteId)) {
-    HISTORIAL_POR_CLIENTE.set(clienteId, [])
-  }
-  return HISTORIAL_POR_CLIENTE.get(clienteId)!
+function obtenerHistorial(id: string): MensajeChat[] {
+  if (!HISTORIAL_POR_CLIENTE.has(id)) HISTORIAL_POR_CLIENTE.set(id, [])
+  return HISTORIAL_POR_CLIENTE.get(id)!
 }
 
-function agregarAlHistorial(clienteId: string, role: 'user' | 'assistant', content: string): void {
-  const h = obtenerHistorial(clienteId)
+function agregarAlHistorial(id: string, role: 'user' | 'assistant', content: string): void {
+  const h = obtenerHistorial(id)
   h.push({ role, content })
   if (h.length > MAX_TURNOS_HISTORIAL * 2) h.splice(0, 2)
 }
 
 // ════════════════════════════════════════════════════════════════
-// CONTROL DE FOTOS ENVIADAS (una vez por día por cliente)
+// CONTROL DE FOTOS ENVIADAS (una vez por día)
 // ════════════════════════════════════════════════════════════════
 
 const FOTOS_YA_ENVIADAS = new Set<string>()
@@ -46,15 +45,100 @@ function yaSeEnviaronFotos(id: string): boolean { return FOTOS_YA_ENVIADAS.has(i
 
 function marcarFotosEnviadas(id: string): void {
   FOTOS_YA_ENVIADAS.add(id)
-  const ahora  = new Date()
-  const manana = new Date(ahora)
+  const manana = new Date()
   manana.setDate(manana.getDate() + 1)
   manana.setHours(0, 0, 0, 0)
-  setTimeout(() => FOTOS_YA_ENVIADAS.delete(id), manana.getTime() - ahora.getTime())
+  setTimeout(() => FOTOS_YA_ENVIADAS.delete(id), manana.getTime() - Date.now())
 }
 
 // ════════════════════════════════════════════════════════════════
-// MONITOR DE MEMORIA (cada 5 min)
+// DETECCIÓN DE FRUSTRACIÓN
+// ════════════════════════════════════════════════════════════════
+
+const KW_FRUSTRACION = [
+  'que show', 'qué show', 'no me ayudas', 'no sirves', 'pesimo', 'pésimo',
+  'mal servicio', 'molesta', 'molesto', 'enojada', 'enojado', 'horrible',
+  'no entiendes', 'no me entiendes', 'quiero hablar con una persona',
+  'quiero hablar con alguien', 'con un humano', 'eres un bot inutil',
+  'no funciona', 'nunca me contestas', 'llevo esperando', 'tardas mucho',
+  'cuando me van a contestar', 'necesito ayuda urgente',
+]
+
+// Llevar cuenta de cuántas veces se notificó frustración por cliente
+const FRUSTRACION_NOTIFICADA = new Map<string, number>()
+
+function detectarFrustracion(texto: string): boolean {
+  const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  return KW_FRUSTRACION.some(k => n.includes(k))
+}
+
+async function manejarFrustracion(clienteId: string, numeroReal: string, texto: string): Promise<void> {
+  const veces = (FRUSTRACION_NOTIFICADA.get(clienteId) ?? 0) + 1
+  FRUSTRACION_NOTIFICADA.set(clienteId, veces)
+  // Solo notificar las primeras 2 veces por sesión para no spamear
+  if (veces <= 2) {
+    enviarAlertaClienteFrustrado(numeroReal, texto)
+      .catch(err => console.error('[bot] Telegram frustración:', err))
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// PAUSA DEL BOT (modo humano)
+// ════════════════════════════════════════════════════════════════
+
+let BOT_PAUSADO       = false
+let ultimaVerifPausa  = 0
+const PAUSA_CACHE_MS  = 30_000 // verificar cada 30 segundos
+
+async function verificarSiBotPausado(): Promise<boolean> {
+  if (Date.now() - ultimaVerifPausa < PAUSA_CACHE_MS) return BOT_PAUSADO
+  try {
+    const { data } = await supabaseAdmin
+      .from('configuracion_agente')
+      .select('bot_pausado')
+      .eq('id', 1)
+      .single()
+    BOT_PAUSADO      = data?.bot_pausado ?? false
+    ultimaVerifPausa = Date.now()
+  } catch (err) {
+    console.error('[bot] Error verificando pausa:', err)
+  }
+  return BOT_PAUSADO
+}
+
+// ════════════════════════════════════════════════════════════════
+// WATCHDOG — detectar desconexión silenciosa
+// ════════════════════════════════════════════════════════════════
+
+let ultimaActividad = Date.now()
+const WATCHDOG_TIMEOUT_MS = 90 * 60_000 // 90 min sin mensajes → verificar
+
+function registrarActividad(): void { ultimaActividad = Date.now() }
+
+setInterval(async () => {
+  const min = Math.round((Date.now() - ultimaActividad) / 60_000)
+  if (min > 30) console.warn(`[Watchdog] ${min} min sin mensajes`)
+
+  if (Date.now() - ultimaActividad > WATCHDOG_TIMEOUT_MS) {
+    console.warn('[Watchdog] ⚠️ Posible desconexión silenciosa. Verificando...')
+    try {
+      const state = await whatsappClient.getState()
+      console.log(`[Watchdog] Estado: ${state}`)
+      if (state !== 'CONNECTED') {
+        console.warn('[Watchdog] 🔄 Reiniciando cliente...')
+        await whatsappClient.destroy().catch(console.error)
+        await new Promise(r => setTimeout(r, 3000))
+        await whatsappClient.initialize().catch(console.error)
+        ultimaActividad = Date.now()
+      }
+    } catch (err) {
+      console.error('[Watchdog] Error:', err)
+    }
+  }
+}, 15 * 60_000) // cada 15 minutos
+
+// ════════════════════════════════════════════════════════════════
+// MONITOR DE MEMORIA
 // ════════════════════════════════════════════════════════════════
 
 setInterval(() => {
@@ -67,12 +151,13 @@ setInterval(() => {
     const n = Math.floor(clientes.length * 0.3)
     for (let i = 0; i < n; i++) HISTORIAL_POR_CLIENTE.delete(clientes[i])
     FOTOS_YA_ENVIADAS.clear()
+    FRUSTRACION_NOTIFICADA.clear()
     console.log(`[RAM] 🧹 Limpié ${n} historiales`)
   }
-}, 5 * 60 * 1000)
+}, 5 * 60_000)
 
 // ════════════════════════════════════════════════════════════════
-// LÍMITES Y PROTECCIONES
+// LÍMITES Y RATE LIMITING
 // ════════════════════════════════════════════════════════════════
 
 const MAX_LONGITUD_MENSAJE      = 1000
@@ -97,7 +182,7 @@ function avisarRateLimitUnaVez(message: any, id: string): void {
   setTimeout(() => RATE_AVISADOS.delete(id), RATE_LIMIT_WINDOW_MS)
 }
 
-// ── Cola por cliente — procesa mensajes en orden, uno a la vez ──
+// ── Cola por cliente ──────────────────────────────────────────────
 const COLA_POR_CLIENTE = new Map<string, Promise<void>>()
 
 function encolarPorCliente(id: string, tarea: () => Promise<void>): void {
@@ -105,6 +190,23 @@ function encolarPorCliente(id: string, tarea: () => Promise<void>): void {
   const siguiente = previa.catch(() => {}).then(tarea).catch(e => console.error(`[bot] Cola ${id}:`, e))
   COLA_POR_CLIENTE.set(id, siguiente)
   siguiente.finally(() => { if (COLA_POR_CLIENTE.get(id) === siguiente) COLA_POR_CLIENTE.delete(id) })
+}
+
+// ════════════════════════════════════════════════════════════════
+// NÚMERO REAL DEL CONTACTO
+// ════════════════════════════════════════════════════════════════
+
+async function obtenerNumeroReal(message: any): Promise<string> {
+  try {
+    const contact = await message.getContact()
+    if (contact?.number) {
+      const num = contact.number
+      return num.startsWith('52') ? `+${num}` : num
+    }
+  } catch { /* fallback */ }
+  // Si falla getContact, limpiar manualmente el @lid/@c.us
+  const raw = (message.from as string).replace(/@[^\s]*/g, '').trim()
+  return raw.startsWith('52') ? `+${raw}` : raw
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -120,92 +222,67 @@ function esPedidoCotizador(texto: string): boolean {
 }
 
 interface PedidoWebParseado {
-  total:       string
-  entrega:     string
-  flores:      string
-  accesorios:  string
-  tamano:      string
-  envoltura:   string
-  nota:        string
-  imagenUrl:   string
+  total: string; entrega: string; flores: string
+  accesorios: string; tamano: string; envoltura: string
+  nota: string; imagenUrl: string
 }
 
 function parsearPedidoCotizador(texto: string): PedidoWebParseado {
-  // Total
-  const matchTotal = texto.match(/TOTAL A COBRAR[:\s*]*\$?([\d,\.]+)\s*MXN/i)
-  const total      = matchTotal ? `$${matchTotal[1]} MXN` : 'Por confirmar'
-
-  // Tamaño
-  const matchTamano = texto.match(/Tamaño[:\s*]*([^\n]+)/i)
-  const tamano      = matchTamano ? matchTamano[1].trim().replace(/\*/g, '') : 'Por definir'
-
-  // Envoltura
+  const matchTotal  = texto.match(/TOTAL A COBRAR[:\s*]*\$?([\d,\.]+)\s*MXN/i)
+  const matchTamano = texto.match(/Tama[ñn]o[:\s*]*([^\n]+)/i)
   const matchEnvolt = texto.match(/Envoltura[:\s*]*([^\n]+)/i)
-  const envoltura   = matchEnvolt ? matchEnvolt[1].trim().replace(/\*/g, '') : 'Incluida'
+  const matchImg    = texto.match(/(https?:\/\/[^\s]+(?:supabase|storage)[^\s]*)/i)
+  const matchNota   = texto.match(/Nota[:\s\n]*([^\n]+)/i)
 
-  // URL de imagen
-  const matchImg = texto.match(/(https?:\/\/[^\s]+(?:supabase|storage)[^\s]*)/i)
-  const imagenUrl = matchImg ? matchImg[1] : ''
+  const lineas = texto.split('\n')
+  const flores = lineas
+    .filter(l => l.trim().startsWith('•') && !l.includes('🧸') && !l.includes('🎀') && !l.toLowerCase().includes('peluche'))
+    .slice(0, 8).map(l => l.trim().replace(/^[•\*]\s*/, '')).join(', ')
 
-  // Flores (líneas que empiezan con •, sin accesorios)
-  const lineasFlores = texto
-    .split('\n')
-    .filter(l => l.trim().startsWith('•') &&
-      !l.includes('🧸') && !l.includes('🎀') &&
-      !l.toLowerCase().includes('peluche') &&
-      !l.toLowerCase().includes('accesorio'))
-    .slice(0, 8)
-    .map(l => l.trim().replace(/^•\s*/, ''))
-    .join(', ')
-
-  // Accesorios
-  const lineasAccesorios = texto
-    .split('\n')
+  const accesorios = lineas
     .filter(l => l.trim().startsWith('•') && (l.includes('🧸') || l.includes('🎀') || l.toLowerCase().includes('peluche')))
-    .map(l => l.trim().replace(/^•\s*/, ''))
-    .join(', ')
+    .map(l => l.trim().replace(/^[•\*]\s*/, '')).join(', ')
 
-  // Nota
-  const matchNota = texto.match(/Nota[:\s*]*([^\n]+)/i)
-  const nota      = matchNota ? matchNota[1].trim().replace(/\*/g, '') : ''
-
-  // Entrega
   let entrega = 'Por confirmar'
   if (texto.includes('Envío a domicilio') || texto.includes('Envio a domicilio')) {
-    const matchZona = texto.match(/Zona:\s*([^\n]+)/i)
-    entrega = matchZona ? `Envío — ${matchZona[1].trim()}` : 'Envío a domicilio'
+    const z = texto.match(/Zona:\s*([^\n]+)/i)
+    entrega = z ? `Envío — ${z[1].trim()}` : 'Envío a domicilio'
   } else if (texto.includes('Recolección en tienda') || texto.includes('Sucursal')) {
-    const matchSuc = texto.match(/Sucursal\s+([^\n]+)/i)
-    entrega = matchSuc ? `Recoger — Sucursal ${matchSuc[1].trim()}` : 'Recoger en sucursal'
+    const s = texto.match(/Sucursal\s+([^\n]+)/i)
+    entrega = s ? `Recoger — Sucursal ${s[1].trim()}` : 'Recoger en sucursal'
   }
 
-  return { total, entrega, flores: lineasFlores || 'Ver imagen', accesorios: lineasAccesorios, tamano, envoltura, nota, imagenUrl }
+  return {
+    total:      matchTotal  ? `$${matchTotal[1]} MXN`           : 'Por confirmar',
+    tamano:     matchTamano ? matchTamano[1].trim().replace(/\*/g, '') : 'Por definir',
+    envoltura:  matchEnvolt ? matchEnvolt[1].trim().replace(/\*/g, '') : 'Incluida',
+    imagenUrl:  matchImg    ? matchImg[1]                        : '',
+    nota:       matchNota   ? matchNota[1].trim().replace(/\*/g, '') : '',
+    flores:     flores      || 'Ver imagen de referencia',
+    accesorios,
+    entrega,
+  }
 }
 
 // ════════════════════════════════════════════════════════════════
 // DETECCIÓN DE INTENCIÓN
 // ════════════════════════════════════════════════════════════════
 
-// INVENTARIO: palabras que indican querer ver los arreglos del día
 const KW_INVENTARIO = [
   'disponible', 'disponibles', 'armado', 'armados',
   'tienes hoy', 'hay hoy', 'entrega inmediata', 'para hoy',
   'que tienes', 'que tienen', 'tienen algo', 'hay algo',
   'ramitos', 'que ramitos', 'que ramos', 'ramos de hoy',
   'tienen hoy', 'hoy tienen', 'muestrame', 'muéstrame',
-  // "fotos" o "foto" sola = quiere ver arreglos del día
-  'fotos', 'foto', 'ver ramos', 'ver arreglos', 'envíame fotos',
-  'enviame fotos', 'manda fotos', 'mandame fotos',
+  'fotos', 'foto', 'ver ramos', 'ver arreglos',
+  'enviame fotos', 'envíame fotos', 'manda fotos', 'mandame fotos',
 ]
 
-// CATÁLOGO: quiere ver más opciones en Drive
 const KW_CATALOGO = [
   'catalogo', 'catálogo', 'drive', 'ver mas', 'ver más',
-  'mas opciones', 'más opciones', 'otros ramos', 'que mas tienen',
-  'que más tienen',
+  'mas opciones', 'más opciones', 'otros ramos', 'que mas tienen', 'que más tienen',
 ]
 
-// COTIZADOR: quiere armar/cotizar un ramo personalizado
 const KW_COTIZADOR = [
   'cotizar', 'cotizacion', 'cotización', 'cuanto cuesta', 'cuánto cuesta',
   'cuanto vale', 'cuánto vale', 'precio de un ramo', 'hacer un ramo',
@@ -226,11 +303,8 @@ function detectarIntencion(texto: string): 'inventario' | 'catalogo' | 'cotizado
 // ════════════════════════════════════════════════════════════════
 
 interface ArregloConFoto {
-  id:          string
-  nombre:      string
-  precio:      number
-  descripcion: string | null
-  foto_url:    string
+  id: string; nombre: string; precio: number
+  descripcion: string | null; foto_url: string
 }
 
 async function obtenerArreglosConFotos(): Promise<ArregloConFoto[]> {
@@ -243,53 +317,54 @@ async function obtenerArreglosConFotos(): Promise<ArregloConFoto[]> {
     if (error) throw error
     return data ?? []
   } catch (err) {
-    console.error('[bot] Error al obtener arreglos:', err)
+    console.error('[bot] Error obteniendo arreglos:', err)
     return []
   }
 }
 
-// Marcar como "apartado" en la BD cuando se cierra una venta
 async function apartarArreglo(nombreProducto: string): Promise<void> {
   try {
     const { data: arreglos } = await supabaseAdmin
-      .from('arreglos_diarios')
-      .select('id, nombre')
-      .eq('estado', 'disponible')
-
+      .from('arreglos_diarios').select('id, nombre').eq('estado', 'disponible')
     if (!arreglos?.length) return
 
-    const norm    = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    const norm     = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     const normProd = norm(nombreProducto)
-
-    const match = arreglos.find(a => {
-      const n = norm(a.nombre)
-      return normProd.includes(n) || n.includes(normProd)
-    })
+    const match    = arreglos.find(a => { const n = norm(a.nombre); return normProd.includes(n) || n.includes(normProd) })
 
     if (match) {
-      await supabaseAdmin
-        .from('arreglos_diarios')
-        .update({ estado: 'apartado' })
-        .eq('id', match.id)
-      console.log(`[bot] 📦 Arreglo "${match.nombre}" → apartado en Supabase`)
+      await supabaseAdmin.from('arreglos_diarios').update({ estado: 'apartado' }).eq('id', match.id)
+      console.log(`[bot] 📦 "${match.nombre}" → apartado`)
     }
   } catch (err) {
-    console.error('[bot] Error al apartar arreglo:', err)
+    console.error('[bot] Error apartando arreglo:', err)
   }
 }
 
+// Descargar en paralelo, enviar secuencial con delay mínimo
 async function enviarFotosArreglos(client: Client, chatId: string, arreglos: ArregloConFoto[]): Promise<void> {
-  for (const a of arreglos) {
+  if (!arreglos.length) return
+
+  // Descargar todos en paralelo
+  const resultados = await Promise.all(
+    arreglos.map(a =>
+      MessageMedia.fromUrl(a.foto_url, { unsafeMime: true })
+        .then(media => ({ ok: true as const, media, arreglo: a }))
+        .catch(err  => { console.error(`[bot] Error descargando "${a.nombre}":`, err); return { ok: false as const, arreglo: a } })
+    )
+  )
+
+  // Enviar secuencialmente (WhatsApp no soporta parallel send bien)
+  for (const r of resultados) {
+    if (!r.ok) continue
     try {
-      const media   = await MessageMedia.fromUrl(a.foto_url, { unsafeMime: true })
       const caption =
-        `💐 *${a.nombre}*\n💰 $${a.precio.toFixed(2)} MXN` +
-        (a.descripcion ? `\n📝 ${a.descripcion}` : '')
-      await client.sendMessage(chatId, media, { caption })
-      await new Promise(r => setTimeout(r, 2000 + Math.random() * 1000))
+        `💐 *${r.arreglo.nombre}*\n💰 $${r.arreglo.precio.toFixed(2)} MXN` +
+        (r.arreglo.descripcion ? `\n📝 ${r.arreglo.descripcion}` : '')
+      await client.sendMessage(chatId, r.media, { caption })
+      await new Promise(res => setTimeout(res, 800)) // delay mínimo entre fotos
     } catch (err) {
-      console.error(`[bot] Error foto "${a.nombre}":`, err)
-      // Fallback silencioso — no interrumpir el flujo de fotos
+      console.error(`[bot] Error enviando "${r.arreglo.nombre}":`, err)
     }
   }
 }
@@ -307,7 +382,6 @@ function limpiarRespuestaIA(texto: string): string {
 }
 
 function calcularDelayEscritura(texto: string): number {
-  // Máximo 4 segundos — más natural, menos espera
   const base = Math.min(Math.max((texto.length / 200) * 4000, 1000), 4000)
   return base + (Math.random() * 500 - 250)
 }
@@ -332,42 +406,41 @@ function getFechaActual(): string {
 // ════════════════════════════════════════════════════════════════
 
 async function procesarPedidoWeb(message: any): Promise<void> {
-  const clienteId = message.from as string
-  const texto     = message.body as string
-  const chat      = await message.getChat()
-  const pedido    = parsearPedidoCotizador(texto)
+  const clienteId  = message.from as string
+  const texto      = message.body as string
+  const chat       = await message.getChat()
+  const pedido     = parsearPedidoCotizador(texto)
+  const numeroReal = await obtenerNumeroReal(message)
 
-  console.log(`[bot] 🛒 Pedido cotizador web de ${clienteId}`)
+  console.log(`[bot] 🛒 Pedido cotizador web de ${numeroReal}`)
 
-  // Respuesta corta y cálida al cliente
-  await simularEscritura(chat, 2500)
+  await simularEscritura(chat, 2000)
   await message.reply(
     `¡Qué bonita elección! 🌸 Ya recibimos tu pedido.\n\n` +
     `💐 ${pedido.flores.slice(0, 60)}${pedido.flores.length > 60 ? '...' : ''}\n` +
     `💰 Total: *${pedido.total}*\n` +
     `📍 ${pedido.entrega}\n\n` +
-    `Para confirmar, realiza tu pago:\n` +
+    `Para confirmar tu pago:\n` +
     `BBVA | 4152314097305273 | Devi América Cerenil\n` +
     `_(Concepto: tu nombre o usuario de WhatsApp)_\n\n` +
     `Mándame tu comprobante y listo. ¡Con mucho gusto! 🌹`
   )
 
-  // Notificar a Telegram con todos los detalles
   enviarAlertaPedidoWeb({
-    numeroCliente: clienteId,
+    numeroCliente: numeroReal,
     total:         pedido.total,
     entrega:       pedido.entrega,
     flores:        pedido.flores,
-    accesorios:    pedido.accesorios || undefined,
+    accesorios:    pedido.accesorios  || undefined,
     tamano:        pedido.tamano,
     envoltura:     pedido.envoltura,
-    nota:          pedido.nota || undefined,
-    imagenUrl:     pedido.imagenUrl || undefined,
+    nota:          pedido.nota        || undefined,
+    imagenUrl:     pedido.imagenUrl   || undefined,
   }).catch(err => console.error('[bot] Telegram pedido web:', err))
 }
 
 // ════════════════════════════════════════════════════════════════
-// FLUJO PRINCIPAL: PROCESAMIENTO DE MENSAJES
+// FLUJO PRINCIPAL
 // ════════════════════════════════════════════════════════════════
 
 async function procesarMensaje(message: any): Promise<void> {
@@ -375,132 +448,116 @@ async function procesarMensaje(message: any): Promise<void> {
   let   textoCliente = (message.body as string).trim()
 
   if (textoCliente.length > MAX_LONGITUD_MENSAJE) {
-    console.warn(`[bot] Truncando mensaje largo de ${clienteId}`)
     textoCliente = textoCliente.slice(0, MAX_LONGITUD_MENSAJE)
   }
 
   console.log(`[${new Date().toLocaleTimeString('es-MX')}] 📨 ${clienteId}: ${textoCliente.substring(0, 80)}`)
 
+  // Obtener número real una sola vez (usado en alertas)
+  const numeroReal = await obtenerNumeroReal(message)
+
+  // Detectar frustración y notificar
+  if (detectarFrustracion(textoCliente)) {
+    console.warn(`[bot] ⚠️ Frustración detectada de ${numeroReal}`)
+    manejarFrustracion(clienteId, numeroReal, textoCliente)
+  }
+
   try {
     const chat = await message.getChat()
-    // Pausa natural — simula que "leyó" el mensaje
     await new Promise(r => setTimeout(r, 800 + Math.random() * 700))
 
     agregarAlHistorial(clienteId, 'user', textoCliente)
 
-    const intencion = detectarIntencion(textoCliente)
-    let   contextoExtra      = `[Fecha actual: ${getFechaActual()}]`
+    const intencion        = detectarIntencion(textoCliente)
+    let   contextoExtra    = `[Fecha actual: ${getFechaActual()}]`
     let   arreglosParaEnviar: ArregloConFoto[] = []
-    let   enviarFotos        = false
+    let   enviarFotos      = false
 
-    // ── INVENTARIO DEL DÍA ────────────────────────────────────────
+    // ── INVENTARIO ────────────────────────────────────────────────
     if (intencion === 'inventario') {
       const arreglos = await obtenerArreglosConFotos()
-
       if (arreglos.length > 0) {
         const resumen = arreglos.map((a, i) => `Foto ${i + 1}: "${a.nombre}" — $${a.precio} MXN`).join('\n')
-
         if (!yaSeEnviaronFotos(clienteId)) {
-          // Primera vez: mandar fotos
           contextoExtra +=
             `\n\nINVENTARIO HOY:\n${resumen}\n\n` +
-            `INSTRUCCION CRITICA: El sistema enviará las fotos automáticamente justo después de tu mensaje. ` +
-            `ABSOLUTAMENTE NUNCA digas que no puedes enviar fotos. ` +
-            `Tu respuesta: máximo 1 línea, confirma brevemente que hay opciones lindas y que ya manda las fotos.`
+            `INSTRUCCION CRITICA: Las fotos se envían automáticamente después de tu mensaje. ` +
+            `NUNCA digas que no puedes enviarlas. Responde máximo 1 línea cálida confirmando que ya van.`
           arreglosParaEnviar = arreglos
           enviarFotos        = true
         } else {
-          // Ya las vio: solo mencionar por nombre
           contextoExtra +=
-            `\n\nINVENTARIO HOY (fotos ya enviadas antes):\n${resumen}\n\n` +
-            `INSTRUCCION: El cliente ya vio las fotos. Menciona nombre y precio en máximo 2 líneas. ` +
-            `NUNCA digas que no puedes enviar fotos.`
+            `\n\nINVENTARIO HOY (fotos ya enviadas):\n${resumen}\n\n` +
+            `INSTRUCCION: Menciona nombre y precio en máximo 2 líneas. NUNCA digas que no puedes enviar fotos.`
         }
       } else {
-        contextoExtra +=
-          `\n\nHoy NO hay arreglos listos para entrega inmediata. ` +
-          `Ofrece pedido personalizado con 24-48h de anticipación. Máximo 2 líneas.`
+        contextoExtra += `\n\nHoy NO hay arreglos listos. Ofrece pedido personalizado 24-48h. Máximo 2 líneas.`
       }
     }
 
     // ── CATÁLOGO ──────────────────────────────────────────────────
     else if (intencion === 'catalogo') {
       contextoExtra +=
-        `\n\nINSTRUCCION: Envía DIRECTAMENTE este link sin preámbulos: ` +
-        `https://drive.google.com/drive/folders/1s7Hs5JKBSezcqVznKwl6TT866UqRCB4N ` +
-        `Máximo 2 líneas.`
+        `\n\nINSTRUCCION: Envía DIRECTAMENTE este link: ` +
+        `https://drive.google.com/drive/folders/1s7Hs5JKBSezcqVznKwl6TT866UqRCB4N Máximo 2 líneas.`
     }
 
     // ── COTIZADOR ─────────────────────────────────────────────────
     else if (intencion === 'cotizador') {
       contextoExtra +=
-        `\n\nINSTRUCCION: El cliente quiere cotizar o pide algo especial. ` +
-        `Envía DIRECTAMENTE este link: https://floreria-app-mauve.vercel.app/ ` +
-        `Menciona que puede armar su ramo, subir foto de referencia y calcular precio. ` +
-        `Si necesita algo muy específico puede pedirlo aquí. Máximo 3 líneas.`
+        `\n\nINSTRUCCION: Envía DIRECTAMENTE: https://floreria-app-mauve.vercel.app/ ` +
+        `Menciona que puede armar su ramo y subir foto. Si quiere algo especial puede pedirlo aquí. Máximo 3 líneas.`
 
-      // Notificar a Telegram (fire & forget)
-      enviarAlertaCotizacion(clienteId, textoCliente)
+      enviarAlertaCotizacion(numeroReal, textoCliente)
         .catch(err => console.error('[bot] Telegram cotizacion:', err))
     }
 
-    // ── LLAMAR A LA IA ────────────────────────────────────────────
+    // ── IA ────────────────────────────────────────────────────────
     await chat.sendStateTyping()
-    const historial = obtenerHistorial(clienteId)
-    const { mensaje, ventaCerrada } = await getAIResponse(historial, contextoExtra)
+    const { mensaje, ventaCerrada } = await getAIResponse(obtenerHistorial(clienteId), contextoExtra)
     await chat.clearState()
 
     agregarAlHistorial(clienteId, 'assistant', mensaje)
 
     // ── VENTA CERRADA ─────────────────────────────────────────────
     if (ventaCerrada) {
-      console.log(`[bot] 🎉 VENTA CERRADA: ${ventaCerrada.cliente}`)
+      console.log(`[bot] 🎉 VENTA CERRADA: ${ventaCerrada.cliente} | ${numeroReal}`)
 
-      // Alerta Telegram con número limpio
       enviarAlertaVentaCerrada({
         cliente:       ventaCerrada.cliente,
         producto:      ventaCerrada.producto,
         total:         ventaCerrada.total,
         direccion:     ventaCerrada.direccion,
-        numeroCliente: clienteId,
+        numeroCliente: numeroReal,
       }).catch(err => console.error('[bot] Telegram venta:', err))
 
-      // Marcar arreglo como apartado en Supabase
       apartarArreglo(ventaCerrada.producto)
         .catch(err => console.error('[bot] Error apartando:', err))
     }
 
-    // ── RESPONDER AL CLIENTE ──────────────────────────────────────
+    // ── RESPONDER ─────────────────────────────────────────────────
     const mensajeFinal = limpiarRespuestaIA(mensaje)
     await simularEscritura(chat, calcularDelayEscritura(mensajeFinal))
     await message.reply(mensajeFinal)
 
-    // ── ENVIAR FOTOS (solo la primera vez del día) ────────────────
+    // ── FOTOS (primera vez del día) ───────────────────────────────
     if (enviarFotos && arreglosParaEnviar.length > 0) {
-      await new Promise(r => setTimeout(r, 1200))
+      await new Promise(r => setTimeout(r, 800))
       await enviarFotosArreglos(whatsappClient, clienteId, arreglosParaEnviar)
       marcarFotosEnviadas(clienteId)
 
-      // Registrar en historial para que la IA sepa qué se envió
-      const resumenFotos = arreglosParaEnviar
-        .map((a, i) => `Foto ${i + 1}: ${a.nombre} ($${a.precio} MXN)`)
-        .join(', ')
+      const resumenFotos = arreglosParaEnviar.map((a, i) => `Foto ${i + 1}: ${a.nombre} ($${a.precio} MXN)`).join(', ')
       agregarAlHistorial(clienteId, 'assistant', `[Sistema] Fotos enviadas: ${resumenFotos}`)
 
-      await new Promise(r => setTimeout(r, 1500))
-      await simularEscritura(chat, 1500)
-      await whatsappClient.sendMessage(
-        clienteId,
-        '¿Alguno te llamó la atención? 🌸\nSolo dime cuál y lo aparto para ti. 🌹'
-      )
+      await new Promise(r => setTimeout(r, 1000))
+      await simularEscritura(chat, 1200)
+      await whatsappClient.sendMessage(clienteId, '¿Alguno te llamó la atención? 🌸\nSolo dime cuál y lo aparto para ti. 🌹')
     }
 
     console.log(`[${new Date().toLocaleTimeString('es-MX')}] ✅ Listo para ${clienteId}`)
 
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error)
-
-    // Contexto de Chromium destruido — WhatsApp Web se recargó
     const esContextoDestruido =
       errMsg.includes('Execution context was destroyed') ||
       errMsg.includes('Protocol error') ||
@@ -508,7 +565,7 @@ async function procesarMensaje(message: any): Promise<void> {
       errMsg.includes('Session closed')
 
     if (esContextoDestruido) {
-      console.warn('[bot] ⚠️ Contexto destruido (WhatsApp Web se recargó). El cliente puede reenviar su mensaje.')
+      console.warn('[bot] ⚠️ Contexto destruido. El cliente puede reenviar su mensaje.')
       return
     }
 
@@ -531,142 +588,106 @@ const whatsappClient = new Client({
     dataPath: process.env.WWEBJS_DATA_PATH || '/app/.wwebjs_auth',
   }),
   puppeteer: {
-    headless:       true,
+    headless: true,
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
-    timeout:        60000,
+    timeout: 60000,
     args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--disable-gpu-sandbox',
-      '--use-gl=swiftshader',
-      '--disable-software-rasterizer',
-      '--disable-extensions',
-      '--disable-plugins',
-      '--disable-default-apps',
-      '--disable-sync',
-      '--disable-background-networking',
-      '--disable-background-timer-throttling',
-      '--disable-backgrounding-occluded-windows',
-      '--disable-renderer-backgrounding',
-      '--disable-ipc-flooding-protection',
-      '--disable-notifications',
-      '--disable-speech-api',
-      '--disable-print-preview',
-      '--mute-audio',
-      '--hide-scrollbars',
-      '--disable-client-side-phishing-detection',
-      '--disable-hang-monitor',
-      '--disable-prompt-on-repost',
-      '--disable-breakpad',
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--no-pings',
-      '--password-store=basic',
-      '--use-mock-keychain',
-      '--metrics-recording-only',
+      '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+      '--disable-gpu', '--disable-gpu-sandbox', '--use-gl=swiftshader',
+      '--disable-software-rasterizer', '--disable-extensions', '--disable-plugins',
+      '--disable-default-apps', '--disable-sync', '--disable-background-networking',
+      '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding', '--disable-ipc-flooding-protection',
+      '--disable-notifications', '--disable-speech-api', '--disable-print-preview',
+      '--mute-audio', '--hide-scrollbars', '--disable-client-side-phishing-detection',
+      '--disable-hang-monitor', '--disable-prompt-on-repost', '--disable-breakpad',
+      '--no-first-run', '--no-default-browser-check', '--no-pings',
+      '--password-store=basic', '--use-mock-keychain', '--metrics-recording-only',
       '--js-flags=--max-old-space-size=256',
       '--disable-features=TranslateUI,BlinkGenPropertyTrees,AudioServiceOutOfProcess',
     ],
   },
 })
 
-// ── Eventos ───────────────────────────────────────────────────────
-
 whatsappClient.on('qr', async (qr) => {
   console.log('\n📱 Nuevo QR. Subiendo a Supabase...')
   try {
-    const { error } = await supabaseAdmin
-      .from('configuracion_agente').update({ qr_code: qr }).eq('id', 1)
+    const { error } = await supabaseAdmin.from('configuracion_agente').update({ qr_code: qr }).eq('id', 1)
     if (error) throw error
-    console.log('✅ QR guardado en Supabase.')
-  } catch (err) {
-    console.error('❌ Error al subir QR:', err)
-  }
+    console.log('✅ QR guardado.')
+  } catch (err) { console.error('❌ Error QR:', err) }
 })
 
 whatsappClient.on('ready', async () => {
   console.log('\n✅ Bot de Jardín RoCe conectado!')
   console.log('🌸 Flora está escuchando...\n')
+  ultimaActividad = Date.now()
 
-  // Limpiar QR de Supabase
   try {
-    const { error } = await supabaseAdmin
-      .from('configuracion_agente').update({ qr_code: null }).eq('id', 1)
+    const { error } = await supabaseAdmin.from('configuracion_agente').update({ qr_code: null }).eq('id', 1)
     if (error) throw error
-  } catch (err) {
-    console.error('[bot] Error limpiando QR:', err)
-  }
+  } catch (err) { console.error('[bot] Error limpiando QR:', err) }
 
-  // Detectar recargas de página de WhatsApp Web
   try {
     const page = whatsappClient.pupPage
     if (page) {
       page.on('framenavigated', async (frame: any) => {
         if (frame === page.mainFrame()) {
-          console.warn('[bot] 🔄 WhatsApp Web se recargó. Esperando estabilización...')
+          console.warn('[bot] 🔄 WhatsApp Web se recargó. Esperando...')
           await new Promise(r => setTimeout(r, 5000))
           console.log('[bot] ✅ Página estabilizada.')
+          ultimaActividad = Date.now()
         }
       })
     }
-  } catch (err) {
-    console.warn('[bot] No se pudo registrar listener de navegación:', err)
-  }
+  } catch (err) { console.warn('[bot] No se pudo registrar framenavigated:', err) }
 })
 
-whatsappClient.on('auth_failure', (msg) => {
-  console.error('❌ Auth error:', msg)
-  process.exit(1)
-})
+whatsappClient.on('auth_failure', (msg) => { console.error('❌ Auth:', msg); process.exit(1) })
 
 whatsappClient.on('disconnected', (reason) => {
   console.warn('⚠️ Desconectado:', reason)
-  setTimeout(() => {
-    console.log('🔄 Reconectando...')
-    whatsappClient.initialize().catch(console.error)
-  }, 5000)
+  setTimeout(() => { console.log('🔄 Reconectando...'); whatsappClient.initialize().catch(console.error) }, 5000)
 })
 
-// ── UN SOLO manejador ─────────────────────────────────────────────
+// ── UN SOLO manejador ──────────────────────────────────────────────
 function manejarMensajeEntrante(message: any): void {
+  registrarActividad()
   console.log(`[DIAG] from: ${message.from} | type: ${message.type} | fromMe: ${message.fromMe}`)
 
-  if (message.fromMe)    return
+  if (message.fromMe)     return
   if (message.isGroupMsg) return
   if (!message.from || message.from === 'status@broadcast') return
-  // Permitir @lid con body (multi-device), bloquear @lid sin body
   if (message.from.includes('@lid') && !message.body?.trim()) return
 
   const clienteId = message.from as string
 
-  // Multimedia — solo avisar que no procesamos
   if (message.type && message.type !== 'chat') {
     if (TIPOS_MEDIA_NO_SOPORTADOS.has(message.type)) {
-      message
-        .reply('Por ahora solo puedo leer mensajes de *texto* 🌸. Escríbeme qué necesitas. 🌹')
-        .catch(() => {})
+      message.reply('Por ahora solo puedo leer mensajes de *texto* 🌸. Escríbeme qué necesitas. 🌹').catch(() => {})
     }
     return
   }
 
   if (!message.body?.trim()) return
 
-  // Rate limiting
-  if (estaRateLimited(clienteId)) {
-    avisarRateLimitUnaVez(message, clienteId)
-    return
-  }
+  if (estaRateLimited(clienteId)) { avisarRateLimitUnaVez(message, clienteId); return }
 
-  // Detectar pedido del cotizador web (va a flujo aparte)
-  if (esPedidoCotizador(message.body)) {
-    encolarPorCliente(clienteId, () => procesarPedidoWeb(message))
-    return
-  }
-
-  // Flujo normal con la IA
-  encolarPorCliente(clienteId, () => procesarMensaje(message))
+  // Verificar pausa (async, encolar igualmente)
+  verificarSiBotPausado().then(pausado => {
+    if (pausado) {
+      console.log(`[bot] ⏸️ Bot pausado — mensaje de ${clienteId} ignorado`)
+      return
+    }
+    if (esPedidoCotizador(message.body)) {
+      encolarPorCliente(clienteId, () => procesarPedidoWeb(message))
+    } else {
+      encolarPorCliente(clienteId, () => procesarMensaje(message))
+    }
+  }).catch(err => {
+    console.error('[bot] Error verificando pausa:', err)
+    encolarPorCliente(clienteId, () => procesarMensaje(message))
+  })
 }
 
 whatsappClient.on('message_create', manejarMensajeEntrante)
@@ -676,17 +697,13 @@ whatsappClient.on('message_create', manejarMensajeEntrante)
 // ════════════════════════════════════════════════════════════════
 
 console.log('🌸 Iniciando bot de Jardín RoCe...')
-whatsappClient.initialize().catch((err) => {
-  console.error('❌ Error al inicializar:', err)
-  process.exit(1)
-})
+whatsappClient.initialize().catch((err) => { console.error('❌ Error al inicializar:', err); process.exit(1) })
 
 process.on('SIGINT', async () => {
   console.log('\n⚠️ Cerrando...')
   await whatsappClient.destroy().catch(console.error)
   process.exit(0)
 })
-
 process.on('uncaughtException',  (err) => console.error('❌ Excepción:', err))
 process.on('unhandledRejection', (r)   => console.error('❌ Rechazo:', r))
 

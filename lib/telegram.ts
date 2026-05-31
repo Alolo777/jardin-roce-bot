@@ -1,63 +1,68 @@
 // lib/telegram.ts — Jardín RoCe 🌸
-// Notificaciones a Telegram
 
 const API_BASE = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
 const CHAT_ID  = process.env.TELEGRAM_CHAT_ID ?? ''
 
-// ── Escapar caracteres especiales de Markdown ────────────────────────────────
+// ── Escapar Markdown ──────────────────────────────────────────────────────────
 function esc(text: string): string {
   return String(text ?? '').replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&')
 }
 
-// ── Limpiar número de WhatsApp ────────────────────────────────────────────────
-// Convierte "5215512345678@c.us" o "162195@lid" → "+5215512345678"
-function limpiarNumero(raw: string): string {
-  const limpio = raw.replace(/@[^\s]*/g, '').trim()
-  return limpio.startsWith('52') ? `+${limpio}` : limpio
-}
-
-// ── Hora en México ────────────────────────────────────────────────────────────
+// ── Hora México ───────────────────────────────────────────────────────────────
 function horaActual(): string {
   return new Date().toLocaleString('es-MX', {
-    timeZone:  'America/Mexico_City',
-    day:       '2-digit',
-    month:     '2-digit',
-    year:      'numeric',
-    hour:      '2-digit',
-    minute:    '2-digit',
+    timeZone: 'America/Mexico_City',
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
   })
 }
 
-// ── Enviar mensaje a Telegram ─────────────────────────────────────────────────
-async function enviar(texto: string): Promise<void> {
+// ── Enviar con retry y timeout ────────────────────────────────────────────────
+async function enviar(texto: string, intentos = 3): Promise<void> {
   if (!process.env.TELEGRAM_BOT_TOKEN || !CHAT_ID) {
-    console.warn('[Telegram] Variables no configuradas, omitiendo alerta.')
+    console.warn('[Telegram] Variables no configuradas.')
     return
   }
 
-  // Telegram tiene límite de 4096 chars por mensaje
-  const textoCortado = texto.length > 4000
-    ? texto.slice(0, 4000) + '\n…_(recortado)_'
-    : texto
+  const textoCortado = texto.length > 4000 ? texto.slice(0, 4000) + '\n…_(recortado)_' : texto
 
-  const res = await fetch(`${API_BASE}/sendMessage`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({
-      chat_id:    CHAT_ID,
-      text:       textoCortado,
-      parse_mode: 'Markdown',
-    }),
-  })
+  for (let intento = 1; intento <= intentos; intento++) {
+    try {
+      const controller = new AbortController()
+      const timeout    = setTimeout(() => controller.abort(), 10_000)
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(`Telegram API error: ${JSON.stringify(err)}`)
+      const res = await fetch(`${API_BASE}/sendMessage`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal:  controller.signal,
+        body:    JSON.stringify({
+          chat_id:    CHAT_ID,
+          text:       textoCortado,
+          parse_mode: 'Markdown',
+        }),
+      })
+      clearTimeout(timeout)
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(`Telegram ${res.status}: ${JSON.stringify(err)}`)
+      }
+      return // éxito
+
+    } catch (err) {
+      const ultimo = intento === intentos
+      console.warn(`[Telegram] Intento ${intento}/${intentos} fallido:`, (err as Error).message)
+      if (ultimo) {
+        console.error('[Telegram] Todos los intentos fallaron. Mensaje descartado.')
+        return // nunca bloquear el bot por Telegram
+      }
+      await new Promise(r => setTimeout(r, 2000 * intento)) // backoff exponencial
+    }
   }
 }
 
 // ════════════════════════════════════════════════════════════════
-// 1. VENTA CERRADA  (via conversación normal con Flora)
+// 1. VENTA CERRADA
 // ════════════════════════════════════════════════════════════════
 
 export interface DatosVentaCerrada {
@@ -65,17 +70,15 @@ export interface DatosVentaCerrada {
   producto:      string
   total:         string
   direccion:     string
-  numeroCliente: string   // raw de WhatsApp, se limpia aquí
+  numeroCliente: string // número real obtenido de getContact()
 }
 
 export async function enviarAlertaVentaCerrada(datos: DatosVentaCerrada): Promise<void> {
-  const numero = limpiarNumero(datos.numeroCliente)
-
   const msg = [
     '🌸 *¡VENTA CERRADA!* 🌸',
     '',
     `👤 *Cliente:* ${esc(datos.cliente)}`,
-    `📱 *WhatsApp:* ${esc(numero)}`,
+    `📱 *WhatsApp:* ${esc(datos.numeroCliente)}`,
     `💐 *Producto:* ${esc(datos.producto)}`,
     `💰 *Total:* ${esc(datos.total)}`,
     `📍 *Entrega:* ${esc(datos.direccion)}`,
@@ -83,13 +86,11 @@ export async function enviarAlertaVentaCerrada(datos: DatosVentaCerrada): Promis
     '',
     '✅ _Recuerda apartar el arreglo y confirmar el pago_',
   ].join('\n')
-
   await enviar(msg)
 }
 
 // ════════════════════════════════════════════════════════════════
 // 2. PEDIDO DEL COTIZADOR WEB
-// El cliente armó su ramo en la web y lo envió por WhatsApp
 // ════════════════════════════════════════════════════════════════
 
 export interface DatosPedidoWeb {
@@ -105,70 +106,67 @@ export interface DatosPedidoWeb {
 }
 
 export async function enviarAlertaPedidoWeb(datos: DatosPedidoWeb): Promise<void> {
-  const numero = limpiarNumero(datos.numeroCliente)
-
   const lineas = [
     '🛒 *PEDIDO VÍA COTIZADOR WEB*',
     '',
-    `📱 *WhatsApp:* ${esc(numero)}`,
+    `📱 *WhatsApp:* ${esc(datos.numeroCliente)}`,
     `💐 *Flores:* ${esc(datos.flores)}`,
   ]
-
-  if (datos.accesorios) {
-    lineas.push(`🎀 *Accesorios:* ${esc(datos.accesorios)}`)
-  }
-
+  if (datos.accesorios) lineas.push(`🎀 *Accesorios:* ${esc(datos.accesorios)}`)
   lineas.push(
     `📐 *Tamaño:* ${esc(datos.tamano)}`,
     `🎁 *Envoltura:* ${esc(datos.envoltura)}`,
     `📍 *Entrega:* ${esc(datos.entrega)}`,
     `💰 *Total:* ${esc(datos.total)}`,
   )
-
-  if (datos.nota) {
-    lineas.push(`📝 *Nota:* ${esc(datos.nota)}`)
-  }
-
-  lineas.push(
-    `⏰ *Hora:* ${esc(horaActual())}`,
-  )
-
-  if (datos.imagenUrl) {
-    lineas.push('', `🖼️ [Ver imagen de referencia](${datos.imagenUrl})`)
-  }
-
+  if (datos.nota)     lineas.push(`📝 *Nota:* ${esc(datos.nota)}`)
+  lineas.push(`⏰ *Hora:* ${esc(horaActual())}`)
+  if (datos.imagenUrl) lineas.push('', `🖼️ [Ver imagen de referencia](${datos.imagenUrl})`)
   lineas.push('', '⚠️ _Confirmar disponibilidad y proceder al cobro_')
-
   await enviar(lineas.join('\n'))
 }
 
 // ════════════════════════════════════════════════════════════════
-// 3. CLIENTE INTERESADO EN COTIZACIÓN PERSONALIZADA
-// Se le envió el link del cotizador web o pide algo especial
+// 3. CLIENTE QUIERE COTIZACIÓN PERSONALIZADA
 // ════════════════════════════════════════════════════════════════
 
 export async function enviarAlertaCotizacion(
   numeroCliente: string,
   descripcion:   string
 ): Promise<void> {
-  const numero = limpiarNumero(numeroCliente)
-
   const msg = [
     '🌷 *CLIENTE QUIERE COTIZACIÓN*',
     '',
-    `📱 *WhatsApp:* ${esc(numero)}`,
+    `📱 *WhatsApp:* ${esc(numeroCliente)}`,
     `💬 *Busca:* ${esc(descripcion.slice(0, 300))}`,
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
-    '_Se le envió el link del cotizador web — puede que necesite tu ayuda para el costo de envío_',
+    '_Se le envió el link del cotizador — puede necesitar ayuda con costo de envío_',
   ].join('\n')
-
   await enviar(msg)
 }
 
 // ════════════════════════════════════════════════════════════════
-// EXPORT LEGACY — compatibilidad con imports anteriores
+// 4. CLIENTE CON PROBLEMA / FRUSTRADO
 // ════════════════════════════════════════════════════════════════
+
+export async function enviarAlertaClienteFrustrado(
+  numeroCliente: string,
+  ultimoMensaje: string
+): Promise<void> {
+  const msg = [
+    '⚠️ *CLIENTE NECESITA ATENCIÓN HUMANA*',
+    '',
+    `📱 *WhatsApp:* ${esc(numeroCliente)}`,
+    `💬 *Último mensaje:* ${esc(ultimoMensaje.slice(0, 200))}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '🙋 _Escríbele directamente para ayudarle mejor_',
+  ].join('\n')
+  await enviar(msg)
+}
+
+// ── Export legacy ─────────────────────────────────────────────────────────────
 export async function enviarAlertaTelegram(datos: DatosVentaCerrada): Promise<void> {
   return enviarAlertaVentaCerrada(datos)
 }
