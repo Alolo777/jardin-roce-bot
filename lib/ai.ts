@@ -62,13 +62,48 @@ function parsearTokenVenta(texto: string): VentaCerrada | null {
   const match = texto.match(REGEX_VENTA)
   if (!match) return null
 
+  const cliente = match[1].trim()
+  const producto = match[2].trim()
+  const total = match[3].trim()
+  const direccion = match[4].trim()
+
+  // Validar que ningún campo quede vacío. Un token malformado
+  // (p. ej. "[VENTA_CERRADA: | | | ]") NO debe disparar alerta de Telegram.
+  if (!cliente || !producto || !total || !direccion) {
+    console.warn('[ai.ts] Token VENTA_CERRADA malformado (campos vacíos), se ignora:', match[0])
+    return null
+  }
+
   return {
-    cliente: match[1].trim(),
-    producto: match[2].trim(),
-    total: match[3].trim(),
-    direccion: match[4].trim(),
+    cliente,
+    producto,
+    total,
+    direccion,
     rawToken: match[0],
   }
+}
+
+// ─── Retry con backoff exponencial para la API de GitHub Models ──────────────
+// La API puede dar timeouts o errores 5xx transitorios; reintentamos con
+// esperas crecientes (500ms, 1s, 2s) + jitter antes de rendirnos.
+// Genérico sobre un thunk para preservar el tipo de retorno exacto.
+async function conRetry<T>(fn: () => Promise<T>, maxIntentos = 3): Promise<T> {
+  let ultimoError: unknown
+  for (let intento = 0; intento < maxIntentos; intento++) {
+    try {
+      return await fn()
+    } catch (error) {
+      ultimoError = error
+      if (intento === maxIntentos - 1) break
+      const espera = 500 * 2 ** intento + Math.floor(Math.random() * 300)
+      console.warn(
+        `[ai.ts] Error en LLM (intento ${intento + 1}/${maxIntentos}), reintentando en ${espera}ms:`,
+        error instanceof Error ? error.message : error
+      )
+      await new Promise(resolve => setTimeout(resolve, espera))
+    }
+  }
+  throw ultimoError
 }
 
 // ─── Estructura del historial de conversación ────────────────────────────────
@@ -90,18 +125,23 @@ export async function getAIResponse(
       ? `${systemPromptBase}\n\n--- INVENTARIO DISPONIBLE HOY ---\n${inventarioDiario}\n--- FIN DEL INVENTARIO ---`
       : systemPromptBase
 
-    const completion = await client.chat.completions.create({
-      model: MODEL,
-      messages: [
-        { role: 'system', content: systemPromptFinal },
-        ...historial,
-      ],
-      max_tokens: 800,
-      temperature: 0.7,
-    })
+    const completion = await conRetry(() =>
+      client.chat.completions.create({
+        model: MODEL,
+        messages: [
+          { role: 'system', content: systemPromptFinal },
+          ...historial,
+        ],
+        max_tokens: 800,
+        temperature: 0.7,
+      })
+    )
 
-    const respuestaRaw = completion.choices[0]?.message?.content ?? 
-      'Lo siento, no pude procesar tu mensaje. ¿Puedes repetirlo?'
+    // Fallback robusto: cubre tanto null/undefined como string vacío o solo espacios.
+    const contenido = completion.choices[0]?.message?.content?.trim()
+    const respuestaRaw = contenido && contenido.length > 0
+      ? contenido
+      : 'Lo siento, no pude procesar tu mensaje. ¿Puedes repetirlo? 🌸'
 
     // Detectar si hay un token de venta cerrada
     const ventaCerrada = parsearTokenVenta(respuestaRaw)

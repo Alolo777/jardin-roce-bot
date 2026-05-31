@@ -30,6 +30,13 @@ ${emoji} *¡NUEVA VENTA CERRADA!* ${emoji}
 ⏰ ${new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' })}
   `.trim()
 
+  // Telegram rechaza mensajes de más de 4096 caracteres. Truncamos por seguridad
+  // (los datos vienen del token de la IA y podrían venir inflados).
+  const TELEGRAM_MAX = 4096
+  const mensajeFinal = mensaje.length > TELEGRAM_MAX
+    ? mensaje.slice(0, TELEGRAM_MAX - 1) + '…'
+    : mensaje
+
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`
 
   const response = await fetch(url, {
@@ -37,7 +44,7 @@ ${emoji} *¡NUEVA VENTA CERRADA!* ${emoji}
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: TELEGRAM_CHAT_ID,
-      text: mensaje,
+      text: mensajeFinal,
       parse_mode: 'Markdown',
     }),
   })

@@ -84,6 +84,69 @@ function marcarFotosEnviadas(clienteId: string): void {
 }
 
 // ════════════════════════════════════════════════════════════════
+// LIMITES Y CONTROL DE ENTRADA
+// ════════════════════════════════════════════════════════════════
+
+// Longitud máxima de un mensaje del cliente antes de truncarlo (evita
+// inflar el contexto enviado al LLM y disparar costos/timeout).
+const MAX_LONGITUD_MENSAJE = 1000
+
+// Tipos de mensaje multimedia que NO procesamos (solo texto por ahora).
+const TIPOS_MEDIA_NO_SOPORTADOS = new Set([
+  'image', 'video', 'audio', 'ptt', 'document', 'sticker',
+])
+
+// ── Rate limiting por cliente ────────────────────────────────────
+// Si un cliente envía más de RATE_LIMIT_MAX mensajes dentro de la ventana,
+// ignoramos los extras y le avisamos una sola vez de forma cortés.
+const RATE_LIMIT_MAX = 8
+const RATE_LIMIT_WINDOW_MS = 30 * 1000
+const RATE_TIMESTAMPS = new Map<string, number[]>()
+const RATE_AVISADOS = new Set<string>()
+
+function estaRateLimited(clienteId: string): boolean {
+  const ahora = Date.now()
+  const recientes = (RATE_TIMESTAMPS.get(clienteId) ?? []).filter(
+    t => ahora - t < RATE_LIMIT_WINDOW_MS
+  )
+  recientes.push(ahora)
+  RATE_TIMESTAMPS.set(clienteId, recientes)
+  return recientes.length > RATE_LIMIT_MAX
+}
+
+function avisarRateLimitUnaVez(message: any, clienteId: string): void {
+  if (RATE_AVISADOS.has(clienteId)) return
+  RATE_AVISADOS.add(clienteId)
+  message
+    .reply('Voy un poquito rápido para seguirte el paso 🌸. Dame unos segundos y te respondo todo, ¿va?')
+    .catch(() => { /* no fatal */ })
+  setTimeout(() => RATE_AVISADOS.delete(clienteId), RATE_LIMIT_WINDOW_MS)
+}
+
+// ── Cola de procesamiento por cliente ────────────────────────────
+// Garantiza que los mensajes de un mismo cliente se procesen EN ORDEN
+// y de uno en uno, evitando respuestas cruzadas si el cliente escribe
+// mientras el bot aún procesa su mensaje anterior.
+const COLA_POR_CLIENTE = new Map<string, Promise<void>>()
+
+function encolarPorCliente(clienteId: string, tarea: () => Promise<void>): void {
+  const previa = COLA_POR_CLIENTE.get(clienteId) ?? Promise.resolve()
+  const siguiente = previa
+    .catch(() => { /* el error de la tarea anterior no debe frenar la cola */ })
+    .then(tarea)
+    .catch(err => console.error(`[bot] Error en cola de ${clienteId}:`, err))
+
+  COLA_POR_CLIENTE.set(clienteId, siguiente)
+
+  // Liberar la entrada del Map cuando esta sea la última tarea pendiente.
+  siguiente.finally(() => {
+    if (COLA_POR_CLIENTE.get(clienteId) === siguiente) {
+      COLA_POR_CLIENTE.delete(clienteId)
+    }
+  })
+}
+
+// ════════════════════════════════════════════════════════════════
 // DETECCION DE INTENCION — tres categorias separadas
 // ════════════════════════════════════════════════════════════════
 
@@ -206,7 +269,13 @@ async function procesarMensaje(message: any): Promise<void> {
   if (message.from === 'status@broadcast' || message.from.includes('@lid')) return
 
   const clienteId: string = message.from
-  const textoCliente: string = message.body.trim()
+  let textoCliente: string = message.body.trim()
+
+  // Truncar mensajes excesivamente largos antes de mandarlos a la IA.
+  if (textoCliente.length > MAX_LONGITUD_MENSAJE) {
+    console.warn(`[bot] Mensaje de ${clienteId} truncado de ${textoCliente.length} a ${MAX_LONGITUD_MENSAJE} chars`)
+    textoCliente = textoCliente.slice(0, MAX_LONGITUD_MENSAJE)
+  }
 
   console.log(`[${new Date().toLocaleTimeString('es-MX')}] 📨 ${clienteId}: ${textoCliente.substring(0, 80)}`)
 
@@ -333,10 +402,12 @@ async function procesarMensaje(message: any): Promise<void> {
 const whatsappClient = new Client({
   authStrategy: new LocalAuth({
     clientId: 'jardin-roce-bot',
-    dataPath: '/app/.wwebjs_auth',
+    // Default Docker/Render; override con WWEBJS_DATA_PATH en local.
+    dataPath: process.env.WWEBJS_DATA_PATH || '/app/.wwebjs_auth',
   }),
   puppeteer: {
     headless: true,
+    // En Docker apunta a /usr/bin/chromium; en local define PUPPETEER_EXECUTABLE_PATH.
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
     timeout: 60000,
     args: [
@@ -413,11 +484,17 @@ whatsappClient.on('ready', async () => {
   console.log('🌸 Flora está escuchando...\n')
 
   // Limpiar QR de Supabase
-  await supabaseAdmin
-    .from('configuracion_agente')
-    .update({ qr_code: null })
-    .eq('id', 1)
-    .catch(console.error)
+  // El query builder de Supabase es "thenable" pero NO expone .catch(),
+  // así que envolvemos en try/catch para no lanzar TypeError al conectar.
+  try {
+    const { error } = await supabaseAdmin
+      .from('configuracion_agente')
+      .update({ qr_code: null })
+      .eq('id', 1)
+    if (error) throw error
+  } catch (err) {
+    console.error('[bot] Error al limpiar QR de Supabase:', err)
+  }
 
   // Interceptar y bloquear recursos que no necesita WhatsApp Web
   try {
@@ -463,10 +540,39 @@ whatsappClient.on('disconnected', (reason) => {
   }, 5000)
 })
 
-whatsappClient.on('message_create', (message: any) => {
+// Punto de entrada de cada mensaje: filtros baratos + media + rate limit + cola.
+function manejarMensajeEntrante(message: any): void {
   if (message.fromMe) return
-  procesarMensaje(message).catch(err => console.error('[bot] Error de promesas no capturadas:', err))
-})
+  if (message.isGroupMsg) return
+  if (!message.from || message.from === 'status@broadcast' || message.from.includes('@lid')) return
+
+  const clienteId: string = message.from
+
+  // ── Mensajes no-texto (audio, imagen, video, sticker, documento) ──
+  if (message.type && message.type !== 'chat') {
+    if (TIPOS_MEDIA_NO_SOPORTADOS.has(message.type)) {
+      message
+        .reply('Por ahora solo puedo leer mensajes de *texto* 🌸. Escríbeme qué necesitas y con gusto te ayudo. 🌹')
+        .catch(() => { /* no fatal */ })
+    }
+    // location, vcard, notificaciones del sistema, etc. → ignorar en silencio
+    return
+  }
+
+  if (!message.body?.trim()) return
+
+  // ── Rate limiting: ignorar avalanchas de mensajes ──
+  if (estaRateLimited(clienteId)) {
+    console.warn(`[bot] Rate limit alcanzado para ${clienteId}, mensaje ignorado`)
+    avisarRateLimitUnaVez(message, clienteId)
+    return
+  }
+
+  // ── Encolar para procesar en orden, uno a la vez por cliente ──
+  encolarPorCliente(clienteId, () => procesarMensaje(message))
+}
+
+whatsappClient.on('message_create', manejarMensajeEntrante)
 
 // ════════════════════════════════════════════════════════════════
 // ARRANQUE
