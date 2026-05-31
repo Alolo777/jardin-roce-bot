@@ -264,10 +264,6 @@ function getFechaActual(): string {
 
 async function procesarMensaje(message: any): Promise<void> {
   // 1. EL FILTRO SALVA-VIDAS: Ignorar grupos, estados y mensajes fantasma (@lid)
-  if (message.isGroupMsg) return
-  if (!message.body?.trim()) return
-  if (message.from === 'status@broadcast' || message.from.includes('@lid')) return
-
   const clienteId: string = message.from
   let textoCliente: string = message.body.trim()
 
