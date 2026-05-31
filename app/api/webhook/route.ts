@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+/*import { NextRequest, NextResponse } from 'next/server';
 import { getCatalogoFlores } from '../../../lib/googleSheets';
 import { generarRespuestaVendedor } from '../../../lib/ai';
 // Endpoint para validar el Webhook (Meta/Instagram lo pide mediante GET)
@@ -45,4 +45,4 @@ export async function POST(request: NextRequest) {
     console.error('Error en el webhook:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
-}
+}*/
