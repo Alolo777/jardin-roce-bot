@@ -496,35 +496,13 @@ whatsappClient.on('ready', async () => {
     console.error('[bot] Error al limpiar QR de Supabase:', err)
   }
 
-  // Interceptar y bloquear recursos que no necesita WhatsApp Web
-  try {
-    const page = whatsappClient.pupPage
-    if (page) {
-      await page.setRequestInterception(true)
-      page.on('request', (request) => {
-        const tipo = request.resourceType()
-        const url = request.url()
-
-        const bloquear =
-          tipo === 'image' ||
-          tipo === 'media' ||
-          tipo === 'font' ||
-          url.includes('google-analytics') ||
-          url.includes('doubleclick') ||
-          url.includes('crashlogs') ||
-          url.includes('sentry.io')
-
-        if (bloquear) {
-          request.abort()
-        } else {
-          request.continue()
-        }
-      })
-      console.log('🛡️ Interceptor de requests activado — ahorrando RAM')
-    }
-  } catch (err) {
-    console.warn('[bot] Interceptor no disponible:', err)
-  }
+  // NOTA: Antes había aquí un interceptor de requests (page.setRequestInterception)
+  // para bloquear imágenes/media y ahorrar RAM. Se ELIMINÓ porque whatsapp-web.js
+  // ya activa su propia intercepción internamente; al llamar nosotros también a
+  // request.continue()/abort() la request "ya estaba manejada" y lanzaba el error
+  // "Request is already handled!" en bucle, dejando la página de WhatsApp inestable
+  // y al bot sin responder. La RAM se controla con el monitor + limpieza de
+  // historiales (ver setInterval arriba) y los flags de Chromium.
 })
 
 whatsappClient.on('auth_failure', (msg) => {
