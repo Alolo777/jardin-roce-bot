@@ -37,4 +37,4 @@ export default function AdminDashboard() {
       </div>
     </main>
   );
-}
+}// ── Botón de Pausa ─────────────────────────────────────────────────────────────
