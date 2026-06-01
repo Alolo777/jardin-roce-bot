@@ -640,8 +640,8 @@ const whatsappClient = new Client({
   puppeteer: {
     headless: true,
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
-    timeout: 60000,
-    protocolTimeout: 60000, // ← FIX CRÍTICO: evita "callFunctionOn timed out"
+    timeout: 120000,          // ← Aumentado a 2 minutos
+    protocolTimeout: 300000,  // ← Aumentado a 5 minutos (A prueba de Render)
     args: [
       '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
       '--disable-gpu', '--disable-gpu-sandbox', '--use-gl=swiftshader',
