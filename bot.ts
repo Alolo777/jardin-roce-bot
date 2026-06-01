@@ -595,30 +595,26 @@ async function procesarMensaje(message: any): Promise<void> {
 
     agregarAlHistorial(clienteId, 'assistant', mensaje)
 
-    // ── ENVIAR RESPUESTA (primero el mensaje, luego Telegram) ─────
+    // ── ENVIAR RESPUESTA ─────
     const mensajeFinal = limpiarRespuestaIA(mensaje)
     await simularEscritura(chat, calcularDelayEscritura(mensajeFinal))
     await message.reply(mensajeFinal) // ← primero el cliente
 
-    // Obtener número real (puede ya estar en caché)
+    // Obtener número real
     const numeroReal = await numeroRealPromise
 
-    // ── TELEGRAM DESPUÉS DE ENVIAR (no antes) ────────────────────
+    // ── TELEGRAM DESPUÉS DE ENVIAR ────────────────────
 
-    // Notificar cotización (DESPUÉS de confirmar que el mensaje se envió)
-    if (intencion === 'cotizador') {
-      enviarAlertaCotizacion(numeroReal, textoCliente)
-        .catch(err => console.error('[bot] Telegram cotizacion:', err))
+    // 🚨 NUEVA ALERTA: Cotización de envío manual
+    if (mensajeFinal.toLowerCase().includes('verificar el costo')) {
+      enviarAlertaCotizacion(numeroReal, `📍 Requiere cotización de envío.\nDirección dada: ${textoCliente}`)
+        .catch(err => console.error('[bot] Telegram envío:', err))
     }
 
-    // Notificar frustración
-    if (esFrustrado) {
-      const veces = (FRUSTRACION_NOTIFICADA.get(clienteId) ?? 0) + 1
-      FRUSTRACION_NOTIFICADA.set(clienteId, veces)
-      if (veces <= 2) {
-        enviarAlertaClienteFrustrado(numeroReal, textoCliente)
-          .catch(err => console.error('[bot] Telegram frustración:', err))
-      }
+    // Notificar cotización normal (cotizador web)
+    if (intencion === 'cotizador' && !mensajeFinal.toLowerCase().includes('verificar el costo')) {
+      enviarAlertaCotizacion(numeroReal, textoCliente)
+        .catch(err => console.error('[bot] Telegram cotizacion:', err))
     }
 
     // ── VENTA CERRADA ─────────────────────────────────────────────
