@@ -3,12 +3,10 @@
 const API_BASE = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
 const CHAT_ID  = process.env.TELEGRAM_CHAT_ID ?? ''
 
-// ── Escapar Markdown ──────────────────────────────────────────────────────────
 function esc(text: string): string {
   return String(text ?? '').replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&')
 }
 
-// ── Hora México ───────────────────────────────────────────────────────────────
 function horaActual(): string {
   return new Date().toLocaleString('es-MX', {
     timeZone: 'America/Mexico_City',
@@ -17,7 +15,6 @@ function horaActual(): string {
   })
 }
 
-// ── Enviar con retry y timeout ────────────────────────────────────────────────
 async function enviar(texto: string, intentos = 3): Promise<void> {
   if (!process.env.TELEGRAM_BOT_TOKEN || !CHAT_ID) {
     console.warn('[Telegram] Variables no configuradas.')
@@ -32,13 +29,11 @@ async function enviar(texto: string, intentos = 3): Promise<void> {
       const timeout    = setTimeout(() => controller.abort(), 10_000)
 
       const res = await fetch(`${API_BASE}/sendMessage`, {
-        method:  'POST',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal:  controller.signal,
-        body:    JSON.stringify({
-          chat_id:    CHAT_ID,
-          text:       textoCortado,
-          parse_mode: 'Markdown',
+        signal: controller.signal,
+        body: JSON.stringify({
+          chat_id: CHAT_ID, text: textoCortado, parse_mode: 'Markdown',
         }),
       })
       clearTimeout(timeout)
@@ -47,16 +42,12 @@ async function enviar(texto: string, intentos = 3): Promise<void> {
         const err = await res.json().catch(() => ({}))
         throw new Error(`Telegram ${res.status}: ${JSON.stringify(err)}`)
       }
-      return // éxito
+      return
 
     } catch (err) {
-      const ultimo = intento === intentos
       console.warn(`[Telegram] Intento ${intento}/${intentos} fallido:`, (err as Error).message)
-      if (ultimo) {
-        console.error('[Telegram] Todos los intentos fallaron. Mensaje descartado.')
-        return // nunca bloquear el bot por Telegram
-      }
-      await new Promise(r => setTimeout(r, 2000 * intento)) // backoff exponencial
+      if (intento === intentos) { console.error('[Telegram] Todos los intentos fallaron.'); return }
+      await new Promise(r => setTimeout(r, 2000 * intento))
     }
   }
 }
@@ -66,11 +57,8 @@ async function enviar(texto: string, intentos = 3): Promise<void> {
 // ════════════════════════════════════════════════════════════════
 
 export interface DatosVentaCerrada {
-  cliente:       string
-  producto:      string
-  total:         string
-  direccion:     string
-  numeroCliente: string // número real obtenido de getContact()
+  cliente: string; producto: string; total: string
+  direccion: string; numeroCliente: string
 }
 
 export async function enviarAlertaVentaCerrada(datos: DatosVentaCerrada): Promise<void> {
@@ -84,25 +72,40 @@ export async function enviarAlertaVentaCerrada(datos: DatosVentaCerrada): Promis
     `📍 *Entrega:* ${esc(datos.direccion)}`,
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
-    '✅ _Recuerda apartar el arreglo y confirmar el pago_',
+    '✅ _Confirmar pago y preparar el pedido_',
   ].join('\n')
   await enviar(msg)
 }
 
 // ════════════════════════════════════════════════════════════════
-// 2. PEDIDO DEL COTIZADOR WEB
+// 2. ARREGLO APARTADO (desde inventario del día)
+// ════════════════════════════════════════════════════════════════
+
+export async function enviarAlertaArregloApartado(
+  nombreArreglo: string,
+  precio: number,
+  numeroCliente: string
+): Promise<void> {
+  const msg = [
+    '📦 *ARREGLO APARTADO*',
+    '',
+    `💐 *Arreglo:* ${esc(nombreArreglo)}`,
+    `💰 *Precio:* $${precio.toFixed(2)} MXN`,
+    `📱 *WhatsApp cliente:* ${esc(numeroCliente)}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '⚠️ _Marcar como APARTADO en la tienda para no venderlo_',
+  ].join('\n')
+  await enviar(msg)
+}
+
+// ════════════════════════════════════════════════════════════════
+// 3. PEDIDO DEL COTIZADOR WEB
 // ════════════════════════════════════════════════════════════════
 
 export interface DatosPedidoWeb {
-  numeroCliente: string
-  total:         string
-  entrega:       string
-  flores:        string
-  tamano:        string
-  envoltura:     string
-  accesorios?:   string
-  nota?:         string
-  imagenUrl?:    string
+  numeroCliente: string; total: string; entrega: string; flores: string
+  tamano: string; envoltura: string; accesorios?: string; nota?: string; imagenUrl?: string
 }
 
 export async function enviarAlertaPedidoWeb(datos: DatosPedidoWeb): Promise<void> {
@@ -119,20 +122,20 @@ export async function enviarAlertaPedidoWeb(datos: DatosPedidoWeb): Promise<void
     `📍 *Entrega:* ${esc(datos.entrega)}`,
     `💰 *Total:* ${esc(datos.total)}`,
   )
-  if (datos.nota)     lineas.push(`📝 *Nota:* ${esc(datos.nota)}`)
+  if (datos.nota) lineas.push(`📝 *Nota:* ${esc(datos.nota)}`)
   lineas.push(`⏰ *Hora:* ${esc(horaActual())}`)
   if (datos.imagenUrl) lineas.push('', `🖼️ [Ver imagen de referencia](${datos.imagenUrl})`)
-  lineas.push('', '⚠️ _Confirmar disponibilidad y proceder al cobro_')
+  lineas.push('', '⚠️ _Confirmar disponibilidad y cobrar_')
   await enviar(lineas.join('\n'))
 }
 
 // ════════════════════════════════════════════════════════════════
-// 3. CLIENTE QUIERE COTIZACIÓN PERSONALIZADA
+// 4. CLIENTE QUIERE COTIZACIÓN
 // ════════════════════════════════════════════════════════════════
 
 export async function enviarAlertaCotizacion(
   numeroCliente: string,
-  descripcion:   string
+  descripcion: string
 ): Promise<void> {
   const msg = [
     '🌷 *CLIENTE QUIERE COTIZACIÓN*',
@@ -141,13 +144,13 @@ export async function enviarAlertaCotizacion(
     `💬 *Busca:* ${esc(descripcion.slice(0, 300))}`,
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
-    '_Se le envió el link del cotizador — puede necesitar ayuda con costo de envío_',
+    '_Se le envió el cotizador web — puede necesitar ayuda con precio de envío_',
   ].join('\n')
   await enviar(msg)
 }
 
 // ════════════════════════════════════════════════════════════════
-// 4. CLIENTE CON PROBLEMA / FRUSTRADO
+// 5. CLIENTE FRUSTRADO
 // ════════════════════════════════════════════════════════════════
 
 export async function enviarAlertaClienteFrustrado(
@@ -158,10 +161,10 @@ export async function enviarAlertaClienteFrustrado(
     '⚠️ *CLIENTE NECESITA ATENCIÓN HUMANA*',
     '',
     `📱 *WhatsApp:* ${esc(numeroCliente)}`,
-    `💬 *Último mensaje:* ${esc(ultimoMensaje.slice(0, 200))}`,
+    `💬 *Mensaje:* ${esc(ultimoMensaje.slice(0, 200))}`,
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
-    '🙋 _Escríbele directamente para ayudarle mejor_',
+    '🙋 _Escríbele directamente para ayudarle_',
   ].join('\n')
   await enviar(msg)
 }
