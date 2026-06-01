@@ -756,12 +756,12 @@ const whatsappClient = new Client({
     clientId: 'jardin-roce-bot',
     dataPath: process.env.WWEBJS_DATA_PATH || './.wwebjs_auth',
   }),
+  authTimeoutMs: 0, // ← ¡NUEVO! 0 significa "Paciencia infinita, espera a que cargue el servidor"
   qrMaxRetries: 100,
   puppeteer: {
     headless: true,
-    // Eliminamos por completo la línea executablePath para que Puppeteer use el suyo nativo
-    timeout: 120000,          // ← Aumentado a 2 minutos
-    protocolTimeout: 300000,  // ← Aumentado a 5 minutos (A prueba de nubes)
+    timeout: 120000,
+    protocolTimeout: 300000,
     args: [
       '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
       '--disk-cache-size=0',
@@ -777,7 +777,7 @@ const whatsappClient = new Client({
       '--disable-hang-monitor', '--disable-prompt-on-repost', '--disable-breakpad',
       '--no-first-run', '--no-default-browser-check', '--no-pings',
       '--password-store=basic', '--use-mock-keychain', '--metrics-recording-only',
-      '--js-flags=--max-old-space-size=512', // ← Aumentado a 512 para el giga de RAM en GCP
+      '--js-flags=--max-old-space-size=512',
       '--disable-features=TranslateUI,BlinkGenPropertyTrees,AudioServiceOutOfProcess',
     ],
   },
