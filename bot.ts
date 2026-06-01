@@ -311,7 +311,8 @@ const KW_CATALOGO = [
 
 const KW_COTIZADOR = [
   'cotizar', 'cotizacion', 'cotización', 'cuanto cuesta', 'cuánto cuesta',
-  'cuanto vale', 'cuánto vale', 'precio de un ramo', 'hacer un ramo',
+  'cuanto vale', 'cuánto vale', 'precio', 'qué precio', 'que precio',
+  'cuanto sale', 'cuánto sale', 'precio de un ramo', 'hacer un ramo',
   'ramo personalizado', 'armar un ramo', 'pedido especial',
   'tienen web', 'tienes web', 'pagina', 'página', 'diseñar',
 ]
@@ -343,25 +344,64 @@ async function obtenerArreglosConFotos(): Promise<ArregloConFoto[]> {
   } catch (err) { console.error('[bot] Error obteniendo arreglos:', err); return [] }
 }
 
+// ════════════════════════════════════════════════════════════════
+// ARREGLOS DEL DÍA (Versión con búsqueda agresiva y logs)
+// ════════════════════════════════════════════════════════════════
+
 async function apartarArreglo(nombreProducto: string, numeroCliente: string): Promise<void> {
   try {
-    const { data: arreglos } = await supabaseAdmin
-      .from('arreglos_diarios').select('id, nombre, precio').eq('estado', 'disponible')
-    if (!arreglos?.length) return
+    // 1. Limpiamos cualquier espacio basura que haya metido la IA
+    const prodSeguro = nombreProducto ? String(nombreProducto).trim() : 'Desconocido';
+    console.log(`[bot] 🔍 Buscando en DB para apartar: "${prodSeguro}"`);
 
-    const norm     = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    const normProd = norm(nombreProducto)
-    const match    = arreglos.find(a => { const n = norm(a.nombre); return normProd.includes(n) || n.includes(normProd) })
+    const { data: arreglos, error } = await supabaseAdmin
+      .from('arreglos_diarios')
+      .select('id, nombre, precio')
+      .eq('estado', 'disponible');
+
+    if (error) {
+      console.error('[bot] ❌ Error consultando DB:', error.message);
+      return;
+    }
+
+    if (!arreglos || arreglos.length === 0) {
+      console.log('[bot] ⚠️ No hay arreglos disponibles en la base de datos.');
+      return;
+    }
+
+    // 2. Normalización súper estricta: minúsculas, sin acentos, sin espacios en las orillas
+    const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const normProd = norm(prodSeguro);
+
+    // 3. Buscar el match
+    const match = arreglos.find(a => { 
+      const n = norm(a.nombre); 
+      // Match si son iguales, o si uno es fragmento del otro
+      return n === normProd || n.includes(normProd) || normProd.includes(n);
+    });
 
     if (match) {
-      await supabaseAdmin.from('arreglos_diarios').update({ estado: 'apartado' }).eq('id', match.id)
-      console.log(`[bot] 📦 "${match.nombre}" → apartado`)
+      console.log(`[bot] 🎯 Match encontrado: "${match.nombre}" (ID: ${match.id}). Actualizando estado...`);
+      
+      const { error: updateError } = await supabaseAdmin
+        .from('arreglos_diarios')
+        .update({ estado: 'apartado' })
+        .eq('id', match.id);
 
-      // Notificar a Telegram que se apartó
+      if (updateError) throw updateError;
+
+      console.log(`[bot] 📦 ¡EXITO! "${match.nombre}" marcado como apartado en tu Dashboard.`);
+
+      // Notificar a Telegram específicamente que se apartó del inventario
       enviarAlertaArregloApartado(match.nombre, match.precio, numeroCliente)
-        .catch(err => console.error('[bot] Telegram apartado:', err))
+        .catch(err => console.error('[bot] ❌ Error enviando Telegram de apartado:', err));
+        
+    } else {
+      console.warn(`[bot] ⚠️ El arreglo "${prodSeguro}" NO hizo match con ninguno disponible. Disponibles en DB:`, arreglos.map(a => a.nombre).join(', '));
     }
-  } catch (err) { console.error('[bot] Error apartando:', err) }
+  } catch (err) { 
+    console.error('[bot] ❌ Error crítico apartando:', err); 
+  }
 }
 
 // Descargar en paralelo, enviar con delay mínimo
