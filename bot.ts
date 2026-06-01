@@ -192,7 +192,7 @@ setInterval(() => {
   const rss  = Math.round(process.memoryUsage().rss      / 1024 / 1024)
   const heap = Math.round(process.memoryUsage().heapUsed / 1024 / 1024)
   console.log(`[RAM] RSS: ${rss}MB | Heap: ${heap}MB`)
-  if (rss > 400) {
+  if (rss > 440) {
     const clientes = Array.from(HISTORIAL_POR_CLIENTE.keys())
     const n = Math.floor(clientes.length * 0.3)
     for (let i = 0; i < n; i++) HISTORIAL_POR_CLIENTE.delete(clientes[i])
@@ -654,7 +654,7 @@ const whatsappClient = new Client({
       '--disable-hang-monitor', '--disable-prompt-on-repost', '--disable-breakpad',
       '--no-first-run', '--no-default-browser-check', '--no-pings',
       '--password-store=basic', '--use-mock-keychain', '--metrics-recording-only',
-      '--js-flags=--max-old-space-size=256',
+      '--js-flags=--max-old-space-size=340',
       '--disable-features=TranslateUI,BlinkGenPropertyTrees,AudioServiceOutOfProcess',
     ],
   },
