@@ -756,6 +756,7 @@ const whatsappClient = new Client({
     clientId: 'jardin-roce-bot',
     dataPath: process.env.WWEBJS_DATA_PATH || './.wwebjs_auth',
   }),
+  qrMaxRetries: 100,
   puppeteer: {
     headless: true,
     // Eliminamos por completo la línea executablePath para que Puppeteer use el suyo nativo
