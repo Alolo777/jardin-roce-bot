@@ -206,6 +206,25 @@ setInterval(() => {
 }, 5 * 60_000)
 
 // ════════════════════════════════════════════════════════════════
+// AUTO-LIMPIEZA PROFUNDA DE CHROMIUM (Anti-colapsos)
+// ════════════════════════════════════════════════════════════════
+
+setInterval(async () => {
+  try {
+    const page = whatsappClient.pupPage
+    if (page) {
+      console.log('[bot] 🧹 Vaciando caché de basura en Chromium...')
+      // Usamos el protocolo de herramientas de desarrollador para limpiar
+      const cdp = await page.target().createCDPSession()
+      await cdp.send('Network.clearBrowserCache')
+      console.log('[bot] ✨ Basura digital eliminada. Servidor ligero.')
+    }
+  } catch (err) {
+    // Si falla silenciosamente porque la página se estaba recargando, lo ignoramos
+  }
+}, 45 * 60_000) // Se ejecuta automáticamente cada 45 minutos
+
+// ════════════════════════════════════════════════════════════════
 // LÍMITES Y RATE LIMITING
 // ════════════════════════════════════════════════════════════════
 
