@@ -382,9 +382,18 @@ async function enviarFotosArreglos(client: Client, chatId: string, arreglos: Arr
       const caption =
         `💐 *${r.arreglo.nombre}*\n💰 $${r.arreglo.precio.toFixed(2)} MXN` +
         (r.arreglo.descripcion ? `\n📝 ${r.arreglo.descripcion}` : '')
+      
       await client.sendMessage(chatId, r.media, { caption })
       await new Promise(res => setTimeout(res, 600)) // delay mínimo entre fotos
-    } catch (err) { console.error(`[bot] Error enviando "${r.arreglo.nombre}":`, err) }
+    } catch (err) { 
+      const errorStr = String(err)
+      // Si la página se recargó a la mitad, abortar el resto de fotos para no ensuciar la consola
+      if (errorStr.includes('Execution context was destroyed') || errorStr.includes('Target closed')) {
+        console.warn(`[bot] ⚠️ WhatsApp se recargó mientras se enviaban fotos a ${chatId}. Abortando lote.`)
+        break // Salimos del ciclo
+      }
+      console.error(`[bot] Error enviando "${r.arreglo.nombre}":`, err) 
+    }
   }
 }
 
@@ -614,21 +623,63 @@ async function procesarMensaje(message: any): Promise<void> {
       errMsg.includes('Protocol error') ||
       errMsg.includes('Target closed') ||
       errMsg.includes('Session closed') ||
-      errMsg.includes('timed out')
+      errMsg.includes('timed out') ||
+      errMsg.includes('getChat') || // ← FIX: Ignorar si el mensaje quedó huérfano por recarga
+      errMsg.includes('evaluate')
 
     if (esPuppeteerError) {
-      console.warn(`[bot] ⚠️ Error de Puppeteer (${errMsg.substring(0, 60)}). El cliente puede reenviar.`)
+      console.warn(`[bot] ⚠️ Recarga de WhatsApp interceptada. El cliente puede reenviar si faltó algo.`)
       return
     }
 
     console.error(`[bot] Error con ${clienteId}:`, error)
     try {
-      const chat = await message.getChat()
-      await chat.clearState()
-      await message.reply('Disculpa, tuve un pequeño mareo digital 🌸. ¿Me lo puedes repetir?')
-    } catch { /* ignorar */ }
+      // Usar un timeout de seguridad
+      const chat = await Promise.race([
+        message.getChat(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000))
+      ]) as any
+      await chat.clearState().catch(() => {})
+      await message.reply('Disculpa, tuve un pequeño mareo digital 🌸. ¿Me lo puedes repetir?').catch(() => {})
+    } catch { /* ignorar totalmente si falla la disculpa */ }
   }
 }
+
+
+// ════════════════════════════════════════════════════════════════
+// RESCATE DE MENSAJES HUÉRFANOS TRAS RECARGA
+// ════════════════════════════════════════════════════════════════
+async function recuperarMensajesPerdidos() {
+  try {
+    console.log('[bot] 🧹 Buscando mensajes no leídos tras la recarga...');
+    const chats = await whatsappClient.getChats();
+    
+    // Filtrar chats que tengan mensajes sin leer y que no sean grupos
+    const chatsPendientes = chats.filter(c => c.unreadCount > 0 && !c.isGroup);
+
+    if (chatsPendientes.length === 0) {
+      console.log('[bot] ✨ Sincronización perfecta. No hay mensajes atrasados.');
+      return;
+    }
+
+    console.log(`[bot] 📥 Rescatando mensajes de ${chatsPendientes.length} chats...`);
+
+    for (const chat of chatsPendientes) {
+      // Obtener exactamente la cantidad de mensajes que no hemos leído de ese chat
+      const mensajes = await chat.fetchMessages({ limit: chat.unreadCount });
+      for (const msg of mensajes) {
+        // Solo procesar si el mensaje lo envió el cliente (no nosotros)
+        if (!msg.fromMe) {
+          console.log(`[bot] ♻️ Inyectando mensaje rescatado de ${chat.id._serialized}`);
+          manejarMensajeEntrante(msg);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[bot] Error en el rescate de mensajes:', err);
+  }
+}
+
 
 // ════════════════════════════════════════════════════════════════
 // CLIENTE DE WHATSAPP
@@ -689,6 +740,11 @@ whatsappClient.on('ready', async () => {
           await new Promise(r => setTimeout(r, 5000))
           console.log('[bot] ✅ Página estabilizada.')
           ultimaActividad = Date.now()
+          
+          // 👇 EL NUEVO CÓDIGO DE RESCATE 👇
+          // Le damos 8 segundos extra a la interfaz web para descargar mensajes atrasados
+          await new Promise(r => setTimeout(r, 8000)) 
+          recuperarMensajesPerdidos()
         }
       })
     }
