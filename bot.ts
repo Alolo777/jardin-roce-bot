@@ -705,7 +705,18 @@ async function procesarMensaje(message: any): Promise<void> {
 // RESCATE DE MENSAJES HUÉRFANOS TRAS RECARGA
 // ════════════════════════════════════════════════════════════════
 async function recuperarMensajesPerdidos() {
+  console.log('[bot] ⏳ Esperando a que el cliente se estabilice (8s)...');
+  // Esperar a que WhatsApp Web termine de cargar la interfaz por debajo
+  await new Promise(r => setTimeout(r, 8000));
+
   try {
+    // Blindaje anti-crasheos: Verificar que seguimos conectados antes de pedir los chats
+    const state = await whatsappClient.getState().catch(() => null);
+    if (state !== 'CONNECTED') {
+      console.log('[bot] ⚠️ Cliente no está listo aún o se desconectó. Omitiendo rescate.');
+      return;
+    }
+
     console.log('[bot] 🧹 Buscando mensajes no leídos tras la recarga...');
     const chats = await whatsappClient.getChats();
     
