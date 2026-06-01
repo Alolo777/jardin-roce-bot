@@ -87,7 +87,7 @@ function getContextoHorario(): string {
 }
 
 // ════════════════════════════════════════════════════════════════
-// NÚMERO REAL DEL CONTACTO (caché para evitar múltiples llamadas)
+// NÚMERO REAL DEL CONTACTO (Extracción profunda para evadir LIDs)
 // ════════════════════════════════════════════════════════════════
 
 const CACHE_NUMEROS = new Map<string, string>()
@@ -95,7 +95,7 @@ const CACHE_NUMEROS = new Map<string, string>()
 async function obtenerNumeroReal(message: any): Promise<string> {
   const raw = message.from as string
 
-  // Si ya tenemos el número real en caché, usarlo
+  // Si ya lo tenemos, usar caché
   if (CACHE_NUMEROS.has(raw)) return CACHE_NUMEROS.get(raw)!
 
   try {
@@ -104,19 +104,21 @@ async function obtenerNumeroReal(message: any): Promise<string> {
       new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
     ]) as any
 
-    if (contact?.number) {
-      const num  = String(contact.number)
-      const real = num.startsWith('52') ? `+${num}` : num
-      CACHE_NUMEROS.set(raw, real)
-      return real
-    }
-  } catch { /* fallback */ }
+    // Intentar sacar el número real (evitando el LID en lo posible)
+    // contact?.id?.user suele tener el número real en cuentas multi-dispositivo
+    let num = contact?.id?.user || contact?.number || raw.replace(/@[^\s]*/g, '').trim()
 
-  // Fallback: limpiar el @lid y agregar + si aplica
-  const limpio = raw.replace(/@[^\s]*/g, '').trim()
-  const numero = limpio.startsWith('52') ? `+${limpio}` : limpio
-  CACHE_NUMEROS.set(raw, numero)
-  return numero
+    // Formatear a estándar internacional si es de México
+    const real = num.startsWith('52') ? `+${num}` : num
+    CACHE_NUMEROS.set(raw, real)
+    return real
+  } catch { 
+    // Fallback absoluto
+    const limpio = raw.replace(/@[^\s]*/g, '').trim()
+    const numero = limpio.startsWith('52') ? `+${limpio}` : limpio
+    CACHE_NUMEROS.set(raw, numero)
+    return numero
+  }
 }
 
 // ════════════════════════════════════════════════════════════════
