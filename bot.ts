@@ -733,6 +733,9 @@ const whatsappClient = new Client({
     protocolTimeout: 300000,  // ← Aumentado a 5 minutos (A prueba de Render)
     args: [
       '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+      '--disk-cache-size=0',
+      '--media-cache-size=0',
+      '--disable-application-cache',
       '--disable-gpu', '--disable-gpu-sandbox', '--use-gl=swiftshader',
       '--disable-software-rasterizer', '--disable-extensions', '--disable-plugins',
       '--disable-default-apps', '--disable-sync', '--disable-background-networking',
