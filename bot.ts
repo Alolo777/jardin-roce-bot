@@ -784,13 +784,20 @@ const whatsappClient = new Client({
 })
 
 whatsappClient.on('qr', async (qr) => {
-  console.log('\n📱 Nuevo QR. Subiendo a Supabase...')
+  console.log('\n⚡ ¡NUEVO QR EN CONSOLA! Escanéalo ahora:');
+  
+  // Mostrar el QR directamente en la terminal (small: true es clave para que no se deforme)
+  qrcode.generate(qr, { small: true });
+
+  console.log('\n📱 Subiendo también a Supabase como respaldo...');
   try {
-    const { error } = await supabaseAdmin.from('configuracion_agente').update({ qr_code: qr }).eq('id', 1)
-    if (error) throw error
-    console.log('✅ QR guardado.')
-  } catch (err) { console.error('❌ Error QR:', err) }
-})
+    const { error } = await supabaseAdmin.from('configuracion_agente').update({ qr_code: qr }).eq('id', 1);
+    if (error) throw error;
+    console.log('✅ QR guardado en Supabase.');
+  } catch (err) { 
+    console.error('❌ Error QR en Supabase:', err); 
+  }
+});
 
 whatsappClient.on('ready', async () => {
   console.log('\n✅ Bot de Jardín RoCe conectado!')
