@@ -754,13 +754,13 @@ async function recuperarMensajesPerdidos() {
 const whatsappClient = new Client({
   authStrategy: new LocalAuth({
     clientId: 'jardin-roce-bot',
-    dataPath: process.env.WWEBJS_DATA_PATH || '/app/.wwebjs_auth',
+    dataPath: process.env.WWEBJS_DATA_PATH || './.wwebjs_auth',
   }),
   puppeteer: {
     headless: true,
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+    // Eliminamos por completo la línea executablePath para que Puppeteer use el suyo nativo
     timeout: 120000,          // ← Aumentado a 2 minutos
-    protocolTimeout: 300000,  // ← Aumentado a 5 minutos (A prueba de Render)
+    protocolTimeout: 300000,  // ← Aumentado a 5 minutos (A prueba de nubes)
     args: [
       '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
       '--disk-cache-size=0',
@@ -776,7 +776,7 @@ const whatsappClient = new Client({
       '--disable-hang-monitor', '--disable-prompt-on-repost', '--disable-breakpad',
       '--no-first-run', '--no-default-browser-check', '--no-pings',
       '--password-store=basic', '--use-mock-keychain', '--metrics-recording-only',
-      '--js-flags=--max-old-space-size=340',
+      '--js-flags=--max-old-space-size=512', // ← Aumentado a 512 para el giga de RAM en GCP
       '--disable-features=TranslateUI,BlinkGenPropertyTrees,AudioServiceOutOfProcess',
     ],
   },
