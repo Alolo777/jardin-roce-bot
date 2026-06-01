@@ -12,17 +12,27 @@ function BotonPausa() {
   const [guardando, setGuardando] = useState(false)
   const supabase = createSupabaseBrowserClient()
 
+  // ✅ AQUÍ ESTÁ LA MAGIA CORREGIDA
   useEffect(() => {
-    supabase
-      .from('configuracion_agente')
-      .select('bot_pausado')
-      .eq('id', 1)
-      .single()
-      .then(({ data }) => {
+    async function cargarEstado() {
+      try {
+        const { data, error } = await supabase
+          .from('configuracion_agente')
+          .select('bot_pausado')
+          .eq('id', 1)
+          .single()
+
+        if (error) throw error;
+        
         setPausado(data?.bot_pausado ?? false)
+      } catch (error) {
+        console.error('Error al obtener estado de pausa:', error)
+      } finally {
         setCargando(false)
-      })
-      .catch(() => setCargando(false))
+      }
+    }
+
+    cargarEstado()
   }, [])
 
   async function togglePausa() {
