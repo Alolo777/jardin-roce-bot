@@ -13,15 +13,15 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=antedavid00
 WorkingDirectory=/home/antedavid00/jardin-roce-bot
 
 # Node.js: heap limitado a 380MB, GC agresivo
 # NOTA: .env.local lo carga el bot via dotenv, no via EnvironmentFile
 Environment="NODE_OPTIONS=--max-old-space-size=380 --optimize-for-size --max-semi-space-size=32"
 
-# Usar PATH completo para que systemd encuentre npm
-ExecStart=/usr/bin/npm run bot:prod
+# PATH completo para que systemd encuentre npm
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=npm run bot:prod
 
 # ═══ Reinicio automático ═══
 Restart=on-failure
