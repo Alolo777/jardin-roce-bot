@@ -7,6 +7,11 @@ function esc(text: string): string {
   return String(text ?? '').replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&')
 }
 
+function ultimos4(numero: string): string {
+  const limpio = String(numero ?? '').replace(/\D/g, '')
+  return 'xxx' + limpio.slice(-4)
+}
+
 function horaActual(): string {
   return new Date().toLocaleString('es-MX', {
     timeZone: 'America/Mexico_City',
@@ -66,7 +71,7 @@ export async function enviarAlertaVentaCerrada(datos: DatosVentaCerrada): Promis
     '🌸 *¡VENTA CERRADA!* 🌸',
     '',
     `👤 *Cliente:* ${esc(datos.cliente)}`,
-    `📱 *WhatsApp:* ${esc(datos.numeroCliente)}`,
+    `📱 *Teléfono:* ${ultimos4(datos.numeroCliente)}`,
     `💐 *Producto:* ${esc(datos.producto)}`,
     `💰 *Total:* ${esc(datos.total)}`,
     `📍 *Entrega:* ${esc(datos.direccion)}`,
@@ -89,9 +94,9 @@ export async function enviarAlertaArregloApartado(
   const msg = [
     '📦 *ARREGLO APARTADO*',
     '',
-    `💐 *Arreglo:* ${esc(nombreArreglo)}`,
-    `💰 *Precio:* $${precio.toFixed(2)} MXN`,
-    `📱 *WhatsApp cliente:* ${esc(numeroCliente)}`,
+      `💐 *Arreglo:* ${esc(nombreArreglo)}`,
+      `💰 *Precio:* $${precio.toFixed(2)} MXN`,
+      `📱 *Teléfono:* ${ultimos4(numeroCliente)}`,
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
     '⚠️ _Marcar como APARTADO en la tienda para no venderlo_',
@@ -112,7 +117,7 @@ export async function enviarAlertaPedidoWeb(datos: DatosPedidoWeb): Promise<void
   const lineas = [
     '🛒 *PEDIDO VÍA COTIZADOR WEB*',
     '',
-    `📱 *WhatsApp:* ${esc(datos.numeroCliente)}`,
+    `📱 *Teléfono:* ${ultimos4(datos.numeroCliente)}`,
     `💐 *Flores:* ${esc(datos.flores)}`,
   ]
   if (datos.accesorios) lineas.push(`🎀 *Accesorios:* ${esc(datos.accesorios)}`)
@@ -140,7 +145,7 @@ export async function enviarAlertaCotizacion(
   const msg = [
     '🌷 *CLIENTE QUIERE COTIZACIÓN*',
     '',
-    `📱 *WhatsApp:* ${esc(numeroCliente)}`,
+    `📱 *Teléfono:* ${ultimos4(numeroCliente)}`,
     `💬 *Busca:* ${esc(descripcion.slice(0, 300))}`,
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
@@ -160,7 +165,7 @@ export async function enviarAlertaClienteFrustrado(
   const msg = [
     '⚠️ *CLIENTE NECESITA ATENCIÓN HUMANA*',
     '',
-    `📱 *WhatsApp:* ${esc(numeroCliente)}`,
+    `📱 *Teléfono:* ${ultimos4(numeroCliente)}`,
     `💬 *Mensaje:* ${esc(ultimoMensaje.slice(0, 200))}`,
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',

@@ -102,7 +102,8 @@ async function obtenerNumeroReal(message: any): Promise<string> {
       new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
     ]) as any
 
-    const num  = contact?.id?.user || contact?.number || raw.replace(/@[^\s]*/g, '').trim()
+    // Preferir contact.number (teléfono real) sobre contact.id.user (ID interno)
+    const num  = contact?.number || contact?.id?.user || raw.replace(/@[^\s]*/g, '').trim()
     const real = String(num).startsWith('52') ? `+${num}` : String(num)
     CACHE_NUMEROS.set(raw, real)
     return real
