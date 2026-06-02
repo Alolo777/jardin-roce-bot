@@ -675,15 +675,20 @@ async function recuperarMensajesPerdidos(): Promise<void> {
       return
     }
 
-    console.log(`[bot] 📥 Rescatando ${chatsPendientes.length} chats...`)
-    for (const chat of chatsPendientes) {
-      const mensajes = await chat.fetchMessages({ limit: chat.unreadCount })
-      for (const msg of mensajes) {
-        if (!msg.fromMe) {
-          console.log(`[bot] ♻️ Inyectando mensaje de ${chat.id._serialized}`)
-          manejarMensajeEntrante(msg)
+    console.log(`[bot] 📥 Rescatando ${chatsPendientes.length} chats (lotes de 2)...`)
+    const BATCH_SIZE_RESCATE = 2
+    for (let i = 0; i < chatsPendientes.length; i += BATCH_SIZE_RESCATE) {
+      const batch = chatsPendientes.slice(i, i + BATCH_SIZE_RESCATE)
+      await Promise.all(batch.map(async (chat) => {
+        const mensajes = await chat.fetchMessages({ limit: chat.unreadCount })
+        for (const msg of mensajes) {
+          if (!msg.fromMe) {
+            console.log(`[bot] ♻️ Inyectando mensaje de ${chat.id._serialized}`)
+            manejarMensajeEntrante(msg)
+          }
+          await new Promise(r => setTimeout(r, 150))
         }
-      }
+      }))
     }
   } catch (err) {
     console.error('[bot] Error en rescate:', err)
@@ -745,6 +750,14 @@ const whatsappClient = new Client({
       '--metrics-recording-only',
       '--js-flags=--max-old-space-size=512',
       '--disable-features=TranslateUI,BlinkGenPropertyTrees,AudioServiceOutOfProcess',
+      // Reducción extrema de memoria para e2-micro
+      '--single-process',                // Un solo proceso Chromium (menos RAM total)
+      '--disable-component-extensions-with-background-pages',
+      '--disable-component-update',
+      '--safebrowsing-disable-auto-updates',
+      '--disable-domain-reliability',
+      '--disable-backing-store-limit',
+      '--max_old_space_size=256',        // Heap de V8 de Chromium limitado a 256MB
     ],
   },
 })
@@ -779,12 +792,12 @@ whatsappClient.on('ready', async () => {
       page.on('framenavigated', async (frame: any) => {
         if (frame !== page.mainFrame()) return
         
-        console.warn('[bot] 🔄 WhatsApp Web fue recargado a la fuerza por Meta.')
-        console.log('💀 El puente de conexión interno se rompió. Forzando reinicio seguro...')
-        
-        // Al matar el proceso, systemd (en Google Cloud) lo levantará en 10 segundos
-        // y como el rescate de mensajes ahora está en el "ready", no perderás nada.
-        process.exit(1) 
+        console.warn('[bot] 🔄 WhatsApp Web recargado por Meta. Reconectando en 5s...')
+        // Esperar 5s para que mensajes en vuelvo terminen, luego reiniciar
+        setTimeout(() => {
+          console.log('💀 Forzando reinicio seguro vía systemd...')
+          process.exit(1)
+        }, 5_000).unref()
       })
     }
   } catch (err) { console.warn('[bot] No se pudo registrar framenavigated:', err) }
@@ -837,19 +850,34 @@ whatsappClient.on('message_create', manejarMensajeEntrante)
 console.log('🌸 Iniciando bot de Jardín RoCe...')
 whatsappClient.initialize().catch((err) => { console.error('❌ Error:', err); process.exit(1) })
 
-process.on('SIGINT', async () => {
-  console.log('\n⚠️ Cerrando...')
-  await whatsappClient.destroy().catch(console.error)
+async function gracefulShutdown(signal: string): Promise<void> {
+  console.log(`\n⚠️ ${signal} recibido — cerrando graceful...`)
+  const timer = setTimeout(() => {
+    console.warn('[shutdown] Timeout 10s — forzando exit.')
+    process.exit(1)
+  }, 10_000)
+  timer.unref()
+
+  try {
+    await whatsappClient.destroy()
+  } catch (e) {
+    console.error('[shutdown] Error al destruir:', e)
+  }
+  clearTimeout(timer)
   process.exit(0)
-})
+}
+
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'))
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
 process.on('uncaughtException',  (err) => console.error('❌ Excepción:', err))
 process.on('unhandledRejection', (r)   => console.error('❌ Rechazo:', r))
 
 import express from 'express'
 const app  = express()
-const port = process.env.PORT || 3000
+const port = process.env.BOT_PORT || 10000
 app.get('/', (_req, res) => res.send('🌸 Jardín RoCe Bot — en línea.'))
 app.listen(port, () => console.log(`🌐 Servidor web en puerto ${port}`))
+console.log(`⚠️ Bot escuchando en :${port}. Next.js debe usar otro puerto (default 3000).`)
 
 
 
