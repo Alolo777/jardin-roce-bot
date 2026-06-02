@@ -336,6 +336,7 @@ function parsearPedidoCotizador(texto: string): PedidoWebParseado {
 // ════════════════════════════════════════════════════════════════
 
 const FOTOS_PENDIENTES = new Map<string, { arreglos: ArregloConFoto[] }>()
+const ULTIMOS_ARREGLOS = new Map<string, ArregloConFoto[]>()
 
 // ════════════════════════════════════════════════════════════════
 // DETECCIÓN DE INTENCIÓN
@@ -544,6 +545,20 @@ async function procesarMensaje(message: any): Promise<void> {
 
     agregarAlHistorial(clienteId, 'user', textoCliente)
 
+    // Primer mensaje del usuario: inyectar saludo dinámico
+    const historialCompleto = obtenerHistorial(clienteId)
+    if (historialCompleto.length === 1) {
+      const saludos = [
+        'PRESENTATE así: "¡Hola! Soy Flora 🌸, la asistente de Jardín RoCe. ¿En qué te puedo ayudar hoy?"',
+        'PRESENTATE así: "Holis 🌷 Soy Flora, tu asistente floral. ¿En qué te ayudo?"',
+        'PRESENTATE así: "¡Buen día! Soy Flora 🌸, de Jardín RoCe. Dime, ¿qué se te ofrece?"',
+        'PRESENTATE así: "Holiwis ✨ Soy Flora. ¿Estás buscando algún regalo floral? Cuéntame"',
+        'PRESENTATE así: "¡Hola! Qué gusto verte por aquí 🌷 Soy Flora. ¿Buscas algo en especial?"',
+      ]
+      contextoExtra += `\n\n${saludos[Math.floor(Math.random() * saludos.length)]}` +
+        '\nMáximo 2 líneas. NUNCA te presentes de nuevo si ya hay conversación.'
+    }
+
     const intencion     = detectarIntencion(textoCliente, clienteId)
     const horario       = getContextoHorario()
     let   contextoExtra = `[Fecha actual: ${getFechaActual()}]${horario}`
@@ -580,12 +595,34 @@ async function procesarMensaje(message: any): Promise<void> {
     else if (intencion === 'cotizador') {
       if (!estaEnHorario()) {
         contextoExtra +=
-          `\n\nINSTRUCCION: Fuera de horario. Para armar ramo: https://floreria-app-mauve.vercel.app/ ` +
-          `Para cotizar envío, dile que mañana a las 10am con gusto lo hacemos. Máximo 3 líneas.`
+          `\n\nINSTRUCCION (Fuera de horario): ` +
+          `Primero envía el cotizador: https://floreria-app-mauve.vercel.app/ ` +
+          `Luego ofrécele ver los arreglos disponibles de hoy si los hay. ` +
+          `Para envío complejo: mañana a las 10am confirmamos. Máximo 4 líneas.`
       } else {
         contextoExtra +=
-          `\n\nINSTRUCCION: Primero pregunta si quiere ver arreglos del día (más rápido). ` +
+          `\n\nINSTRUCCION: Primero pregúntale si quiere ver los arreglos del día (entrega inmediata). ` +
           `Si prefiere personalizado: https://floreria-app-mauve.vercel.app/ Máximo 3 líneas.`
+      }
+    }
+
+    // Detectar si el usuario está eligiendo un arreglo de la lista mostrada
+    const ultimosArreglos = ULTIMOS_ARREGLOS.get(clienteId)
+    if (ultimosArreglos?.length && textoCliente.length < 200) {
+      const mencionaPrecio = /\$\s*[\d,]+/.test(textoCliente)
+      const mencionaNombre = ultimosArreglos.some(a => {
+        const palabras = a.nombre.toLowerCase().split(/\s+/)
+        return palabras.some(p => p.length > 2 && textoCliente.toLowerCase().includes(p))
+      })
+      const esEleccion = /me gust[oó]|quiero|ese|este|el[^a-zA-Z]|prefiero|me llevo|aparta|reply/i.test(textoCliente)
+      if (mencionaNombre || mencionaPrecio || esEleccion) {
+        const lista = ultimosArreglos.map((a, i) => `"${a.nombre}" — $${a.precio} MXN`).join(' | ')
+        contextoExtra +=
+          `\n\n[ARREGLOS MOSTRADOS: ${lista}]` +
+          `\nINSTRUCCION: El usuario eligió un arreglo por su nombre o precio. ` +
+          `Busca en la lista el que coincida exactamente por nombre O precio. ` +
+          `Confírmalo y pasa DIRECTAMENTE a preguntar si lo recoge o necesita envío. ` +
+          `NO preguntes "cuál te gustó" — el usuario ya lo dijo.`
       }
     }
 
@@ -654,6 +691,8 @@ async function procesarMensaje(message: any): Promise<void> {
 
         const resumenFotos = arreglosFinales.map((a, i) => `Foto ${i + 1}: ${a.nombre} ($${a.precio} MXN)`).join(', ')
         agregarAlHistorial(clienteId, 'assistant', `[Sistema] Fotos enviadas: ${resumenFotos}`)
+        // Guardar lista para matching en próximos mensajes
+        ULTIMOS_ARREGLOS.set(clienteId, arreglosFinales)
 
         await new Promise(r => setTimeout(r, 600))
         await simularEscritura(chat, 800)
