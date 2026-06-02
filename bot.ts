@@ -606,6 +606,20 @@ async function procesarMensaje(message: any): Promise<void> {
       }
     }
 
+    // Inyectar inventario aunque el intent no sea 'inventario'
+    // Evita que la IA alucine "hoy no tenemos" cuando el usuario ya vio fotos
+    if (intencion !== 'inventario' && yaSeEnviaronFotos(clienteId)) {
+      if (!contextoExtra.includes('INVENTARIO HOY')) {
+        const arreglos = await obtenerArreglosConFotos()
+        if (arreglos.length > 0) {
+          const resumen = arreglos.map((a, i) => `Foto ${i + 1}: "${a.nombre}" — $${a.precio} MXN`).join('\n')
+          contextoExtra +=
+            `\n\nINVENTARIO HOY (el usuario ya vio estas fotos antes):\n${resumen}` +
+            `\nINSTRUCCION: Usa esta lista si el usuario pregunta por disponibilidad. NO digas que no hay arreglos.`
+        }
+      }
+    }
+
     // Detectar si el usuario está eligiendo un arreglo de la lista mostrada
     const ultimosArreglos = ULTIMOS_ARREGLOS.get(clienteId)
     if (ultimosArreglos?.length && textoCliente.length < 200) {
