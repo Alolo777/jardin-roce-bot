@@ -65,15 +65,22 @@ function estaEnHorario(): boolean {
 }
 
 function getContextoHorario(): string {
-  if (estaEnHorario()) return ''
-  const ahora = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' }))
+  if (estaEnHorario()) return '';
+  
+  const ahora = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
+  const hora = ahora.getHours();
+  
+  // Detectar si es antes de abrir (mañana) o después de cerrar (tarde/noche)
+  const estadoHorario = hora < 10 
+    ? 'Aún no abrimos (abrimos a las 10:00 am).' 
+    : 'Ya cerramos por hoy (abrimos mañana a las 10:00 am).';
+
   return (
-    `\n\n[FUERA DE HORARIO] Son las ` +
-    `${ahora.getHours()}:${String(ahora.getMinutes()).padStart(2, '0')} México. Estamos cerrados. ` +
-    `Horario: Lun-Vie 10am-7pm, Sáb-Dom 10am-5pm. ` +
-    `Si el cliente quiere cotizar envío o algo especial, dile que mañana a las 10am con gusto le ayudamos. ` +
-    `Para armar su ramo, sí puede usar el cotizador web ahora. Toma nota de lo que necesita.`
-  )
+    `\n\n[CONTEXTO: Fuera de Horario] ${estadoHorario} ` +
+    `REGLA DE ORO: NUNCA le digas al cliente "mañana te muestro" o "mañana te atiendo". ` +
+    `SÍ PUEDES y DEBES enviarle el inventario de hoy, el link del catálogo o el cotizador web (https://floreria-app-mauve.vercel.app/) en este momento para que adelante su pedido y quede agendado para nuestra apertura. ` +
+    `Para cotizaciones de envío complejas que no estén en la web, dile amablemente que a las 10 am le confirmas el costo exacto.`
+  );
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -737,21 +744,22 @@ whatsappClient.on('ready', async () => {
     await supabaseAdmin.from('configuracion_agente').update({ qr_code: null }).eq('id', 1)
   } catch (err) { console.error('[bot] Error limpiando QR:', err) }
 
+  // 👇 FIX MÁGICO: Ejecutar el rescate de mensajes justo al arrancar en limpio
+  recuperarMensajesPerdidos().catch(err => console.error('[bot] Error recuperando:', err))
+
   try {
     const page = whatsappClient.pupPage
     if (page) {
-      // FIX: remover listeners anteriores antes de añadir uno nuevo
-      // Esto evita acumulación de listeners en cada reconexión
       page.removeAllListeners('framenavigated')
-
       page.on('framenavigated', async (frame: any) => {
         if (frame !== page.mainFrame()) return
-        console.warn('[bot] 🔄 WhatsApp Web se recargó. Esperando estabilización...')
-        await new Promise(r => setTimeout(r, 5000))
-        console.log('[bot] ✅ Página estabilizada.')
-        ultimaActividad = Date.now()
-        // FIX: await para capturar errores + espera unificada dentro de recuperar
-        recuperarMensajesPerdidos().catch(err => console.error('[bot] Error recuperando:', err))
+        
+        console.warn('[bot] 🔄 WhatsApp Web fue recargado a la fuerza por Meta.')
+        console.log('💀 El puente de conexión interno se rompió. Forzando reinicio seguro...')
+        
+        // Al matar el proceso, systemd (en Google Cloud) lo levantará en 10 segundos
+        // y como el rescate de mensajes ahora está en el "ready", no perderás nada.
+        process.exit(1) 
       })
     }
   } catch (err) { console.warn('[bot] No se pudo registrar framenavigated:', err) }
@@ -817,3 +825,8 @@ const app  = express()
 const port = process.env.PORT || 3000
 app.get('/', (_req, res) => res.send('🌸 Jardín RoCe Bot — en línea.'))
 app.listen(port, () => console.log(`🌐 Servidor web en puerto ${port}`))
+
+
+
+
+
