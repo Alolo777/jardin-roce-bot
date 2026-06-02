@@ -1,5 +1,5 @@
 // bot.ts — Jardín RoCe 🌸
-// Ejecutar con: npx tsx bot.ts
+// Optimizado para GCP e2-micro (1GB RAM) con systemd
 
 import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js'
 import qrcode from 'qrcode-terminal'
@@ -37,7 +37,7 @@ function agregarAlHistorial(id: string, role: 'user' | 'assistant', content: str
 }
 
 // ════════════════════════════════════════════════════════════════
-// CONTROL DE FOTOS ENVIADAS (una vez por día)
+// CONTROL DE FOTOS ENVIADAS
 // ════════════════════════════════════════════════════════════════
 
 const FOTOS_YA_ENVIADAS = new Set<string>()
@@ -59,44 +59,35 @@ function marcarFotosEnviadas(id: string): void {
 function estaEnHorario(): boolean {
   const ahora = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' }))
   const hora  = ahora.getHours() * 60 + ahora.getMinutes()
-  const dia   = ahora.getDay() // 0=dom, 6=sáb
+  const dia   = ahora.getDay()
   const esFinDeSemana = dia === 0 || dia === 6
-
-  const apertura = 10 * 60       // 10:00 am
-  const cierre   = esFinDeSemana ? 17 * 60 : 19 * 60  // 5pm o 7pm
-
-  return hora >= apertura && hora < cierre
+  return hora >= 10 * 60 && hora < (esFinDeSemana ? 17 * 60 : 19 * 60)
 }
 
 function getContextoHorario(): string {
   if (estaEnHorario()) return ''
   const ahora = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' }))
-  const dia   = ahora.getDay()
-  const esFinDeSemana = dia === 0 || dia === 6
   return (
-    `\n\n[FUERA DE HORARIO] Actualmente son las ` +
-    `${ahora.getHours()}:${String(ahora.getMinutes()).padStart(2, '0')} ` +
-    `(horario de México). Estamos cerrados. ` +
+    `\n\n[FUERA DE HORARIO] Son las ` +
+    `${ahora.getHours()}:${String(ahora.getMinutes()).padStart(2, '0')} México. Estamos cerrados. ` +
     `Horario: Lun-Vie 10am-7pm, Sáb-Dom 10am-5pm. ` +
-    `Si el cliente quiere cotizar envío o pide cotización especial, ` +
-    `dile amablemente que NO podemos cotizarla ahorita porque ya no estamos atendiendo, ` +
-    `pero que mañana a partir de las 10am con gusto le damos el costo. ` +
-    `Si quiere armar su ramo, sí puedes enviarle el cotizador web. ` +
-    `Toma nota de lo que necesita para no perder el hilo.`
+    `Si el cliente quiere cotizar envío o algo especial, dile que mañana a las 10am con gusto le ayudamos. ` +
+    `Para armar su ramo, sí puede usar el cotizador web ahora. Toma nota de lo que necesita.`
   )
 }
 
 // ════════════════════════════════════════════════════════════════
-// NÚMERO REAL DEL CONTACTO (Extracción profunda para evadir LIDs)
+// NÚMERO REAL DEL CONTACTO
 // ════════════════════════════════════════════════════════════════
 
 const CACHE_NUMEROS = new Map<string, string>()
 
 async function obtenerNumeroReal(message: any): Promise<string> {
   const raw = message.from as string
-
-  // Si ya lo tenemos, usar caché
   if (CACHE_NUMEROS.has(raw)) return CACHE_NUMEROS.get(raw)!
+
+  // FIX: limpiar caché si crece demasiado (previene leak)
+  if (CACHE_NUMEROS.size > 500) CACHE_NUMEROS.clear()
 
   try {
     const contact = await Promise.race([
@@ -104,16 +95,11 @@ async function obtenerNumeroReal(message: any): Promise<string> {
       new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
     ]) as any
 
-    // Intentar sacar el número real (evitando el LID en lo posible)
-    // contact?.id?.user suele tener el número real en cuentas multi-dispositivo
-    let num = contact?.id?.user || contact?.number || raw.replace(/@[^\s]*/g, '').trim()
-
-    // Formatear a estándar internacional si es de México
-    const real = num.startsWith('52') ? `+${num}` : num
+    const num  = contact?.id?.user || contact?.number || raw.replace(/@[^\s]*/g, '').trim()
+    const real = String(num).startsWith('52') ? `+${num}` : String(num)
     CACHE_NUMEROS.set(raw, real)
     return real
-  } catch { 
-    // Fallback absoluto
+  } catch {
     const limpio = raw.replace(/@[^\s]*/g, '').trim()
     const numero = limpio.startsWith('52') ? `+${limpio}` : limpio
     CACHE_NUMEROS.set(raw, numero)
@@ -141,30 +127,35 @@ function detectarFrustracion(texto: string): boolean {
 }
 
 // ════════════════════════════════════════════════════════════════
-// PAUSA DEL BOT (modo humano)
+// PAUSA DEL BOT
 // ════════════════════════════════════════════════════════════════
 
-let BOT_PAUSADO      = false
-let ultimaVerifPausa = 0
-const PAUSA_CACHE_MS = 30_000
+let BOT_PAUSADO        = false
+let ultimaVerifPausa   = 0
+let verificacionEnCurso = false // FIX: mutex para evitar llamadas concurrentes a Supabase
+const PAUSA_CACHE_MS   = 30_000
 
 async function verificarSiBotPausado(): Promise<boolean> {
   if (Date.now() - ultimaVerifPausa < PAUSA_CACHE_MS) return BOT_PAUSADO
+  if (verificacionEnCurso) return BOT_PAUSADO // FIX: si ya hay una consulta en curso, usar valor actual
+
+  verificacionEnCurso = true
   try {
     const { data } = await supabaseAdmin
       .from('configuracion_agente').select('bot_pausado').eq('id', 1).single()
     BOT_PAUSADO      = data?.bot_pausado ?? false
     ultimaVerifPausa = Date.now()
   } catch { /* mantener valor anterior */ }
+  finally { verificacionEnCurso = false }
+
   return BOT_PAUSADO
 }
 
 // ════════════════════════════════════════════════════════════════
-// WATCHDOG — detectar desconexión silenciosa
+// WATCHDOG — UNA SOLA DECLARACIÓN (fix: eliminado el duplicado)
 // ════════════════════════════════════════════════════════════════
 
 let ultimaActividad = Date.now()
-
 function registrarActividad(): void { ultimaActividad = Date.now() }
 
 setInterval(async () => {
@@ -182,43 +173,13 @@ setInterval(async () => {
         await whatsappClient.initialize().catch(console.error)
         ultimaActividad = Date.now()
       }
-    } catch (err) { 
-      console.error('[Watchdog] Error crítico detectado:', err) 
-      console.log('💀 Navegador zombie (Detached Frame). Forzando reinicio de Systemd...')
-      process.exit(1) // ← ¡AQUÍ ESTÁ LA LÍNEA MÁGICA!
+    } catch (err) {
+      console.error('[Watchdog] Error crítico — forzando reinicio systemd:', err)
+      process.exit(1) // systemd Restart=always lo levanta limpio
     }
   }
 }, 15 * 60_000)
-// ════════════════════════════════════════════════════════════════
-// WATCHDOG — detectar desconexión silenciosa
-// ════════════════════════════════════════════════════════════════
 
-let ultimaActividad = Date.now()
-
-function registrarActividad(): void { ultimaActividad = Date.now() }
-
-setInterval(async () => {
-  const min = Math.round((Date.now() - ultimaActividad) / 60_000)
-  if (min > 30) console.warn(`[Watchdog] ${min} min sin mensajes`)
-
-  if (Date.now() - ultimaActividad > 90 * 60_000) {
-    console.warn('[Watchdog] ⚠️ Verificando conexión...')
-    try {
-      const state = await whatsappClient.getState()
-      if (state !== 'CONNECTED') {
-        console.warn('[Watchdog] 🔄 Reconectando...')
-        await whatsappClient.destroy().catch(console.error)
-        await new Promise(r => setTimeout(r, 3000))
-        await whatsappClient.initialize().catch(console.error)
-        ultimaActividad = Date.now()
-      }
-    } catch (err) { 
-      console.error('[Watchdog] Error crítico detectado:', err) 
-      console.log('💀 Navegador zombie (Detached Frame). Forzando reinicio de Systemd...')
-      process.exit(1) // ← ¡AQUÍ ESTÁ LA LÍNEA MÁGICA!
-    }
-  }
-}, 15 * 60_000)
 // ════════════════════════════════════════════════════════════════
 // MONITOR DE MEMORIA
 // ════════════════════════════════════════════════════════════════
@@ -227,35 +188,36 @@ setInterval(() => {
   const rss  = Math.round(process.memoryUsage().rss      / 1024 / 1024)
   const heap = Math.round(process.memoryUsage().heapUsed / 1024 / 1024)
   console.log(`[RAM] RSS: ${rss}MB | Heap: ${heap}MB`)
+
   if (rss > 440) {
+    console.warn('[RAM] ⚠️ Memoria alta — limpiando...')
     const clientes = Array.from(HISTORIAL_POR_CLIENTE.keys())
     const n = Math.floor(clientes.length * 0.3)
     for (let i = 0; i < n; i++) HISTORIAL_POR_CLIENTE.delete(clientes[i])
     FOTOS_YA_ENVIADAS.clear()
     CACHE_NUMEROS.clear()
     FRUSTRACION_NOTIFICADA.clear()
+    // FIX: también limpiar RATE_TIMESTAMPS en presión de memoria
+    RATE_TIMESTAMPS.clear()
     console.log(`[RAM] 🧹 Limpié ${n} historiales`)
   }
 }, 5 * 60_000)
 
 // ════════════════════════════════════════════════════════════════
-// AUTO-LIMPIEZA PROFUNDA DE CHROMIUM (Anti-colapsos)
+// AUTO-LIMPIEZA CHROMIUM (FIX: destruir CDPSession después de usar)
 // ════════════════════════════════════════════════════════════════
 
 setInterval(async () => {
   try {
     const page = whatsappClient.pupPage
-    if (page) {
-      console.log('[bot] 🧹 Vaciando caché de basura en Chromium...')
-      // Usamos el protocolo de herramientas de desarrollador para limpiar
-      const cdp = await page.target().createCDPSession()
-      await cdp.send('Network.clearBrowserCache')
-      console.log('[bot] ✨ Basura digital eliminada. Servidor ligero.')
-    }
-  } catch (err) {
-    // Si falla silenciosamente porque la página se estaba recargando, lo ignoramos
-  }
-}, 45 * 60_000) // Se ejecuta automáticamente cada 45 minutos
+    if (!page) return
+    console.log('[bot] 🧹 Vaciando caché de Chromium...')
+    const cdp = await page.target().createCDPSession()
+    await cdp.send('Network.clearBrowserCache')
+    await cdp.detach() // FIX: destruir la session para no acumularlas
+    console.log('[bot] ✨ Caché limpia.')
+  } catch { /* ignorar si la página se estaba recargando */ }
+}, 45 * 60_000)
 
 // ════════════════════════════════════════════════════════════════
 // LÍMITES Y RATE LIMITING
@@ -272,7 +234,13 @@ function estaRateLimited(id: string): boolean {
   const ahora     = Date.now()
   const recientes = (RATE_TIMESTAMPS.get(id) ?? []).filter(t => ahora - t < RATE_LIMIT_WINDOW_MS)
   recientes.push(ahora)
-  RATE_TIMESTAMPS.set(id, recientes)
+
+  if (recientes.length === 0) {
+    RATE_TIMESTAMPS.delete(id) // FIX: liberar key cuando no hay actividad reciente
+  } else {
+    RATE_TIMESTAMPS.set(id, recientes)
+  }
+
   return recientes.length > RATE_LIMIT_MAX
 }
 
@@ -331,11 +299,11 @@ function parsearPedidoCotizador(texto: string): PedidoWebParseado {
   }
 
   return {
-    total:     matchTotal  ? `$${matchTotal[1]} MXN`                   : 'Por confirmar',
-    tamano:    matchTamano ? matchTamano[1].trim().replace(/\*/g, '')   : 'Por definir',
-    envoltura: matchEnvolt ? matchEnvolt[1].trim().replace(/\*/g, '')   : 'Incluida',
-    imagenUrl: matchImg    ? matchImg[1]                                : '',
-    nota:      matchNota   ? matchNota[1].trim().replace(/\*/g, '')     : '',
+    total:     matchTotal  ? `$${matchTotal[1]} MXN`                 : 'Por confirmar',
+    tamano:    matchTamano ? matchTamano[1].trim().replace(/\*/g, '') : 'Por definir',
+    envoltura: matchEnvolt ? matchEnvolt[1].trim().replace(/\*/g, '') : 'Incluida',
+    imagenUrl: matchImg    ? matchImg[1]                              : '',
+    nota:      matchNota   ? matchNota[1].trim().replace(/\*/g, '')   : '',
     flores:    flores      || 'Ver imagen de referencia',
     accesorios,
     entrega,
@@ -361,10 +329,11 @@ const KW_CATALOGO = [
   'mas opciones', 'más opciones', 'otros ramos', 'que mas tienen', 'que más tienen',
 ]
 
+// FIX: eliminado 'precio', 'qué precio', 'que precio', 'cuanto sale' — demasiado genéricos
+// y causaban Telegram spam cuando preguntaban por el precio de arreglos del día
 const KW_COTIZADOR = [
   'cotizar', 'cotizacion', 'cotización', 'cuanto cuesta', 'cuánto cuesta',
-  'cuanto vale', 'cuánto vale', 'precio', 'qué precio', 'que precio',
-  'cuanto sale', 'cuánto sale', 'precio de un ramo', 'hacer un ramo',
+  'cuanto vale', 'cuánto vale', 'precio de un ramo', 'hacer un ramo',
   'ramo personalizado', 'armar un ramo', 'pedido especial',
   'tienen web', 'tienes web', 'pagina', 'página', 'diseñar',
 ]
@@ -396,67 +365,34 @@ async function obtenerArreglosConFotos(): Promise<ArregloConFoto[]> {
   } catch (err) { console.error('[bot] Error obteniendo arreglos:', err); return [] }
 }
 
-// ════════════════════════════════════════════════════════════════
-// ARREGLOS DEL DÍA (Versión con búsqueda agresiva y logs)
-// ════════════════════════════════════════════════════════════════
-
 async function apartarArreglo(nombreProducto: string, numeroCliente: string): Promise<void> {
   try {
-    // 1. Limpiamos cualquier espacio basura que haya metido la IA
-    const prodSeguro = nombreProducto ? String(nombreProducto).trim() : 'Desconocido';
-    console.log(`[bot] 🔍 Buscando en DB para apartar: "${prodSeguro}"`);
+    const prodSeguro = nombreProducto ? String(nombreProducto).trim() : 'Desconocido'
+    console.log(`[bot] 🔍 Buscando en DB: "${prodSeguro}"`)
 
     const { data: arreglos, error } = await supabaseAdmin
-      .from('arreglos_diarios')
-      .select('id, nombre, precio')
-      .eq('estado', 'disponible');
+      .from('arreglos_diarios').select('id, nombre, precio').eq('estado', 'disponible')
 
-    if (error) {
-      console.error('[bot] ❌ Error consultando DB:', error.message);
-      return;
-    }
+    if (error) { console.error('[bot] ❌ Error DB:', error.message); return }
+    if (!arreglos?.length) { console.log('[bot] ⚠️ No hay arreglos disponibles.'); return }
 
-    if (!arreglos || arreglos.length === 0) {
-      console.log('[bot] ⚠️ No hay arreglos disponibles en la base de datos.');
-      return;
-    }
-
-    // 2. Normalización súper estricta: minúsculas, sin acentos, sin espacios en las orillas
-    const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
-    const normProd = norm(prodSeguro);
-
-    // 3. Buscar el match
-    const match = arreglos.find(a => { 
-      const n = norm(a.nombre); 
-      // Match si son iguales, o si uno es fragmento del otro
-      return n === normProd || n.includes(normProd) || normProd.includes(n);
-    });
+    const norm     = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
+    const normProd = norm(prodSeguro)
+    const match    = arreglos.find(a => { const n = norm(a.nombre); return n === normProd || n.includes(normProd) || normProd.includes(n) })
 
     if (match) {
-      console.log(`[bot] 🎯 Match encontrado: "${match.nombre}" (ID: ${match.id}). Actualizando estado...`);
-      
       const { error: updateError } = await supabaseAdmin
-        .from('arreglos_diarios')
-        .update({ estado: 'apartado' })
-        .eq('id', match.id);
-
-      if (updateError) throw updateError;
-
-      console.log(`[bot] 📦 ¡EXITO! "${match.nombre}" marcado como apartado en tu Dashboard.`);
-
-      // Notificar a Telegram específicamente que se apartó del inventario
+        .from('arreglos_diarios').update({ estado: 'apartado' }).eq('id', match.id)
+      if (updateError) throw updateError
+      console.log(`[bot] 📦 "${match.nombre}" → apartado`)
       enviarAlertaArregloApartado(match.nombre, match.precio, numeroCliente)
-        .catch(err => console.error('[bot] ❌ Error enviando Telegram de apartado:', err));
-        
+        .catch(err => console.error('[bot] Telegram apartado:', err))
     } else {
-      console.warn(`[bot] ⚠️ El arreglo "${prodSeguro}" NO hizo match con ninguno disponible. Disponibles en DB:`, arreglos.map(a => a.nombre).join(', '));
+      console.warn(`[bot] ⚠️ Sin match para "${prodSeguro}". Disponibles:`, arreglos.map(a => a.nombre).join(', '))
     }
-  } catch (err) { 
-    console.error('[bot] ❌ Error crítico apartando:', err); 
-  }
+  } catch (err) { console.error('[bot] Error apartando:', err) }
 }
 
-// Descargar en paralelo, enviar con delay mínimo
 async function enviarFotosArreglos(client: Client, chatId: string, arreglos: ArregloConFoto[]): Promise<void> {
   if (!arreglos.length) return
 
@@ -474,17 +410,15 @@ async function enviarFotosArreglos(client: Client, chatId: string, arreglos: Arr
       const caption =
         `💐 *${r.arreglo.nombre}*\n💰 $${r.arreglo.precio.toFixed(2)} MXN` +
         (r.arreglo.descripcion ? `\n📝 ${r.arreglo.descripcion}` : '')
-      
       await client.sendMessage(chatId, r.media, { caption })
-      await new Promise(res => setTimeout(res, 600)) // delay mínimo entre fotos
-    } catch (err) { 
-      const errorStr = String(err)
-      // Si la página se recargó a la mitad, abortar el resto de fotos para no ensuciar la consola
-      if (errorStr.includes('Execution context was destroyed') || errorStr.includes('Target closed')) {
-        console.warn(`[bot] ⚠️ WhatsApp se recargó mientras se enviaban fotos a ${chatId}. Abortando lote.`)
-        break // Salimos del ciclo
+      await new Promise(res => setTimeout(res, 600))
+    } catch (err) {
+      const errStr = String(err)
+      if (errStr.includes('Execution context was destroyed') || errStr.includes('Target closed')) {
+        console.warn(`[bot] ⚠️ Recarga durante envío de fotos a ${chatId}. Abortando lote.`)
+        break
       }
-      console.error(`[bot] Error enviando "${r.arreglo.nombre}":`, err) 
+      console.error(`[bot] Error enviando "${r.arreglo.nombre}":`, err)
     }
   }
 }
@@ -501,7 +435,6 @@ function limpiarRespuestaIA(texto: string): string {
     .trim()
 }
 
-// Delay reducido 50% vs versión anterior
 function calcularDelayEscritura(texto: string): number {
   const base = Math.min(Math.max((texto.length / 200) * 2000, 600), 2500)
   return base + (Math.random() * 300 - 150)
@@ -527,12 +460,10 @@ function getFechaActual(): string {
 // ════════════════════════════════════════════════════════════════
 
 async function procesarPedidoWeb(message: any): Promise<void> {
-  const clienteId  = message.from as string
-  const texto      = message.body as string
-  const chat       = await message.getChat()
-  const pedido     = parsearPedidoCotizador(texto)
-
-  // Número real en paralelo — no bloquea el flujo principal
+  const clienteId        = message.from as string
+  const texto            = message.body as string
+  const chat             = await message.getChat()
+  const pedido           = parsearPedidoCotizador(texto)
   const numeroRealPromise = obtenerNumeroReal(message)
 
   await simularEscritura(chat, 1500)
@@ -547,16 +478,13 @@ async function procesarPedidoWeb(message: any): Promise<void> {
     `Mándame tu comprobante y listo. ¡Con mucho gusto! 🌹`
   )
 
-  // Telegram DESPUÉS de enviar el mensaje (no antes)
   const numeroReal = await numeroRealPromise
   console.log(`[bot] 🛒 Pedido cotizador web de ${numeroReal}`)
-
   enviarAlertaPedidoWeb({
-    numeroCliente: numeroReal,
-    total: pedido.total, entrega: pedido.entrega, flores: pedido.flores,
-    accesorios: pedido.accesorios || undefined, tamano: pedido.tamano,
-    envoltura: pedido.envoltura, nota: pedido.nota || undefined,
-    imagenUrl: pedido.imagenUrl || undefined,
+    numeroCliente: numeroReal, total: pedido.total, entrega: pedido.entrega,
+    flores: pedido.flores, accesorios: pedido.accesorios || undefined,
+    tamano: pedido.tamano, envoltura: pedido.envoltura,
+    nota: pedido.nota || undefined, imagenUrl: pedido.imagenUrl || undefined,
   }).catch(err => console.error('[bot] Telegram pedido web:', err))
 }
 
@@ -568,33 +496,25 @@ async function procesarMensaje(message: any): Promise<void> {
   const clienteId    = message.from as string
   let   textoCliente = (message.body as string).trim()
 
-  if (textoCliente.length > MAX_LONGITUD_MENSAJE) {
-    textoCliente = textoCliente.slice(0, MAX_LONGITUD_MENSAJE)
-  }
+  if (textoCliente.length > MAX_LONGITUD_MENSAJE) textoCliente = textoCliente.slice(0, MAX_LONGITUD_MENSAJE)
 
   console.log(`[${new Date().toLocaleTimeString('es-MX')}] 📨 ${clienteId}: ${textoCliente.substring(0, 80)}`)
 
-  // Obtener número real en background — no bloquea el procesamiento
   const numeroRealPromise = obtenerNumeroReal(message)
-
-  // Detectar frustración antes de responder
-  const esFrustrado = detectarFrustracion(textoCliente)
+  const esFrustrado       = detectarFrustracion(textoCliente)
 
   try {
     const chat = await message.getChat()
-
-    // Pausa inicial reducida al 50% (antes 800-1500ms, ahora 400-700ms)
     await new Promise(r => setTimeout(r, 400 + Math.random() * 300))
 
     agregarAlHistorial(clienteId, 'user', textoCliente)
 
-    const intencion    = detectarIntencion(textoCliente)
-    const horario      = getContextoHorario()
+    const intencion     = detectarIntencion(textoCliente)
+    const horario       = getContextoHorario()
     let   contextoExtra = `[Fecha actual: ${getFechaActual()}]${horario}`
     let   arreglosParaEnviar: ArregloConFoto[] = []
-    let   enviarFotos  = false
+    let   enviarFotos   = false
 
-    // ── INVENTARIO ────────────────────────────────────────────────
     if (intencion === 'inventario') {
       const arreglos = await obtenerArreglosConFotos()
       if (arreglos.length > 0) {
@@ -616,77 +536,70 @@ async function procesarMensaje(message: any): Promise<void> {
       }
     }
 
-    // ── CATÁLOGO ──────────────────────────────────────────────────
     else if (intencion === 'catalogo') {
       contextoExtra +=
         `\n\nINSTRUCCION: Envía DIRECTAMENTE: ` +
         `https://drive.google.com/drive/folders/1s7Hs5JKBSezcqVznKwl6TT866UqRCB4N Máximo 2 líneas.`
     }
 
-    // ── COTIZADOR ─────────────────────────────────────────────────
     else if (intencion === 'cotizador') {
       if (!estaEnHorario()) {
         contextoExtra +=
-          `\n\nINSTRUCCION: El cliente quiere cotizar pero estamos fuera de horario. ` +
-          `Para armar su ramo puede usar el cotizador: https://floreria-app-mauve.vercel.app/ ` +
-          `Para cotización de envío, dile amablemente que ahorita ya no podemos cotizarlo, ` +
-          `pero que mañana a las 10am con gusto le damos el precio. ` +
-          `Toma nota de lo que necesita. Máximo 3 líneas.`
+          `\n\nINSTRUCCION: Fuera de horario. Para armar ramo: https://floreria-app-mauve.vercel.app/ ` +
+          `Para cotizar envío, dile que mañana a las 10am con gusto lo hacemos. Máximo 3 líneas.`
       } else {
         contextoExtra +=
-          `\n\nINSTRUCCION: Primero pregunta si quiere ver los arreglos del día (pueden ser más rápidos). ` +
-          `Si prefiere personalizado, envía: https://floreria-app-mauve.vercel.app/ ` +
-          `Máximo 3 líneas.`
+          `\n\nINSTRUCCION: Primero pregunta si quiere ver arreglos del día (más rápido). ` +
+          `Si prefiere personalizado: https://floreria-app-mauve.vercel.app/ Máximo 3 líneas.`
       }
     }
 
-    // ── IA ────────────────────────────────────────────────────────
     await chat.sendStateTyping()
     const { mensaje, ventaCerrada } = await getAIResponse(obtenerHistorial(clienteId), contextoExtra)
     await chat.clearState()
 
     agregarAlHistorial(clienteId, 'assistant', mensaje)
 
-    // ── ENVIAR RESPUESTA ─────
     const mensajeFinal = limpiarRespuestaIA(mensaje)
     await simularEscritura(chat, calcularDelayEscritura(mensajeFinal))
-    await message.reply(mensajeFinal) // ← primero el cliente
+    await message.reply(mensajeFinal)
 
-    // Obtener número real
     const numeroReal = await numeroRealPromise
 
-    // ── TELEGRAM DESPUÉS DE ENVIAR ────────────────────
-
-    // 🚨 NUEVA ALERTA: Cotización de envío manual
+    // Alerta cotización de envío
     if (mensajeFinal.toLowerCase().includes('verificar el costo')) {
-      enviarAlertaCotizacion(numeroReal, `📍 Requiere cotización de envío.\nDirección dada: ${textoCliente}`)
+      enviarAlertaCotizacion(numeroReal, `📍 Cotización de envío solicitada.\nDirección: ${textoCliente}`)
         .catch(err => console.error('[bot] Telegram envío:', err))
     }
-
-    // Notificar cotización normal (cotizador web)
-    if (intencion === 'cotizador' && !mensajeFinal.toLowerCase().includes('verificar el costo')) {
+    // Alerta cotizador web
+    else if (intencion === 'cotizador') {
       enviarAlertaCotizacion(numeroReal, textoCliente)
         .catch(err => console.error('[bot] Telegram cotizacion:', err))
     }
 
-    // ── VENTA CERRADA ─────────────────────────────────────────────
+    // Frustración
+    if (esFrustrado) {
+      const veces = (FRUSTRACION_NOTIFICADA.get(clienteId) ?? 0) + 1
+      FRUSTRACION_NOTIFICADA.set(clienteId, veces)
+      if (veces <= 2) {
+        enviarAlertaClienteFrustrado(numeroReal, textoCliente)
+          .catch(err => console.error('[bot] Telegram frustración:', err))
+      }
+    }
+
+    // Venta cerrada
     if (ventaCerrada) {
       console.log(`[bot] 🎉 VENTA CERRADA: ${ventaCerrada.cliente} | ${numeroReal}`)
-
       enviarAlertaVentaCerrada({
-        cliente:       ventaCerrada.cliente,
-        producto:      ventaCerrada.producto,
-        total:         ventaCerrada.total,
-        direccion:     ventaCerrada.direccion,
+        cliente: ventaCerrada.cliente, producto: ventaCerrada.producto,
+        total: ventaCerrada.total, direccion: ventaCerrada.direccion,
         numeroCliente: numeroReal,
       }).catch(err => console.error('[bot] Telegram venta:', err))
-
-      // Apartar el arreglo en Supabase y notificar por Telegram
       apartarArreglo(ventaCerrada.producto, numeroReal)
         .catch(err => console.error('[bot] Error apartando:', err))
     }
 
-    // ── FOTOS (solo primera vez del día) ──────────────────────────
+    // Fotos
     if (enviarFotos && arreglosParaEnviar.length > 0) {
       await new Promise(r => setTimeout(r, 500))
       await enviarFotosArreglos(whatsappClient, clienteId, arreglosParaEnviar)
@@ -704,81 +617,71 @@ async function procesarMensaje(message: any): Promise<void> {
 
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error)
-
-    // Errores de contexto/timeout de Puppeteer — no intentar responder con Puppeteer muerto
     const esPuppeteerError =
       errMsg.includes('Execution context was destroyed') ||
       errMsg.includes('Protocol error') ||
       errMsg.includes('Target closed') ||
       errMsg.includes('Session closed') ||
       errMsg.includes('timed out') ||
-      errMsg.includes('getChat') || // ← FIX: Ignorar si el mensaje quedó huérfano por recarga
+      errMsg.includes('getChat') ||
       errMsg.includes('evaluate')
 
     if (esPuppeteerError) {
-      console.warn(`[bot] ⚠️ Recarga de WhatsApp interceptada. El cliente puede reenviar si faltó algo.`)
+      console.warn(`[bot] ⚠️ Recarga de WhatsApp. El cliente puede reenviar.`)
       return
     }
 
     console.error(`[bot] Error con ${clienteId}:`, error)
     try {
-      // Usar un timeout de seguridad
       const chat = await Promise.race([
         message.getChat(),
         new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000))
       ]) as any
       await chat.clearState().catch(() => {})
       await message.reply('Disculpa, tuve un pequeño mareo digital 🌸. ¿Me lo puedes repetir?').catch(() => {})
-    } catch { /* ignorar totalmente si falla la disculpa */ }
+    } catch { /* ignorar */ }
   }
 }
 
+// ════════════════════════════════════════════════════════════════
+// RESCATE DE MENSAJES HUÉRFANOS
+// FIX: espera unificada y await correcto
+// ════════════════════════════════════════════════════════════════
 
-// ════════════════════════════════════════════════════════════════
-// RESCATE DE MENSAJES HUÉRFANOS TRAS RECARGA
-// ════════════════════════════════════════════════════════════════
-async function recuperarMensajesPerdidos() {
-  console.log('[bot] ⏳ Esperando a que el cliente se estabilice (8s)...');
-  // Esperar a que WhatsApp Web termine de cargar la interfaz por debajo
-  await new Promise(r => setTimeout(r, 8000));
+async function recuperarMensajesPerdidos(): Promise<void> {
+  // FIX: espera unificada de 10s (antes eran 8s en ready + 8s dentro = 16s)
+  await new Promise(r => setTimeout(r, 10_000))
 
   try {
-    // Blindaje anti-crasheos: Verificar que seguimos conectados antes de pedir los chats
-    const state = await whatsappClient.getState().catch(() => null);
+    const state = await whatsappClient.getState().catch(() => null)
     if (state !== 'CONNECTED') {
-      console.log('[bot] ⚠️ Cliente no está listo aún o se desconectó. Omitiendo rescate.');
-      return;
+      console.log('[bot] ⚠️ No conectado. Omitiendo rescate.')
+      return
     }
 
-    console.log('[bot] 🧹 Buscando mensajes no leídos tras la recarga...');
-    const chats = await whatsappClient.getChats();
-    
-    // Filtrar chats que tengan mensajes sin leer y que no sean grupos
-    const chatsPendientes = chats.filter(c => c.unreadCount > 0 && !c.isGroup);
+    console.log('[bot] 🧹 Buscando mensajes no leídos...')
+    const chats = await whatsappClient.getChats()
+    const chatsPendientes = chats.filter(c => c.unreadCount > 0 && !c.isGroup)
 
     if (chatsPendientes.length === 0) {
-      console.log('[bot] ✨ Sincronización perfecta. No hay mensajes atrasados.');
-      return;
+      console.log('[bot] ✨ Sin mensajes atrasados.')
+      return
     }
 
-    console.log(`[bot] 📥 Rescatando mensajes de ${chatsPendientes.length} chats...`);
-
+    console.log(`[bot] 📥 Rescatando ${chatsPendientes.length} chats...`)
     for (const chat of chatsPendientes) {
-      // Obtener exactamente la cantidad de mensajes que no hemos leído de ese chat
-      const mensajes = await chat.fetchMessages({ limit: chat.unreadCount });
+      const mensajes = await chat.fetchMessages({ limit: chat.unreadCount })
       for (const msg of mensajes) {
-        // Solo procesar si el mensaje lo envió el cliente (no nosotros)
         if (!msg.fromMe) {
-          console.log(`[bot] ♻️ Inyectando mensaje rescatado de ${chat.id._serialized}`);
-          manejarMensajeEntrante(msg);
+          console.log(`[bot] ♻️ Inyectando mensaje de ${chat.id._serialized}`)
+          manejarMensajeEntrante(msg)
         }
       }
     }
   } catch (err) {
-    console.error('[bot] Error en el rescate de mensajes:', err);
+    console.error('[bot] Error en rescate:', err)
   }
 }
-
 
 // ════════════════════════════════════════════════════════════════
 // CLIENTE DE WHATSAPP
@@ -789,17 +692,15 @@ const whatsappClient = new Client({
     clientId: 'jardin-roce-bot',
     dataPath: process.env.WWEBJS_DATA_PATH || './.wwebjs_auth',
   }),
-  authTimeoutMs: 0, // ← ¡NUEVO! 0 significa "Paciencia infinita, espera a que cargue el servidor"
-  qrMaxRetries: 100,
+  authTimeoutMs: 0,   // paciencia infinita en e2-micro lento
+  qrMaxRetries:  100,
   puppeteer: {
-    headless: true,
-    timeout: 120000,
+    headless:        true,
+    timeout:         120000,
     protocolTimeout: 300000,
     args: [
       '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-      '--disk-cache-size=0',
-      '--media-cache-size=0',
-      '--disable-application-cache',
+      '--disk-cache-size=0', '--media-cache-size=0', '--disable-application-cache',
       '--disable-gpu', '--disable-gpu-sandbox', '--use-gl=swiftshader',
       '--disable-software-rasterizer', '--disable-extensions', '--disable-plugins',
       '--disable-default-apps', '--disable-sync', '--disable-background-networking',
@@ -817,20 +718,15 @@ const whatsappClient = new Client({
 })
 
 whatsappClient.on('qr', async (qr) => {
-  console.log('\n⚡ ¡NUEVO QR EN CONSOLA! Escanéalo ahora:');
-  
-  // Mostrar el QR directamente en la terminal (small: true es clave para que no se deforme)
-  qrcode.generate(qr, { small: true });
-
-  console.log('\n📱 Subiendo también a Supabase como respaldo...');
+  console.log('\n⚡ ¡NUEVO QR! Escanéalo ahora:')
+  qrcode.generate(qr, { small: true })
+  console.log('\n📱 Subiendo a Supabase como respaldo...')
   try {
-    const { error } = await supabaseAdmin.from('configuracion_agente').update({ qr_code: qr }).eq('id', 1);
-    if (error) throw error;
-    console.log('✅ QR guardado en Supabase.');
-  } catch (err) { 
-    console.error('❌ Error QR en Supabase:', err); 
-  }
-});
+    const { error } = await supabaseAdmin.from('configuracion_agente').update({ qr_code: qr }).eq('id', 1)
+    if (error) throw error
+    console.log('✅ QR guardado.')
+  } catch (err) { console.error('❌ Error QR Supabase:', err) }
+})
 
 whatsappClient.on('ready', async () => {
   console.log('\n✅ Bot de Jardín RoCe conectado!')
@@ -844,18 +740,18 @@ whatsappClient.on('ready', async () => {
   try {
     const page = whatsappClient.pupPage
     if (page) {
+      // FIX: remover listeners anteriores antes de añadir uno nuevo
+      // Esto evita acumulación de listeners en cada reconexión
+      page.removeAllListeners('framenavigated')
+
       page.on('framenavigated', async (frame: any) => {
-        if (frame === page.mainFrame()) {
-          console.warn('[bot] 🔄 WhatsApp Web se recargó. Esperando...')
-          await new Promise(r => setTimeout(r, 5000))
-          console.log('[bot] ✅ Página estabilizada.')
-          ultimaActividad = Date.now()
-          
-          // 👇 EL NUEVO CÓDIGO DE RESCATE 👇
-          // Le damos 8 segundos extra a la interfaz web para descargar mensajes atrasados
-          await new Promise(r => setTimeout(r, 8000)) 
-          recuperarMensajesPerdidos()
-        }
+        if (frame !== page.mainFrame()) return
+        console.warn('[bot] 🔄 WhatsApp Web se recargó. Esperando estabilización...')
+        await new Promise(r => setTimeout(r, 5000))
+        console.log('[bot] ✅ Página estabilizada.')
+        ultimaActividad = Date.now()
+        // FIX: await para capturar errores + espera unificada dentro de recuperar
+        recuperarMensajesPerdidos().catch(err => console.error('[bot] Error recuperando:', err))
       })
     }
   } catch (err) { console.warn('[bot] No se pudo registrar framenavigated:', err) }
@@ -868,7 +764,6 @@ whatsappClient.on('disconnected', (reason) => {
   setTimeout(() => { console.log('🔄 Reconectando...'); whatsappClient.initialize().catch(console.error) }, 5000)
 })
 
-// ── UN SOLO manejador ──────────────────────────────────────────────
 function manejarMensajeEntrante(message: any): void {
   registrarActividad()
   console.log(`[DIAG] from: ${message.from} | type: ${message.type} | fromMe: ${message.fromMe}`)
@@ -909,7 +804,11 @@ whatsappClient.on('message_create', manejarMensajeEntrante)
 console.log('🌸 Iniciando bot de Jardín RoCe...')
 whatsappClient.initialize().catch((err) => { console.error('❌ Error:', err); process.exit(1) })
 
-process.on('SIGINT', async () => { console.log('\n⚠️ Cerrando...'); await whatsappClient.destroy().catch(console.error); process.exit(0) })
+process.on('SIGINT', async () => {
+  console.log('\n⚠️ Cerrando...')
+  await whatsappClient.destroy().catch(console.error)
+  process.exit(0)
+})
 process.on('uncaughtException',  (err) => console.error('❌ Excepción:', err))
 process.on('unhandledRejection', (r)   => console.error('❌ Rechazo:', r))
 
