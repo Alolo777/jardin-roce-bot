@@ -22,18 +22,75 @@ import type { MensajeChat } from './lib/ai'
 // HISTORIAL DE CONVERSACIONES
 // ════════════════════════════════════════════════════════════════
 
-const HISTORIAL_POR_CLIENTE = new Map<string, MensajeChat[]>()
 const MAX_TURNOS_HISTORIAL  = 10
+const CACHE_CLIENTE_UUID = new Map<string, string>()
 
-function obtenerHistorial(id: string): MensajeChat[] {
-  if (!HISTORIAL_POR_CLIENTE.has(id)) HISTORIAL_POR_CLIENTE.set(id, [])
-  return HISTORIAL_POR_CLIENTE.get(id)!
+function extraerTelefono(message: any): string {
+  const raw = message.from as string
+  const limpio = raw.replace(/@[^\s]*/g, '').trim()
+  return limpio.startsWith('52') ? `+${limpio}` : limpio
 }
 
-function agregarAlHistorial(id: string, role: 'user' | 'assistant', content: string): void {
-  const h = obtenerHistorial(id)
-  h.push({ role, content })
-  if (h.length > MAX_TURNOS_HISTORIAL * 2) h.splice(0, 2)
+async function obtenerClienteId(telefono: string): Promise<string | null> {
+  const cached = CACHE_CLIENTE_UUID.get(telefono)
+  if (cached) return cached
+
+  try {
+    const { data: existing } = await supabaseAdmin
+      .from('clientes').select('id').eq('telefono', telefono).maybeSingle()
+
+    if (existing) {
+      CACHE_CLIENTE_UUID.set(telefono, existing.id)
+      return existing.id
+    }
+
+    const { data: nuevo } = await supabaseAdmin
+      .from('clientes').insert({ telefono }).select('id').single()
+
+    if (nuevo) {
+      CACHE_CLIENTE_UUID.set(telefono, nuevo.id)
+      return nuevo.id
+    }
+  } catch (err) {
+    console.error('[bot] Error en obtenerClienteId:', err)
+  }
+  return null
+}
+
+async function obtenerHistorial(telefono: string): Promise<MensajeChat[]> {
+  const clienteId = await obtenerClienteId(telefono)
+  if (!clienteId) return []
+
+  try {
+    const { data } = await supabaseAdmin
+      .from('historial_chat').select('rol, contenido')
+      .eq('cliente_id', clienteId)
+      .order('creado_en', { ascending: false })
+      .limit(MAX_TURNOS_HISTORIAL * 2)
+
+    return (data ?? []).reverse().map(m => ({
+      role: m.rol as 'user' | 'assistant',
+      content: m.contenido,
+    }))
+  } catch (err) {
+    console.error('[bot] Error leyendo historial:', err)
+    return []
+  }
+}
+
+async function agregarAlHistorial(telefono: string, role: 'user' | 'assistant', content: string): Promise<void> {
+  const clienteId = await obtenerClienteId(telefono)
+  if (!clienteId) return
+
+  try {
+    await supabaseAdmin.from('historial_chat').insert({
+      cliente_id: clienteId,
+      rol: role,
+      contenido: content,
+    })
+  } catch (err) {
+    console.error('[bot] Error guardando historial:', err)
+  }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -51,6 +108,8 @@ function marcarFotosEnviadas(id: string): void {
   manana.setHours(0, 0, 0, 0)
   setTimeout(() => FOTOS_YA_ENVIADAS.delete(id), manana.getTime() - Date.now())
 }
+
+const MENSAJES_RESCATADOS = new Set<string>()
 
 // ════════════════════════════════════════════════════════════════
 // HORARIO DE ATENCIÓN
@@ -212,15 +271,13 @@ setInterval(() => {
 
   if (rss > 440) {
     console.warn('[RAM] ⚠️ Memoria alta — limpiando...')
-    const clientes = Array.from(HISTORIAL_POR_CLIENTE.keys())
-    const n = Math.floor(clientes.length * 0.3)
-    for (let i = 0; i < n; i++) HISTORIAL_POR_CLIENTE.delete(clientes[i])
+    CACHE_CLIENTE_UUID.clear()
     FOTOS_YA_ENVIADAS.clear()
     CACHE_NUMEROS.clear()
     FRUSTRACION_NOTIFICADA.clear()
-    // FIX: también limpiar RATE_TIMESTAMPS en presión de memoria
     RATE_TIMESTAMPS.clear()
-    console.log(`[RAM] 🧹 Limpié ${n} historiales`)
+    MENSAJES_RESCATADOS.clear()
+    console.log('[RAM] 🧹 Cachés limpiadas')
   }
 }, 5 * 60_000)
 
@@ -369,10 +426,12 @@ const KW_COTIZADOR = [
 function detectarIntencion(texto: string, clienteId: string): 'inventario' | 'catalogo' | 'cotizador' | 'normal' {
   const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 
-  // Si hay fotos pendientes y el usuario responde afirmativo, mostrar inventario
   if (FOTOS_PENDIENTES.has(clienteId)) {
-    const esAfirmativo = /^(s[íi]|ok|dale|va|quiero|enseñame|muestra|si muéstrame)/i.test(n.trim())
-    if (esAfirmativo) return 'inventario'
+    const esAfirmativo = /^(s[ií]+|si+|ok|dale|va|quiero|enseñame|muestra|ci|claro|por favor|porfavor|sip|sii+|ándale|andele|yes|adelante|manda|mandame|envía|enviame|oka+s?|hí|súbelas|súbelos|muéstralos)/i.test(n.trim())
+    if (esAfirmativo) {
+      console.log(`[bot] ✅ Afirmativo detectado para fotos pendientes de ${clienteId}`)
+      return 'inventario'
+    }
   }
 
   if (KW_INVENTARIO.some(k => n.includes(k))) return 'inventario'
@@ -530,6 +589,7 @@ async function procesarPedidoWeb(message: any): Promise<void> {
 
 async function procesarMensaje(message: any): Promise<void> {
   const clienteId    = message.from as string
+  const telefono     = extraerTelefono(message)
   let   textoCliente = (message.body as string).trim()
 
   if (textoCliente.length > MAX_LONGITUD_MENSAJE) textoCliente = textoCliente.slice(0, MAX_LONGITUD_MENSAJE)
@@ -543,15 +603,35 @@ async function procesarMensaje(message: any): Promise<void> {
     const chat = await message.getChat()
     await new Promise(r => setTimeout(r, 400 + Math.random() * 300))
 
-    agregarAlHistorial(clienteId, 'user', textoCliente)
+    await agregarAlHistorial(telefono, 'user', textoCliente)
 
     const intencion     = detectarIntencion(textoCliente, clienteId)
     const horario       = getContextoHorario()
     let contextoExtra   = `[Fecha actual: ${getFechaActual()}]${horario}`
 
-    // Primer mensaje del usuario: inyectar saludo dinámico
-    const historialCompleto = obtenerHistorial(clienteId)
-    if (historialCompleto.length === 1) {
+    // ── Detección de reply a una foto específica ──────────────────
+    let arregloReferenciado: ArregloConFoto | null = null
+    if (message.hasQuotedMsg) {
+      try {
+        const quoted = await message.getQuotedMessage()
+        const quotedText = quoted?.caption || quoted?.body || ''
+        if (quotedText) {
+          const ultimosArreglos = ULTIMOS_ARREGLOS.get(clienteId) ?? []
+          const match = ultimosArreglos.find(a =>
+            quotedText.includes(a.nombre) ||
+            quotedText.includes(a.precio.toFixed(2))
+          )
+          if (match) {
+            arregloReferenciado = match
+            console.log(`[bot] 📸 Cliente respondió a foto de "${match.nombre}"`)
+          }
+        }
+      } catch { /* ignorar si falla getQuotedMessage */ }
+    }
+
+    // ── Saludo dinámico en primer mensaje ─────────────────────────
+    const historialCompleto = await obtenerHistorial(telefono)
+    if (historialCompleto.length === 0) {
       const saludos = [
         'PRESENTATE así: "¡Hola! Soy Flora 🌸, la asistente de Jardín RoCe. ¿En qué te puedo ayudar hoy?"',
         'PRESENTATE así: "Holis 🌷 Soy Flora, tu asistente floral. ¿En qué te ayudo?"',
@@ -562,6 +642,7 @@ async function procesarMensaje(message: any): Promise<void> {
       contextoExtra += `\n\n${saludos[Math.floor(Math.random() * saludos.length)]}` +
         '\nMáximo 2 líneas. NUNCA te presentes de nuevo si ya hay conversación.'
     }
+
     let   arreglosParaEnviar: ArregloConFoto[] = []
     let   enviarFotos   = false
 
@@ -592,18 +673,44 @@ async function procesarMensaje(message: any): Promise<void> {
         `https://drive.google.com/drive/folders/1s7Hs5JKBSezcqVznKwl6TT866UqRCB4N Máximo 2 líneas.`
     }
 
+    // ── COTIZADOR ─────────────────────────────────────────────────
     else if (intencion === 'cotizador') {
+      const arreglosHoy = await obtenerArreglosConFotos()
+
       if (!estaEnHorario()) {
+        if (arreglosHoy.length > 0 && !yaSeEnviaronFotos(clienteId)) {
+          FOTOS_PENDIENTES.set(clienteId, { arreglos: arreglosHoy })
+        }
         contextoExtra +=
           `\n\nINSTRUCCION (Fuera de horario): ` +
           `Primero envía el cotizador: https://floreria-app-mauve.vercel.app/ ` +
-          `Luego ofrécele ver los arreglos disponibles de hoy si los hay. ` +
-          `Para envío complejo: mañana a las 10am confirmamos. Máximo 4 líneas.`
+          `${arreglosHoy.length > 0 ? 'También ofrecele ver las fotos de los ramos del día que sí podemos apartar para mañana.' : ''} ` +
+          `Para envío complejo: confirmamos a las 10am. Máximo 4 líneas.`
       } else {
-        contextoExtra +=
-          `\n\nINSTRUCCION: Primero pregúntale si quiere ver los arreglos del día (entrega inmediata). ` +
-          `Si prefiere personalizado: https://floreria-app-mauve.vercel.app/ Máximo 3 líneas.`
+        if (arreglosHoy.length > 0 && !yaSeEnviaronFotos(clienteId)) {
+          const resumen = arreglosHoy.map((a, i) => `Foto ${i + 1}: "${a.nombre}" — $${a.precio} MXN`).join('\n')
+          FOTOS_PENDIENTES.set(clienteId, { arreglos: arreglosHoy })
+          contextoExtra +=
+            `\n\nINVENTARIO HOY LISTO PARA MOSTRAR:\n${resumen}\n\n` +
+            `INSTRUCCION: Pregunta si quiere ver los arreglos del día (son más rápidos y ya están listos). ` +
+            `Si prefiere personalizado: https://floreria-app-mauve.vercel.app/ Máximo 3 líneas.`
+        } else {
+          contextoExtra +=
+            `\n\nINSTRUCCION: Envía DIRECTAMENTE el cotizador: ` +
+            `https://floreria-app-mauve.vercel.app/ Menciona que puede subir foto de referencia. Máximo 3 líneas.`
+        }
       }
+    }
+
+    // Inyectar contexto del arreglo referenciado si aplica
+    if (arregloReferenciado) {
+      const ultimosArreglos = ULTIMOS_ARREGLOS.get(clienteId) ?? []
+      const lista = ultimosArreglos.map(a => `"${a.nombre}" — $${a.precio} MXN`).join(' | ')
+      contextoExtra +=
+        `\n\n[CLIENTE RESPONDIÓ A LA FOTO DE: "${arregloReferenciado.nombre}" — $${arregloReferenciado.precio} MXN]` +
+        `\n[TODOS LOS ARREGLOS MOSTRADOS: ${lista}]` +
+        `\nINSTRUCCION URGENTE: El cliente eligió ESE arreglo específico. ` +
+        `Confirma nombre y precio en 1 línea y pregunta SOLO: "¿Lo recoges en sucursal o necesitas envío?"`
     }
 
     // Detectar si el usuario está eligiendo un arreglo de la lista mostrada
@@ -627,20 +734,15 @@ async function procesarMensaje(message: any): Promise<void> {
     }
 
     await chat.sendStateTyping()
-    const { mensaje, ventaCerrada } = await getAIResponse(obtenerHistorial(clienteId), contextoExtra)
+    const historialAI = await obtenerHistorial(telefono)
+    const { mensaje, ventaCerrada } = await getAIResponse(historialAI, contextoExtra)
     await chat.clearState()
 
-    agregarAlHistorial(clienteId, 'assistant', mensaje)
+    await agregarAlHistorial(telefono, 'assistant', mensaje)
 
     const mensajeFinal = limpiarRespuestaIA(mensaje)
     await simularEscritura(chat, calcularDelayEscritura(mensajeFinal))
     await message.reply(mensajeFinal)
-
-    // Si la IA preguntó "¿quieres ver arreglos?", marcar fotos pendientes
-    const sugirioVer = /quieres ver|te gustaría ver|te gustaria ver/i.test(mensajeFinal)
-    if (sugirioVer && arreglosParaEnviar.length > 0) {
-      FOTOS_PENDIENTES.set(clienteId, { arreglos: arreglosParaEnviar })
-    }
 
     const numeroReal = await numeroRealPromise
 
@@ -690,7 +792,7 @@ async function procesarMensaje(message: any): Promise<void> {
         marcarFotosEnviadas(clienteId)
 
         const resumenFotos = arreglosFinales.map((a, i) => `Foto ${i + 1}: ${a.nombre} ($${a.precio} MXN)`).join(', ')
-        agregarAlHistorial(clienteId, 'assistant', `[Sistema] Fotos enviadas: ${resumenFotos}`)
+        await agregarAlHistorial(telefono, 'assistant', `[Sistema] Fotos enviadas: ${resumenFotos}`)
         // Guardar lista para matching en próximos mensajes
         ULTIMOS_ARREGLOS.set(clienteId, arreglosFinales)
 
@@ -719,14 +821,23 @@ async function procesarMensaje(message: any): Promise<void> {
     }
 
     console.error(`[bot] Error con ${clienteId}:`, error)
-    try {
-      const chat = await Promise.race([
-        message.getChat(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000))
-      ]) as any
-      await chat.clearState().catch(() => {})
-      await message.reply('Disculpa, tuve un pequeño mareo digital 🌸. ¿Me lo puedes repetir?').catch(() => {})
-    } catch { /* ignorar */ }
+
+    const msgId = (message as any).id?._serialized
+    const esRescatado = msgId && MENSAJES_RESCATADOS.has(msgId)
+
+    if (!esRescatado) {
+      try {
+        const chat = await Promise.race([
+          message.getChat(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000))
+        ]) as any
+        await chat.clearState().catch(() => {})
+        await message.reply('Disculpa, tuve un pequeño mareo digital 🌸. ¿Me lo puedes repetir?').catch(() => {})
+      } catch { /* ignorar */ }
+    } else {
+      MENSAJES_RESCATADOS.delete(msgId!)
+      console.warn(`[bot] ⚠️ Mensaje rescatado falló silenciosamente (sin "mareo digital")`)
+    }
   }
 }
 
@@ -763,7 +874,10 @@ async function recuperarMensajesPerdidos(): Promise<void> {
         const mensajes = await chat.fetchMessages({ limit: chat.unreadCount })
         for (const msg of mensajes) {
           if (!msg.fromMe) {
-            console.log(`[bot] ♻️ Inyectando mensaje de ${chat.id._serialized}`)
+            const msgId = (msg as any).id?._serialized
+            if (msgId) MENSAJES_RESCATADOS.add(msgId)
+
+            console.log(`[bot] ♻️ Inyectando mensaje rescatado de ${chat.id._serialized}`)
             manejarMensajeEntrante(msg)
           }
           await new Promise(r => setTimeout(r, 150))
