@@ -182,10 +182,43 @@ setInterval(async () => {
         await whatsappClient.initialize().catch(console.error)
         ultimaActividad = Date.now()
       }
-    } catch (err) { console.error('[Watchdog]', err) }
+    } catch (err) { 
+      console.error('[Watchdog] Error crítico detectado:', err) 
+      console.log('💀 Navegador zombie (Detached Frame). Forzando reinicio de Systemd...')
+      process.exit(1) // ← ¡AQUÍ ESTÁ LA LÍNEA MÁGICA!
+    }
   }
 }, 15 * 60_000)
+// ════════════════════════════════════════════════════════════════
+// WATCHDOG — detectar desconexión silenciosa
+// ════════════════════════════════════════════════════════════════
 
+let ultimaActividad = Date.now()
+
+function registrarActividad(): void { ultimaActividad = Date.now() }
+
+setInterval(async () => {
+  const min = Math.round((Date.now() - ultimaActividad) / 60_000)
+  if (min > 30) console.warn(`[Watchdog] ${min} min sin mensajes`)
+
+  if (Date.now() - ultimaActividad > 90 * 60_000) {
+    console.warn('[Watchdog] ⚠️ Verificando conexión...')
+    try {
+      const state = await whatsappClient.getState()
+      if (state !== 'CONNECTED') {
+        console.warn('[Watchdog] 🔄 Reconectando...')
+        await whatsappClient.destroy().catch(console.error)
+        await new Promise(r => setTimeout(r, 3000))
+        await whatsappClient.initialize().catch(console.error)
+        ultimaActividad = Date.now()
+      }
+    } catch (err) { 
+      console.error('[Watchdog] Error crítico detectado:', err) 
+      console.log('💀 Navegador zombie (Detached Frame). Forzando reinicio de Systemd...')
+      process.exit(1) // ← ¡AQUÍ ESTÁ LA LÍNEA MÁGICA!
+    }
+  }
+}, 15 * 60_000)
 // ════════════════════════════════════════════════════════════════
 // MONITOR DE MEMORIA
 // ════════════════════════════════════════════════════════════════
