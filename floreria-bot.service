@@ -13,7 +13,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/antedavid00/jardin-roce-bot
+User=cantedavid00
+WorkingDirectory=/home/cantedavid00/jardin-roce-bot
 
 # Node.js: heap limitado a 380MB, GC agresivo
 # NOTA: .env.local lo carga el bot via dotenv, no via EnvironmentFile
