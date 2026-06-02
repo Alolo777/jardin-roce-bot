@@ -16,14 +16,12 @@ Type=simple
 User=antedavid00
 WorkingDirectory=/home/antedavid00/jardin-roce-bot
 
-# Cargar variables de entorno
-EnvironmentFile=/home/antedavid00/jardin-roce-bot/.env.local
-
 # Node.js: heap limitado a 380MB, GC agresivo
-Environment=NODE_OPTIONS=--max-old-space-size=380 --optimize-for-size --max-semi-space-size=32
+# NOTA: .env.local lo carga el bot via dotenv, no via EnvironmentFile
+Environment="NODE_OPTIONS=--max-old-space-size=380 --optimize-for-size --max-semi-space-size=32"
 
-# Comando: usa el script bot:prod para heredar NODE_OPTIONS
-ExecStart=npm run bot:prod
+# Usar PATH completo para que systemd encuentre npm
+ExecStart=/usr/bin/npm run bot:prod
 
 # ═══ Reinicio automático ═══
 Restart=on-failure
