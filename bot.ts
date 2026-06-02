@@ -93,17 +93,30 @@ async function obtenerNumeroReal(message: any): Promise<string> {
   const raw = message.from as string
   if (CACHE_NUMEROS.has(raw)) return CACHE_NUMEROS.get(raw)!
 
-  // FIX: limpiar caché si crece demasiado (previene leak)
   if (CACHE_NUMEROS.size > 500) CACHE_NUMEROS.clear()
 
+  // Detectar @lid (Low-Integrity Device) — el número real requiere más tiempo
+  const esLid = raw.includes('@lid')
+
   try {
+    // Timeout más largo en e2-micro (15s vs 5s) para LIDs
+    const timeoutMs = esLid ? 20_000 : 10_000
     const contact = await Promise.race([
       message.getContact(),
-      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
     ]) as any
 
-    // Preferir contact.number (teléfono real) sobre contact.id.user (ID interno)
-    const num  = contact?.number || contact?.id?.user || raw.replace(/@[^\s]*/g, '').trim()
+    // contact.number tiene el teléfono real; contact.id.user puede ser un LID
+    let num = contact?.number || ''
+
+    // Si contact.number no dio resultado, intentar contact.id.user
+    if (!num || esLid && String(num).length > 13) {
+      num = contact?.id?.user || ''
+    }
+
+    // Último recurso: extraer de message.from
+    if (!num) num = raw.replace(/@[^\s]*/g, '').trim()
+
     const real = String(num).startsWith('52') ? `+${num}` : String(num)
     CACHE_NUMEROS.set(raw, real)
     return real
@@ -319,6 +332,12 @@ function parsearPedidoCotizador(texto: string): PedidoWebParseado {
 }
 
 // ════════════════════════════════════════════════════════════════
+// FOTOS PENDIENTES (cuando la IA pregunta "¿quieres ver?")
+// ════════════════════════════════════════════════════════════════
+
+const FOTOS_PENDIENTES = new Map<string, { arreglos: ArregloConFoto[] }>()
+
+// ════════════════════════════════════════════════════════════════
 // DETECCIÓN DE INTENCIÓN
 // ════════════════════════════════════════════════════════════════
 
@@ -346,8 +365,15 @@ const KW_COTIZADOR = [
   'tienen web', 'tienes web', 'pagina', 'página', 'diseñar',
 ]
 
-function detectarIntencion(texto: string): 'inventario' | 'catalogo' | 'cotizador' | 'normal' {
+function detectarIntencion(texto: string, clienteId: string): 'inventario' | 'catalogo' | 'cotizador' | 'normal' {
   const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
+  // Si hay fotos pendientes y el usuario responde afirmativo, mostrar inventario
+  if (FOTOS_PENDIENTES.has(clienteId)) {
+    const esAfirmativo = /^(s[íi]|ok|dale|va|quiero|enseñame|muestra|si muéstrame)/i.test(n.trim())
+    if (esAfirmativo) return 'inventario'
+  }
+
   if (KW_INVENTARIO.some(k => n.includes(k))) return 'inventario'
   if (KW_CATALOGO.some(k => n.includes(k)))   return 'catalogo'
   if (KW_COTIZADOR.some(k => n.includes(k)))  return 'cotizador'
@@ -437,7 +463,8 @@ async function enviarFotosArreglos(client: Client, chatId: string, arreglos: Arr
 
 function limpiarRespuestaIA(texto: string): string {
   return texto
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$2')
+    .replace(/\[([^\]]*)\]\(([^)]+)\)/g, '$2')
     .replace(/https:\/\/[^\s]+supabase\.co\/storage\/[^\s]*/g, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
@@ -517,7 +544,7 @@ async function procesarMensaje(message: any): Promise<void> {
 
     agregarAlHistorial(clienteId, 'user', textoCliente)
 
-    const intencion     = detectarIntencion(textoCliente)
+    const intencion     = detectarIntencion(textoCliente, clienteId)
     const horario       = getContextoHorario()
     let   contextoExtra = `[Fecha actual: ${getFechaActual()}]${horario}`
     let   arreglosParaEnviar: ArregloConFoto[] = []
@@ -572,6 +599,12 @@ async function procesarMensaje(message: any): Promise<void> {
     await simularEscritura(chat, calcularDelayEscritura(mensajeFinal))
     await message.reply(mensajeFinal)
 
+    // Si la IA preguntó "¿quieres ver arreglos?", marcar fotos pendientes
+    const sugirioVer = /quieres ver|te gustaría ver|te gustaria ver/i.test(mensajeFinal)
+    if (sugirioVer && arreglosParaEnviar.length > 0) {
+      FOTOS_PENDIENTES.set(clienteId, { arreglos: arreglosParaEnviar })
+    }
+
     const numeroReal = await numeroRealPromise
 
     // Alerta cotización de envío
@@ -607,18 +640,25 @@ async function procesarMensaje(message: any): Promise<void> {
         .catch(err => console.error('[bot] Error apartando:', err))
     }
 
-    // Fotos
-    if (enviarFotos && arreglosParaEnviar.length > 0) {
-      await new Promise(r => setTimeout(r, 500))
-      await enviarFotosArreglos(whatsappClient, clienteId, arreglosParaEnviar)
-      marcarFotosEnviadas(clienteId)
+    // Fotos — desde intent detection o desde FOTOS_PENDIENTES
+    const fotosPendientes = FOTOS_PENDIENTES.get(clienteId)
+    const arreglosFinales = arreglosParaEnviar.length > 0 ? arreglosParaEnviar : (fotosPendientes?.arreglos ?? [])
 
-      const resumenFotos = arreglosParaEnviar.map((a, i) => `Foto ${i + 1}: ${a.nombre} ($${a.precio} MXN)`).join(', ')
-      agregarAlHistorial(clienteId, 'assistant', `[Sistema] Fotos enviadas: ${resumenFotos}`)
+    if (enviarFotos || fotosPendientes) {
+      FOTOS_PENDIENTES.delete(clienteId)
 
-      await new Promise(r => setTimeout(r, 600))
-      await simularEscritura(chat, 800)
-      await whatsappClient.sendMessage(clienteId, '¿Alguno te llamó la atención? 🌸\nSolo dime cuál y lo aparto para ti. 🌹')
+      if (arreglosFinales.length > 0) {
+        await new Promise(r => setTimeout(r, 500))
+        await enviarFotosArreglos(whatsappClient, clienteId, arreglosFinales)
+        marcarFotosEnviadas(clienteId)
+
+        const resumenFotos = arreglosFinales.map((a, i) => `Foto ${i + 1}: ${a.nombre} ($${a.precio} MXN)`).join(', ')
+        agregarAlHistorial(clienteId, 'assistant', `[Sistema] Fotos enviadas: ${resumenFotos}`)
+
+        await new Promise(r => setTimeout(r, 600))
+        await simularEscritura(chat, 800)
+        await whatsappClient.sendMessage(clienteId, '¿Alguno te llamó la atención? 🌸\nSolo dime cuál y lo aparto para ti. 🌹')
+      }
     }
 
     console.log(`[${new Date().toLocaleTimeString('es-MX')}] ✅ Listo para ${clienteId}`)
