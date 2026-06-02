@@ -705,7 +705,7 @@ const whatsappClient = new Client({
     headless:        true,
     executablePath:  process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     timeout:         120000,
-    protocolTimeout: 300000,
+    protocolTimeout: 600000,
     args: [
       '--no-sandbox', 
       '--disable-setuid-sandbox', 
