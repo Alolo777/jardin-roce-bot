@@ -20,9 +20,7 @@ export default function PromptPage() {
       setActualizadoEn(data.actualizado_en)
     } catch {
       setMensaje({ tipo: 'error', texto: 'No se pudo cargar el prompt' })
-    } finally {
-      setCargando(false)
-    }
+    } finally { setCargando(false) }
   }
 
   useEffect(() => { cargarPrompt() }, [])
@@ -40,88 +38,104 @@ export default function PromptPage() {
       if (!res.ok) throw new Error(data.error)
       setPromptActual(prompt)
       setActualizadoEn(data.actualizado_en)
-      setMensaje({ tipo: 'exito', texto: '✅ Prompt actualizado. El bot lo usará en la próxima consulta.' })
+      setMensaje({ tipo: 'exito', texto: 'Prompt guardado. Flora lo usará en la próxima conversación.' })
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al guardar'
-      setMensaje({ tipo: 'error', texto: msg })
-    } finally {
-      setGuardando(false)
-    }
+      setMensaje({ tipo: 'error', texto: err instanceof Error ? err.message : 'Error al guardar' })
+    } finally { setGuardando(false) }
   }
 
   const hayCambios = prompt !== promptActual
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-800">🤖 Prompt del Agente IA</h1>
-        <p className="text-gray-500 text-sm mt-1">
-          Edita las instrucciones y reglas de negocio que sigue el agente Flora.
-          Los cambios aplican en tiempo real sin reiniciar el bot.
+        <h1 className="text-2xl font-bold text-gray-800">🧠 Cerebro de Flora</h1>
+        <p className="text-sm text-gray-500 mt-0.5">
+          Estas son las instrucciones que sigue Flora para atender a tus clientes.
+          Los cambios se aplican en tiempo real.
         </p>
       </div>
 
-      {actualizadoEn && (
-        <p className="text-xs text-gray-400">
-          Última actualización: {new Date(actualizadoEn).toLocaleString('es-MX')}
-        </p>
-      )}
-
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-        <div className="flex items-center justify-between mb-3">
-          <label className="text-sm font-medium text-gray-700">System Prompt</label>
-          <span className="text-xs text-gray-400">{prompt.length} caracteres</span>
+      {/* Editor card */}
+      <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-lg border border-emerald-100/80 overflow-hidden">
+        {/* Top bar */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <span className="w-1 h-6 bg-gradient-to-b from-emerald-400 to-teal-400 rounded-full" />
+            <span className="text-sm font-semibold text-gray-700">System Prompt</span>
+          </div>
+          <div className="flex items-center gap-3">
+            {actualizadoEn && (
+              <span className="text-xs text-gray-400 hidden sm:inline">
+                Última edición: {new Date(actualizadoEn).toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
+            <span className="text-xs text-gray-400 font-mono">{prompt.length} caracteres</span>
+          </div>
         </div>
 
-        {cargando ? (
-          <div className="h-64 bg-gray-50 rounded-lg animate-pulse" />
-        ) : (
-          <textarea
-            value={prompt}
-            onChange={e => setPrompt(e.target.value)}
-            rows={16}
-            className="w-full border border-gray-200 rounded-lg px-4 py-3 text-sm font-mono focus:ring-2 focus:ring-rose-400 outline-none resize-y"
-            placeholder="Escribe aquí las instrucciones del agente..."
-          />
-        )}
-
-        <div className="mt-4 flex items-center gap-4">
-          <button
-            onClick={handleGuardar}
-            disabled={guardando || !hayCambios || cargando}
-            className="bg-rose-500 hover:bg-rose-600 disabled:opacity-40 text-white font-medium px-6 py-2.5 rounded-lg transition"
-          >
-            {guardando ? 'Guardando...' : '💾 Guardar Cambios'}
-          </button>
-
-          {hayCambios && !guardando && (
-            <span className="text-xs text-amber-600 bg-amber-50 px-3 py-1.5 rounded-full">
-              ⚠️ Hay cambios sin guardar
-            </span>
+        {/* Textarea */}
+        <div className="p-6">
+          {cargando ? (
+            <div className="h-72 bg-gradient-to-b from-gray-50 to-gray-100 rounded-xl animate-pulse" />
+          ) : (
+            <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
+              rows={18}
+              className="w-full border border-gray-200 rounded-xl px-5 py-4 text-sm font-mono leading-relaxed focus:ring-2 focus:ring-emerald-400 outline-none resize-y bg-emerald-50/10"
+              placeholder="Escribe aquí las instrucciones de Flora..." />
           )}
         </div>
 
+        {/* Bottom bar */}
+        <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50/50">
+          <div className="flex items-center gap-3">
+            <button onClick={handleGuardar} disabled={guardando || !hayCambios || cargando}
+              className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:opacity-40 text-white font-medium px-6 py-2.5 rounded-xl transition shadow-md shadow-emerald-200/30">
+              {guardando ? 'Guardando...' : '💾 Guardar'}
+            </button>
+            {hayCambios && !guardando && (
+              <span className="text-xs text-amber-700 bg-amber-100 px-3 py-1.5 rounded-full font-medium">
+                Sin guardar
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Messages */}
         {mensaje && (
-          <div className={`mt-4 text-sm rounded-lg px-4 py-3 ${
-            mensaje.tipo === 'exito'
-              ? 'bg-green-50 text-green-700'
-              : 'bg-red-50 text-red-600'
-          }`}>
-            {mensaje.texto}
+          <div className={`px-6 pb-6 ${mensaje.tipo === 'exito' ? '' : ''}`}>
+            <div className={`text-sm rounded-xl px-4 py-3 ${
+              mensaje.tipo === 'exito'
+                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                : 'bg-rose-50 text-rose-700 border border-rose-200'
+            }`}>
+              {mensaje.texto}
+            </div>
           </div>
         )}
       </div>
 
-      {/* Guía de tokens */}
-      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
-        <h3 className="font-semibold text-amber-800 mb-2">💡 Token de Venta Cerrada</h3>
-        <p className="text-sm text-amber-700">
-          Para que el bot te notifique por Telegram cuando se cierre una venta,
-          incluye en el prompt la instrucción de usar este token exacto al final del mensaje:
-        </p>
-        <code className="block mt-2 bg-white border border-amber-200 rounded-lg px-3 py-2 text-xs font-mono text-amber-900">
-          {'[VENTA_CERRADA: {nombre_cliente} | {producto} | ${precio} | {direccion}]'}
-        </code>
+      {/* Token guide */}
+      <div className="relative overflow-hidden bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200/60 rounded-2xl p-6">
+        <div className="absolute top-0 right-0 w-24 h-24 bg-amber-200/20 rounded-full -translate-y-1/2 translate-x-1/3" />
+        <div className="relative flex items-start gap-4">
+          <div className="flex-shrink-0 w-10 h-10 bg-amber-200/50 rounded-xl flex items-center justify-center">
+            <span className="text-lg">💡</span>
+          </div>
+          <div>
+            <h3 className="font-semibold text-amber-900 mb-1">Token de Venta Cerrada</h3>
+            <p className="text-sm text-amber-800/80 mb-3">
+              Para que el bot te notifique por Telegram cuando se cierre una venta,
+              incluye esta instrucción al final del mensaje de confirmación:
+            </p>
+            <div className="bg-white/80 backdrop-blur-sm border border-amber-200/60 rounded-xl px-4 py-3">
+              <code className="text-xs font-mono text-amber-900 break-all">
+                {'[VENTA_CERRADA: {nombre} | {producto} | ${precio} | {direccion}]'}
+              </code>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )

@@ -545,6 +545,10 @@ async function procesarMensaje(message: any): Promise<void> {
 
     agregarAlHistorial(clienteId, 'user', textoCliente)
 
+    const intencion     = detectarIntencion(textoCliente, clienteId)
+    const horario       = getContextoHorario()
+    let contextoExtra   = `[Fecha actual: ${getFechaActual()}]${horario}`
+
     // Primer mensaje del usuario: inyectar saludo dinámico
     const historialCompleto = obtenerHistorial(clienteId)
     if (historialCompleto.length === 1) {
@@ -558,10 +562,6 @@ async function procesarMensaje(message: any): Promise<void> {
       contextoExtra += `\n\n${saludos[Math.floor(Math.random() * saludos.length)]}` +
         '\nMáximo 2 líneas. NUNCA te presentes de nuevo si ya hay conversación.'
     }
-
-    const intencion     = detectarIntencion(textoCliente, clienteId)
-    const horario       = getContextoHorario()
-    let   contextoExtra = `[Fecha actual: ${getFechaActual()}]${horario}`
     let   arreglosParaEnviar: ArregloConFoto[] = []
     let   enviarFotos   = false
 
