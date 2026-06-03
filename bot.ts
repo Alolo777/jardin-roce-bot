@@ -982,6 +982,7 @@ const whatsappClient = new Client({
   qrMaxRetries:  100,
   puppeteer: {
     headless:        true,
+    dumpio:          true, //Activar para ver logs detallados de Puppeteer
     executablePath:  process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     timeout:         120000,
     protocolTimeout: 600000, // 10 minutos de paciencia
