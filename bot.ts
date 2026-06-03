@@ -269,28 +269,6 @@ async function verificarSiBotPausado(): Promise<boolean> {
 let ultimaActividad = Date.now()
 function registrarActividad(): void { ultimaActividad = Date.now() }
 
-setInterval(async () => {
-  const min = Math.round((Date.now() - ultimaActividad) / 60_000)
-  if (min > 30) console.warn(`[Watchdog] ${min} min sin mensajes`)
-
-  if (Date.now() - ultimaActividad > 90 * 60_000) {
-    console.warn('[Watchdog] ⚠️ Verificando conexión...')
-    try {
-      const state = await whatsappClient.getState()
-      if (state !== 'CONNECTED') {
-        console.warn('[Watchdog] 🔄 Reconectando...')
-        await whatsappClient.destroy().catch(console.error)
-        await new Promise(r => setTimeout(r, 3000))
-        await whatsappClient.initialize().catch(console.error)
-        ultimaActividad = Date.now()
-      }
-    } catch (err) {
-      console.error('[Watchdog] Error crítico — forzando reinicio systemd:', err)
-      process.exit(1) // systemd Restart=always lo levanta limpio
-    }
-  }
-}, 15 * 60_000)
-
 // ════════════════════════════════════════════════════════════════
 // MONITOR DE MEMORIA
 // ════════════════════════════════════════════════════════════════
@@ -1005,6 +983,28 @@ whatsappClient.on('ready', async () => {
   console.log('\n✅ Bot de Jardín RoCe conectado!')
   console.log('🌸 Flora está escuchando...\n')
   ultimaActividad = Date.now()
+
+  setInterval(async () => {
+    const min = Math.round((Date.now() - ultimaActividad) / 60_000)
+    if (min > 30) console.warn(`[Watchdog] ${min} min sin mensajes`)
+
+    if (Date.now() - ultimaActividad > 90 * 60_000) {
+      console.warn('[Watchdog] ⚠️ Verificando conexión...')
+      try {
+        const state = await whatsappClient.getState()
+        if (state !== 'CONNECTED') {
+          console.warn('[Watchdog] 🔄 Reconectando...')
+          await whatsappClient.destroy().catch(console.error)
+          await new Promise(r => setTimeout(r, 3000))
+          await whatsappClient.initialize().catch(console.error)
+          ultimaActividad = Date.now()
+        }
+      } catch (err) {
+        console.error('[Watchdog] Error crítico — forzando reinicio systemd:', err)
+        process.exit(1)
+      }
+    }
+  }, 15 * 60_000)
 
   try {
     await supabaseAdmin.from('configuracion_agente').update({ qr_code: null }).eq('id', 1)
