@@ -207,6 +207,37 @@ function detectarFrustracion(texto: string): boolean {
 }
 
 // ════════════════════════════════════════════════════════════════
+// UTILIDAD: Encontrar mejor coincidencia de arreglo en texto
+// ════════════════════════════════════════════════════════════════
+
+function encontrarMejorCoincidencia(texto: string, arreglos: ArregloConFoto[]): { arreglo: ArregloConFoto; score: number } | null {
+  const textoLower = texto.toLowerCase()
+
+  // 1. Por precio exacto
+  const precioMatch = texto.match(/\$\s*([\d,]+(?:\.\d{1,2})?)/)
+  if (precioMatch) {
+    const precio = parseFloat(precioMatch[1].replace(/,/g, ''))
+    const exacto = arreglos.find(a => Math.abs(a.precio - precio) < 0.01)
+    if (exacto) return { arreglo: exacto, score: 999 }
+  }
+
+  // 2. Por palabras del nombre (scoring)
+  const palabrasCliente = textoLower.split(/\s+/).filter(p => p.length > 2)
+  if (palabrasCliente.length === 0) return null
+
+  let mejor = { arreglo: arreglos[0], score: 0 }
+  for (const a of arreglos) {
+    const palabrasArreglo = a.nombre.toLowerCase().split(/\s+/).filter(p => p.length > 2)
+    const score = palabrasCliente.filter(pc =>
+      palabrasArreglo.some(pa => pa.includes(pc) || pc.includes(pa))
+    ).length
+    if (score > mejor.score) mejor = { arreglo: a, score }
+  }
+
+  return mejor.score > 0 ? mejor : null
+}
+
+// ════════════════════════════════════════════════════════════════
 // PAUSA DEL BOT
 // ════════════════════════════════════════════════════════════════
 
@@ -716,21 +747,36 @@ async function procesarMensaje(message: any): Promise<void> {
     // Detectar si el usuario está eligiendo un arreglo de la lista mostrada
     const ultimosArreglos = ULTIMOS_ARREGLOS.get(clienteId)
     if (ultimosArreglos?.length && textoCliente.length < 200) {
-      const mencionaPrecio = /\$\s*[\d,]+/.test(textoCliente)
-      const mencionaNombre = ultimosArreglos.some(a => {
-        const palabras = a.nombre.toLowerCase().split(/\s+/)
-        return palabras.some(p => p.length > 2 && textoCliente.toLowerCase().includes(p))
-      })
       const esEleccion = /me gust[oó]|quiero|ese|este|el[^a-zA-Z]|prefiero|me llevo|aparta|reply/i.test(textoCliente)
-      if (mencionaNombre || mencionaPrecio || esEleccion) {
+      const match = encontrarMejorCoincidencia(textoCliente, ultimosArreglos)
+      if (match || esEleccion) {
         const lista = ultimosArreglos.map((a, i) => `"${a.nombre}" — $${a.precio} MXN`).join(' | ')
-        contextoExtra +=
-          `\n\n[ARREGLOS MOSTRADOS: ${lista}]` +
-          `\nINSTRUCCION: El usuario eligió un arreglo por su nombre o precio. ` +
-          `Busca en la lista el que coincida exactamente por nombre O precio. ` +
-          `Confírmalo y pasa DIRECTAMENTE a preguntar si lo recoge o necesita envío. ` +
+        let instruccion = `\n\n[ARREGLOS MOSTRADOS: ${lista}]`
+        if (match && match.score >= 2) {
+          instruccion += `\n[CLIENTE ELIGIÓ: "${match.arreglo.nombre}" — $${match.arreglo.precio} MXN (coincidencia exacta)]`
+        } else if (match) {
+          instruccion += `\n[POSIBLE ELECCIÓN: "${match.arreglo.nombre}" — $${match.arreglo.precio} MXN]`
+        }
+        if (esEleccion) {
+          instruccion += `\n[EXPRESIÓN DE ELECCIÓN DETECTADA: "${textoCliente}"]`
+        }
+        instruccion +=
+          `\nINSTRUCCION: Confirma el nombre y precio exacto del arreglo elegido en 1 línea` +
+          ` y pasa DIRECTAMENTE a preguntar si lo recoge o necesita envío. ` +
           `NO preguntes "cuál te gustó" — el usuario ya lo dijo.`
+        contextoExtra += instruccion
       }
+    }
+
+    // Detectar continuacion de venta (pago/envio)
+    const KW_PAGO = /pago|pagar|transferencia|deposito|depósito|bbva|banco|tarjeta|efectivo|oxxo|okei|okis|okas|ok|va|dale|acuerdo|confirmo|si[^a-zA-Z]|simon|sip|sipo|está bien|esta bien|le pago|voy a pagar|ya pague|ya pagué|comprobante/i.test(textoCliente)
+    if (KW_PAGO && intencion === 'normal') {
+      contextoExtra +=
+        `\n\n[CONTEXTO DE PAGO] El usuario parece estar respondiendo sobre pago o confirmación. ` +
+        `Revisa el historial de la conversación. Si ya se acordó un costo de envío, ` +
+        `SUMA el precio del producto + costo de envío y da el TOTAL. ` +
+        `Proporciona los datos de pago: BBVA | 4152314097305273 | Devi América Cerenil. ` +
+        `Pregunta si ya realizó la transferencia para confirmar.`
     }
 
     await chat.sendStateTyping()
@@ -893,66 +939,53 @@ async function recuperarMensajesPerdidos(): Promise<void> {
 // CLIENTE DE WHATSAPP
 // ════════════════════════════════════════════════════════════════
 
+// 1. Detectamos automáticamente si estamos en el servidor Linux (Google Cloud)
+const isProduction = process.platform === 'linux';
+
+// 2. Asignamos las banderas según el sistema operativo
+const puppeteerArgs = isProduction ? [
+  // Banderas extremas para sobrevivir en Google Cloud
+  '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+  '--disk-cache-size=0', '--media-cache-size=0', '--disable-application-cache',
+  '--disable-gpu', '--disable-gpu-sandbox', '--use-gl=swiftshader',
+  '--disable-accelerated-2d-canvas', '--no-zygote',
+  '--disable-software-rasterizer', '--disable-extensions', '--disable-plugins',
+  '--disable-default-apps', '--disable-sync', '--disable-background-networking',
+  '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows',
+  '--disable-renderer-backgrounding', '--disable-ipc-flooding-protection',
+  '--disable-notifications', '--disable-speech-api', '--disable-print-preview',
+  '--mute-audio', '--hide-scrollbars', '--disable-client-side-phishing-detection',
+  '--disable-hang-monitor', '--disable-prompt-on-repost', '--disable-breakpad',
+  '--no-first-run', '--no-default-browser-check', '--no-pings',
+  '--password-store=basic', '--use-mock-keychain', '--metrics-recording-only',
+  '--js-flags=--max-old-space-size=512',
+  '--disable-features=TranslateUI,BlinkGenPropertyTrees,AudioServiceOutOfProcess',
+  '--single-process',
+  '--disable-component-extensions-with-background-pages',
+  '--disable-component-update',
+  '--safebrowsing-disable-auto-updates',
+  '--disable-domain-reliability',
+  '--disable-backing-store-limit',
+  '--max_old_space_size=256',
+] : [
+  // Banderas relajadas para que funcione perfecto en tu Windows local
+  '--no-sandbox', '--disable-setuid-sandbox'
+];
+
+// 3. Inicializamos el cliente
 const whatsappClient = new Client({
   authStrategy: new LocalAuth({
     clientId: 'jardin-roce-bot',
     dataPath: process.env.WWEBJS_DATA_PATH || './.wwebjs_auth',
   }),
-  authTimeoutMs: 0,   // paciencia infinita en e2-micro lento
+  authTimeoutMs: 0,   // Paciencia infinita
   qrMaxRetries:  100,
   puppeteer: {
     headless:        true,
     executablePath:  process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     timeout:         120000,
-    protocolTimeout: 600000,
-    args: [
-      '--no-sandbox', 
-      '--disable-setuid-sandbox', 
-      '--disable-dev-shm-usage',
-      '--disk-cache-size=0', 
-      '--media-cache-size=0', 
-      '--disable-application-cache',
-      '--disable-gpu', 
-      '--disable-gpu-sandbox', 
-      '--use-gl=swiftshader',
-      '--disable-accelerated-2d-canvas', // Agregado: Apaga renderizado gráfico
-      '--no-zygote',                     // Agregado: Ahorra procesos de memoria base en Linux
-      '--disable-software-rasterizer', 
-      '--disable-extensions', 
-      '--disable-plugins',
-      '--disable-default-apps', 
-      '--disable-sync', 
-      '--disable-background-networking',
-      '--disable-background-timer-throttling', 
-      '--disable-backgrounding-occluded-windows',
-      '--disable-renderer-backgrounding', 
-      '--disable-ipc-flooding-protection',
-      '--disable-notifications', 
-      '--disable-speech-api', 
-      '--disable-print-preview',
-      '--mute-audio', 
-      '--hide-scrollbars', 
-      '--disable-client-side-phishing-detection',
-      '--disable-hang-monitor', 
-      '--disable-prompt-on-repost', 
-      '--disable-breakpad',
-      '--no-first-run', 
-      '--no-default-browser-check', 
-      '--no-pings',
-      '--password-store=basic', 
-      '--use-mock-keychain', 
-      '--metrics-recording-only',
-      '--js-flags=--max-old-space-size=512',
-      '--disable-features=TranslateUI,BlinkGenPropertyTrees,AudioServiceOutOfProcess',
-      // Reducción extrema de memoria para e2-micro
-      '--single-process',                // Un solo proceso Chromium (menos RAM total)
-      '--disable-component-extensions-with-background-pages',
-      '--disable-component-update',
-      '--safebrowsing-disable-auto-updates',
-      '--disable-domain-reliability',
-      '--disable-backing-store-limit',
-      '--max_old_space_size=256',        // Heap de V8 de Chromium limitado a 256MB
-    ],
+    protocolTimeout: 600000, // 10 minutos de paciencia
+    args:            puppeteerArgs, // Pasamos las banderas dinámicas
   },
 })
 
@@ -1008,10 +1041,21 @@ function manejarMensajeEntrante(message: any): void {
   registrarActividad()
   console.log(`[DIAG] from: ${message.from} | type: ${message.type} | fromMe: ${message.fromMe}`)
 
-  if (message.fromMe)     return
   if (message.isGroupMsg) return
   if (!message.from || message.from === 'status@broadcast') return
   if (message.from.includes('@lid') && !message.body?.trim()) return
+
+  // Guardar mensajes enviados desde la cuenta (agente humano) al historial para contexto
+  if (message.fromMe) {
+    const telefonoDestino = message.to
+      ? (message.to as string).replace(/@[^\s]*/g, '').trim()
+      : null
+    if (telefonoDestino && message.body?.trim()) {
+      const num = telefonoDestino.startsWith('52') ? `+${telefonoDestino}` : telefonoDestino
+      agregarAlHistorial(num, 'assistant', `[Agente: ${message.body.trim()}]`)
+    }
+    return
+  }
 
   const clienteId = message.from as string
 
@@ -1069,7 +1113,39 @@ process.on('unhandledRejection', (r)   => console.error('❌ Rechazo:', r))
 import express from 'express'
 const app  = express()
 const port = process.env.BOT_PORT || 10000
+
+app.use((_req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*')
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  res.header('Access-Control-Allow-Headers', 'Content-Type')
+  if (_req.method === 'OPTIONS') return res.sendStatus(200)
+  next()
+})
+app.use(express.json())
+
 app.get('/', (_req, res) => res.send('🌸 Jardín RoCe Bot — en línea.'))
+
+app.post('/pause', (_req, res) => {
+  BOT_PAUSADO = true
+  ultimaVerifPausa = Date.now()
+  console.log('[bot] ⏸️ Pausado vía API')
+  res.json({ ok: true, pausado: true })
+})
+
+app.post('/resume', (_req, res) => {
+  BOT_PAUSADO = false
+  ultimaVerifPausa = Date.now()
+  console.log('[bot] ▶️ Reanudado vía API')
+  res.json({ ok: true, pausado: false })
+})
+
+app.get('/status', (_req, res) => {
+  res.json({
+    pausado: BOT_PAUSADO,
+    connected: whatsappClient?.info ? true : false,
+  })
+})
+
 app.listen(port, () => console.log(`🌐 Servidor web en puerto ${port}`))
 console.log(`⚠️ Bot escuchando en :${port}. Next.js debe usar otro puerto (default 3000).`)
 

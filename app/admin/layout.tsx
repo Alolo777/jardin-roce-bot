@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { createSupabaseBrowserClient } from '@/lib/supabase-client'
+import QRCode from 'qrcode'
 
 function BotonPausa() {
   const [pausado,  setPausado]  = useState(false)
@@ -34,11 +35,12 @@ function BotonPausa() {
     setGuardando(true)
     const nuevo = !pausado
     try {
-      const { error } = await supabase
-        .from('configuracion_agente')
-        .update({ bot_pausado: nuevo })
-        .eq('id', 1)
-      if (error) throw error
+      const res = await fetch('/api/bot/pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pausado: nuevo }),
+      })
+      if (!res.ok) throw new Error(await res.text())
       setPausado(nuevo)
     } catch (err) {
       console.error('Error al cambiar pausa:', err)
@@ -72,6 +74,72 @@ function BotonPausa() {
       </span>
       <span>{guardando ? '...' : pausado ? 'Flora dormida' : 'Flora activa'}</span>
     </button>
+  )
+}
+
+function QrDisplay() {
+  const [qrImage, setQrImage] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const supabase = createSupabaseBrowserClient()
+
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const { data } = await supabase
+          .from('configuracion_agente')
+          .select('qr_code')
+          .eq('id', 1)
+          .single()
+
+        if (data?.qr_code) {
+          const url = await QRCode.toDataURL(data.qr_code, { width: 280, margin: 2, color: { dark: '#1a1a2e', light: '#ffffff' } })
+          setQrImage(url)
+        } else {
+          setQrImage(null)
+          setOpen(false)
+        }
+      } catch { /* silently retry */ }
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    if (open) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [open])
+
+  if (!qrImage) return null
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        onClick={() => setOpen(!open)}
+        title="Escanea QR para vincular WhatsApp"
+        className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 text-amber-200/90 hover:bg-white/10 hover:text-amber-100"
+      >
+        <span className="text-base">📱</span>
+        <span className="hidden sm:inline text-xs">Vincular</span>
+        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-amber-400 rounded-full animate-pulse" />
+      </button>
+
+      {open && (
+        <div className="absolute top-full right-0 mt-2 z-50 bg-white rounded-2xl shadow-2xl border border-amber-100 p-5 flex flex-col items-center">
+          <p className="text-sm font-semibold text-gray-700 mb-3">Vincula WhatsApp</p>
+          <img src={qrImage} alt="QR de WhatsApp" className="rounded-xl" />
+          <p className="text-xs text-gray-400 mt-3 text-center leading-relaxed">
+            Abre WhatsApp en tu celular →<br />
+            Menú ⋮ → WhatsApp Web → Escanea
+          </p>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -128,6 +196,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               })}
               <div className="w-px h-6 bg-white/20 mx-1" />
               <BotonPausa />
+              <QrDisplay />
             </div>
           </div>
         </div>
