@@ -948,7 +948,7 @@ const puppeteerArgs = isProduction ? [
   '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
   '--disk-cache-size=0', '--media-cache-size=0', '--disable-application-cache',
   '--disable-gpu', '--disable-gpu-sandbox', '--use-gl=swiftshader',
-  '--disable-accelerated-2d-canvas', '--no-zygote',
+  '--disable-accelerated-2d-canvas',
   '--disable-software-rasterizer', '--disable-extensions', '--disable-plugins',
   '--disable-default-apps', '--disable-sync', '--disable-background-networking',
   '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows',
