@@ -1024,13 +1024,9 @@ whatsappClient.on('ready', async () => {
       page.removeAllListeners('framenavigated')
       page.on('framenavigated', async (frame: any) => {
         if (frame !== page.mainFrame()) return
-        
-        console.warn('[bot] 🔄 WhatsApp Web recargado por Meta. Reconectando en 5s...')
-        // Esperar 5s para que mensajes en vuelvo terminen, luego reiniciar
-        setTimeout(() => {
-          console.log('💀 Forzando reinicio seguro vía systemd...')
-          process.exit(1)
-        }, 5_000).unref()
+
+        console.warn('[bot] 🔄 WhatsApp Web recargado por Meta. El cliente se reconectará automáticamente...')
+        // No forzar exit — dejar que el propio evento 'disconnected' + reconexión automática maneje esto
       })
     }
   } catch (err) { console.warn('[bot] No se pudo registrar framenavigated:', err) }
