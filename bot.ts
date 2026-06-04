@@ -968,7 +968,10 @@ const whatsappClient = new Client({
   },
 })
 
+let BOT_QR_EMITIDO = false
+
 whatsappClient.on('qr', async (qr) => {
+  BOT_QR_EMITIDO = true
   console.log('\n⚡ ¡NUEVO QR! Escanéalo ahora:')
   qrcode.generate(qr, { small: true })
   console.log('\n📱 Subiendo a Supabase como respaldo...')
@@ -1091,12 +1094,19 @@ whatsappClient.on('message_create', manejarMensajeEntrante)
 console.log('🌸 Iniciando bot de Jardín RoCe...')
 
 // ── Startup Watchdog: si no hay "ready" en 3 minutos, reinicia ──
+// (NO reinicia si ya se emitió un QR — el usuario necesita tiempo para escanear)
 const BOT_START_TIME = Date.now()
 let BOT_READY = false
 
 const startupWatchdog = setInterval(() => {
   const elapsed = Math.round((Date.now() - BOT_START_TIME) / 1000)
   if (BOT_READY) { clearInterval(startupWatchdog); return }
+
+  // Si ya salió QR, esperamos pacientemente a que el usuario escanee
+  if (BOT_QR_EMITIDO) {
+    if (elapsed % 120 < 31) console.log(`[Startup] ⏳ Esperando escaneo QR... (${Math.round(elapsed / 60)} min)`)
+    return
+  }
 
   if (elapsed > 180) {
     console.warn(`[Startup] ⏰ ${elapsed}s sin "ready". Verificando estado...`)
