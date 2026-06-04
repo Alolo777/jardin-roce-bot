@@ -24,7 +24,7 @@ Environment="NODE_OPTIONS=--max-old-space-size=380 --max-semi-space-size=32"
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Chromium path para Puppeteer/WhatsApp Web
-Environment="PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser"
+Environment="PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium"
 ExecStart=npm run bot:prod
 
 # ═══ Reinicio automático ═══
