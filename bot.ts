@@ -980,31 +980,33 @@ whatsappClient.on('qr', async (qr) => {
 })
 
 whatsappClient.on('ready', async () => {
+  BOT_READY = true
   console.log('\n✅ Bot de Jardín RoCe conectado!')
   console.log('🌸 Flora está escuchando...\n')
   ultimaActividad = Date.now()
 
   setInterval(async () => {
     const min = Math.round((Date.now() - ultimaActividad) / 60_000)
-    if (min > 30) console.warn(`[Watchdog] ${min} min sin mensajes`)
+    if (min > 15) console.warn(`[Watchdog] ${min} min sin mensajes — verificando estado...`)
 
-    if (Date.now() - ultimaActividad > 90 * 60_000) {
-      console.warn('[Watchdog] ⚠️ Verificando conexión...')
-      try {
-        const state = await whatsappClient.getState()
-        if (state !== 'CONNECTED') {
-          console.warn('[Watchdog] 🔄 Reconectando...')
-          await whatsappClient.destroy().catch(console.error)
-          await new Promise(r => setTimeout(r, 3000))
-          await whatsappClient.initialize().catch(console.error)
-          ultimaActividad = Date.now()
-        }
-      } catch (err) {
+    // Verificar estado real de la conexión cada 5 minutos
+    try {
+      const state = await whatsappClient.getState()
+      if (state === 'CONNECTED') return // Sigue conectado, no hacer nada
+
+      console.warn(`[Watchdog] ⚠️ Estado: ${state}. Reconnectando...`)
+      await whatsappClient.destroy().catch(console.error)
+      await new Promise(r => setTimeout(r, 3000))
+      await whatsappClient.initialize().catch(console.error)
+      ultimaActividad = Date.now()
+    } catch (err) {
+      // Si getState() lanza error, el cliente está desconectado — forzar reinicio
+      if (min >= 15) {
         console.error('[Watchdog] Error crítico — forzando reinicio systemd:', err)
         process.exit(1)
       }
     }
-  }, 15 * 60_000)
+  }, 5 * 60_000)
 
   try {
     await supabaseAdmin.from('configuracion_agente').update({ qr_code: null }).eq('id', 1)
@@ -1087,6 +1089,29 @@ whatsappClient.on('message_create', manejarMensajeEntrante)
 // ════════════════════════════════════════════════════════════════
 
 console.log('🌸 Iniciando bot de Jardín RoCe...')
+
+// ── Startup Watchdog: si no hay "ready" en 3 minutos, reinicia ──
+const BOT_START_TIME = Date.now()
+let BOT_READY = false
+
+const startupWatchdog = setInterval(() => {
+  const elapsed = Math.round((Date.now() - BOT_START_TIME) / 1000)
+  if (BOT_READY) { clearInterval(startupWatchdog); return }
+
+  if (elapsed > 180) {
+    console.warn(`[Startup] ⏰ ${elapsed}s sin "ready". Verificando estado...`)
+    whatsappClient.getState()
+      .then(state => console.warn(`[Startup] Estado: ${state}`))
+      .catch(err => console.warn(`[Startup] Error getState:`, err))
+
+    // Forzar reconexión completa
+    console.warn('[Startup] 🔄 Forzando reinicio por timeout de inicialización...')
+    clearInterval(startupWatchdog)
+    process.exit(1)
+  }
+}, 30_000)
+startupWatchdog.unref()
+
 whatsappClient.initialize().catch((err) => { console.error('❌ Error:', err); process.exit(1) })
 
 async function gracefulShutdown(signal: string): Promise<void> {
