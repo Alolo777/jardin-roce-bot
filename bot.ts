@@ -937,8 +937,9 @@ const puppeteerArgs = isProduction ? [
   '--no-first-run', '--no-default-browser-check', '--no-pings',
   '--password-store=basic', '--use-mock-keychain', '--metrics-recording-only',
   '--js-flags=--max-old-space-size=512',
-  '--disable-features=TranslateUI,BlinkGenPropertyTrees,AudioServiceOutOfProcess',
-  '--single-process',
+  '--disable-features=TranslateUI,BlinkGenPropertyTrees,AudioServiceOutOfProcess,AudioServiceSandbox',
+  '--use-fake-device-for-media-stream',
+  '--use-fake-ui-for-media-stream',
   '--disable-component-extensions-with-background-pages',
   '--disable-component-update',
   '--safebrowsing-disable-auto-updates',
@@ -989,23 +990,37 @@ whatsappClient.on('ready', async () => {
   ultimaActividad = Date.now()
 
   setInterval(async () => {
-    const min = Math.round((Date.now() - ultimaActividad) / 60_000)
-    if (min > 15) console.warn(`[Watchdog] ${min} min sin mensajes — verificando estado...`)
+    const minSinMensajes = Math.round((Date.now() - ultimaActividad) / 60_000)
 
-    // Verificar estado real de la conexión cada 5 minutos
     try {
       const state = await whatsappClient.getState()
-      if (state === 'CONNECTED') return // Sigue conectado, no hacer nada
 
-      console.warn(`[Watchdog] ⚠️ Estado: ${state}. Reconnectando...`)
-      await whatsappClient.destroy().catch(console.error)
-      await new Promise(r => setTimeout(r, 3000))
-      await whatsappClient.initialize().catch(console.error)
-      ultimaActividad = Date.now()
+      if (state !== 'CONNECTED') {
+        console.warn(`[Watchdog] ⚠️ Estado: ${state}. Reconectando...`)
+        await whatsappClient.destroy().catch(console.error)
+        await new Promise(r => setTimeout(r, 3000))
+        await whatsappClient.initialize().catch(console.error)
+        ultimaActividad = Date.now()
+        return
+      }
+
+      // ZOMBIE DETECTION: conectado pero sin mensajes en horario laboral
+      // Si llevamos 15+ min en horario de atención sin recibir NADA → estado zombie
+      if (minSinMensajes >= 15 && estaEnHorario()) {
+        console.error(`[Watchdog] 🧟 ESTADO ZOMBIE detectado: ${minSinMensajes} min sin mensajes en horario laboral. getState()=CONNECTED pero hooks muertos.`)
+        process.exit(1) // systemd Restart=always lo levanta limpio
+        return
+      }
+
+      // Fuera de horario es normal no recibir mensajes
+      if (minSinMensajes >= 30) {
+        console.log(`[Watchdog] ℹ️ ${minSinMensajes} min sin mensajes (fuera de horario — normal)`)
+      }
+
     } catch (err) {
-      // Si getState() lanza error, el cliente está desconectado — forzar reinicio
-      if (min >= 15) {
-        console.error('[Watchdog] Error crítico — forzando reinicio systemd:', err)
+      // getState() falló — el cliente está desconectado
+      if (minSinMensajes >= 5) {
+        console.error('[Watchdog] Error crítico en getState — forzando reinicio:', err)
         process.exit(1)
       }
     }
@@ -1025,8 +1040,13 @@ whatsappClient.on('ready', async () => {
       page.on('framenavigated', async (frame: any) => {
         if (frame !== page.mainFrame()) return
 
-        console.warn('[bot] 🔄 WhatsApp Web recargado por Meta. El cliente se reconectará automáticamente...')
-        // No forzar exit — dejar que el propio evento 'disconnected' + reconexión automática maneje esto
+        console.warn('[bot] 🔄 WhatsApp Web recargado. Reiniciando en 8s para limpiar hooks...')
+        // Dar tiempo para que mensajes en vuelo terminen antes de matar el proceso
+        const t = setTimeout(() => {
+          console.log('[bot] 💀 Forzando reinicio limpio vía systemd...')
+          process.exit(1)
+        }, 8_000)
+        t.unref() // No bloquear el event loop
       })
     }
   } catch (err) { console.warn('[bot] No se pudo registrar framenavigated:', err) }
