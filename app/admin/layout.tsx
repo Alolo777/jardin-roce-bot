@@ -146,8 +146,8 @@ function QrDisplay() {
 const NAV_LINKS = [
   { href: '/admin/inventario', label: 'Inventario', icon: '🌷' },
   { href: '/admin/prompt', label: 'Cerebro', icon: '🧠' },
-  { href: '/admin/envios', label: 'Envíos', icon: '📍' },
   { href: '/admin/municipios', label: 'Municipios', icon: '🏘️' },
+  { href: '/admin/ignorados', label: 'Silenciados', icon: '🔇' },
 ]
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

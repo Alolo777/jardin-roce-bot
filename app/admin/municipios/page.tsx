@@ -3,6 +3,97 @@
 import { useState, useEffect } from 'react'
 import type { MunicipioEnvio } from '@/lib/types'
 
+function FilaMunicipio({ municipio, onEdit, onDelete }: { municipio: MunicipioEnvio; onEdit: (buscar?: string) => Promise<void>; onDelete: (id: string) => Promise<void> }) {
+  const [editando, setEditando] = useState(false)
+  const [zona, setZona] = useState(municipio.zona)
+  const [precio, setPrecio] = useState(String(municipio.precio_envio))
+  const [guardando, setGuardando] = useState(false)
+
+  async function guardar() {
+    if (zona === municipio.zona && parseFloat(precio) === municipio.precio_envio) {
+      setEditando(false); return
+    }
+    setGuardando(true)
+    try {
+      const res = await fetch(`/api/municipios/${municipio.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zona, precio_envio: parseFloat(precio) }),
+      })
+      if (!res.ok) throw new Error()
+      setEditando(false)
+      onEdit()
+    } catch {
+      setZona(municipio.zona)
+      setPrecio(String(municipio.precio_envio))
+      setEditando(false)
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  if (editando) {
+    return (
+      <tr className="bg-amber-50/50">
+        <td className="px-4 py-3 font-medium text-gray-800">{municipio.municipio}</td>
+        <td className="px-4 py-3 text-gray-500">{municipio.codigo_postal}</td>
+        <td className="px-4 py-3 text-gray-500">{municipio.colonia || '—'}</td>
+        <td className="px-4 py-3">
+          <input type="text" value={zona} onChange={e => setZona(e.target.value)}
+            className="w-full border border-emerald-300 rounded-lg px-2 py-1 text-xs focus:ring-2 focus:ring-emerald-400 outline-none"
+            disabled={guardando} />
+        </td>
+        <td className="px-4 py-3">
+          <input type="number" value={precio} onChange={e => setPrecio(e.target.value)}
+            min="1" step="0.01"
+            className="w-24 ml-auto block text-right border border-emerald-300 rounded-lg px-2 py-1 text-xs focus:ring-2 focus:ring-emerald-400 outline-none"
+            disabled={guardando} />
+        </td>
+        <td className="px-4 py-3 text-right">
+          <div className="flex items-center justify-end gap-1">
+            <button onClick={guardar} disabled={guardando}
+              className="text-xs text-emerald-600 hover:bg-emerald-100 rounded-lg px-2 py-1.5 transition font-medium">
+              {guardando ? '...' : '✓'}
+            </button>
+            <button onClick={() => { setEditando(false); setZona(municipio.zona); setPrecio(String(municipio.precio_envio)) }}
+              className="text-xs text-gray-400 hover:bg-gray-100 rounded-lg px-2 py-1.5 transition">
+              ✕
+            </button>
+          </div>
+        </td>
+      </tr>
+    )
+  }
+
+  return (
+    <tr className="hover:bg-emerald-50/30 transition-colors group">
+      <td className="px-4 py-3 font-medium text-gray-800">{municipio.municipio}</td>
+      <td className="px-4 py-3 text-gray-500">{municipio.codigo_postal}</td>
+      <td className="px-4 py-3 text-gray-500">{municipio.colonia || '—'}</td>
+      <td className="px-4 py-3">
+        <span className="bg-emerald-100 text-emerald-700 text-xs font-medium px-2.5 py-1 rounded-full">
+          {municipio.zona}
+        </span>
+      </td>
+      <td className="px-4 py-3 text-right font-semibold text-gray-800">
+        ${municipio.precio_envio.toFixed(2)}
+      </td>
+      <td className="px-4 py-3 text-right">
+        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={() => setEditando(true)}
+            className="text-xs text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg px-2 py-1.5 transition">
+            Editar
+          </button>
+          <button onClick={() => onDelete(municipio.id)}
+            className="text-xs text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg px-2 py-1.5 transition">
+            Eliminar
+          </button>
+        </div>
+      </td>
+    </tr>
+  )
+}
+
 export default function MunicipiosPage() {
   const [municipios, setMunicipios] = useState<MunicipioEnvio[]>([])
   const [cargando, setCargando] = useState(true)
@@ -249,25 +340,7 @@ export default function MunicipiosPage() {
             </thead>
             <tbody className="divide-y divide-gray-50">
               {municipios.map(m => (
-                <tr key={m.id} className="hover:bg-emerald-50/30 transition-colors">
-                  <td className="px-4 py-3 font-medium text-gray-800">{m.municipio}</td>
-                  <td className="px-4 py-3 text-gray-500">{m.codigo_postal}</td>
-                  <td className="px-4 py-3 text-gray-500">{m.colonia || '—'}</td>
-                  <td className="px-4 py-3">
-                    <span className="bg-emerald-100 text-emerald-700 text-xs font-medium px-2.5 py-1 rounded-full">
-                      {m.zona}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold text-gray-800">
-                    ${m.precio_envio.toFixed(2)}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button onClick={() => eliminar(m.id)}
-                      className="text-xs text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg px-2 py-1.5 transition">
-                      Eliminar
-                    </button>
-                  </td>
-                </tr>
+                <FilaMunicipio key={m.id} municipio={m} onEdit={cargarMunicipios} onDelete={eliminar} />
               ))}
             </tbody>
           </table>

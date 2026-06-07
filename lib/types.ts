@@ -35,6 +35,13 @@ export interface MunicipioEnvio {
   creado_en: string
 }
 
+export interface NumeroIgnorado {
+  id: string
+  numero: string
+  descripcion: string | null
+  creado_en: string
+}
+
 export interface AIResponse {
   mensaje: string               // Texto limpio para enviar al cliente
   ventaCerrada: VentaCerrada | null  // Datos de venta si se detectó el token

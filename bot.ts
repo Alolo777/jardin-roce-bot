@@ -27,6 +27,19 @@ import type { MensajeChat } from './lib/ai'
 
 const MAX_TURNOS_HISTORIAL  = 10
 const CACHE_CLIENTE_UUID = new Map<string, string>()
+let IGNORADOS_CACHE: string[] = []
+let IGNORADOS_ULTIMA = 0
+
+async function cargarIgnorados(): Promise<string[]> {
+  const ahora = Date.now()
+  if (ahora - IGNORADOS_ULTIMA < 60_000) return IGNORADOS_CACHE
+  try {
+    const { data } = await supabaseAdmin.from('numeros_ignorados').select('numero')
+    IGNORADOS_CACHE = (data || []).map(n => n.numero.replace(/\D/g, ''))
+    IGNORADOS_ULTIMA = ahora
+  } catch { /* mantener caché anterior */ }
+  return IGNORADOS_CACHE
+}
 
 function extraerTelefono(message: any): string {
   const raw = message.from as string
@@ -1285,6 +1298,13 @@ function manejarMensajeEntrante(message: any): void {
   if (message.isGroupMsg) return
   if (!message.from || message.from === 'status@broadcast') return
   if (message.from.includes('@lid') && !message.body?.trim()) return
+
+  // Ignorar números silenciados (repartidor, admin, etc.)
+  const numMsg = message.from.replace(/@[^\s]*/g, '').replace(/\D/g, '')
+  if (!message.fromMe && IGNORADOS_CACHE.includes(numMsg)) {
+    console.log(`[bot] 🔇 Número ignorado: ${numMsg}`)
+    return
+  }
 
   // Guardar mensajes enviados desde la cuenta (agente humano) al historial para contexto
   if (message.fromMe) {
