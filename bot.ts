@@ -769,17 +769,19 @@ async function procesarMensaje(message: any): Promise<void> {
     const horario       = getContextoHorario()
     let contextoExtra   = `[Fecha actual: ${getFechaActual()}]${horario}`
 
-    // ── Detección de reply a una foto específica ──────────────────
+    // ── Detección de reply (quote) ────────────────────────────────
     let arregloReferenciado: ArregloConFoto | null = null
+    let textoCitado = ''
     if (message.hasQuotedMsg) {
       try {
         const quoted = await message.getQuotedMessage()
-        const quotedText = quoted?.caption || quoted?.body || ''
-        if (quotedText) {
+        textoCitado = (quoted?.caption || quoted?.body || '').trim()
+        // Intentar emparejar con foto mostrada
+        if (textoCitado) {
           const ultimosArreglos = ULTIMOS_ARREGLOS.get(clienteId) ?? []
           const match = ultimosArreglos.find(a =>
-            quotedText.includes(a.nombre) ||
-            quotedText.includes(a.precio.toFixed(2))
+            textoCitado.includes(a.nombre) ||
+            textoCitado.includes(a.precio.toFixed(2))
           )
           if (match) {
             arregloReferenciado = match
@@ -890,6 +892,13 @@ async function procesarMensaje(message: any): Promise<void> {
         `\n[TODOS LOS ARREGLOS MOSTRADOS: ${lista}]` +
         `\nINSTRUCCION URGENTE: El cliente eligió ESE arreglo específico. ` +
         `Confirma nombre y precio en 1 línea y pregunta SOLO: "¿Lo recoges en sucursal o necesitas envío?"`
+    }
+
+    // ── Contexto genérico de reply (aunque no sea foto) ──────────
+    if (message.hasQuotedMsg && !arregloReferenciado && textoCitado) {
+      contextoExtra +=
+        `\n\n[CLIENTE RESPONDIÓ AL MENSAJE: "${textoCitado.replace(/"/g, "'")}"]` +
+        `\nINSTRUCCION: El usuario respondió específicamente a ese mensaje. Úsalo para entender a qué se refiere.`
     }
 
     // Detectar si el usuario está eligiendo un arreglo de la lista mostrada
