@@ -260,7 +260,7 @@ function encontrarMejorCoincidencia(texto: string, arreglos: ArregloConFoto[]): 
 let BOT_PAUSADO        = false
 let ultimaVerifPausa   = 0
 let verificacionEnCurso = false // FIX: mutex para evitar llamadas concurrentes a Supabase
-const PAUSA_CACHE_MS   = 30_000
+const PAUSA_CACHE_MS   = 5_000
 
 async function verificarSiBotPausado(): Promise<boolean> {
   if (Date.now() - ultimaVerifPausa < PAUSA_CACHE_MS) return BOT_PAUSADO

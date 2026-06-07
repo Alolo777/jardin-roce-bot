@@ -14,13 +14,7 @@ export async function POST(req: NextRequest) {
       .eq('id', 1)
     if (error) throw error
 
-    // Notificar al bot vía su Express interno (no crítico si falla)
-    const botPort = process.env.BOT_PORT || '10000'
-    const endpoint = `http://127.0.0.1:${botPort}/${pausado ? 'pause' : 'resume'}`
-
-    fetch(endpoint, { method: 'POST', signal: AbortSignal.timeout(3000) })
-      .catch(() => console.warn('[api/pause] Bot Express no respondió — igual se sincronizará por Supabase'))
-
+    // El bot lee bot_pausado desde Supabase cada ~30s — no hace falta notificarlo vía Express
     return NextResponse.json({ ok: true, pausado })
   } catch (err) {
     console.error('[api/pause] Error:', err)

@@ -11,6 +11,7 @@ function BotonPausa() {
   const [cargando, setCargando] = useState(true)
   const [guardando, setGuardando] = useState(false)
   const supabase = createSupabaseBrowserClient()
+  const toggled = useRef(false)
 
   useEffect(() => {
     async function cargarEstado() {
@@ -21,7 +22,8 @@ function BotonPausa() {
           .eq('id', 1)
           .single()
         if (error) throw error
-        setPausado(data?.bot_pausado ?? false)
+        // ❗ No sobrescribir si el usuario ya hizo toggle manual
+        if (!toggled.current) setPausado(data?.bot_pausado ?? false)
       } catch (error) {
         console.error('Error al obtener estado de pausa:', error)
       } finally {
@@ -32,8 +34,10 @@ function BotonPausa() {
   }, [])
 
   async function togglePausa() {
+    toggled.current = true
     setGuardando(true)
     const nuevo = !pausado
+    setPausado(nuevo) // optimista: cambiar al instante
     try {
       const res = await fetch('/api/bot/pause', {
         method: 'POST',
@@ -41,8 +45,8 @@ function BotonPausa() {
         body: JSON.stringify({ pausado: nuevo }),
       })
       if (!res.ok) throw new Error(await res.text())
-      setPausado(nuevo)
     } catch (err) {
+      setPausado(!nuevo) // revertir si falló
       console.error('Error al cambiar pausa:', err)
     } finally {
       setGuardando(false)
