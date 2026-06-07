@@ -671,6 +671,8 @@ function limpiarRespuestaIA(texto: string): string {
     .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$2')
     .replace(/\[([^\]]*)\]\(([^)]+)\)/g, '$2')
     .replace(/https:\/\/[^\s]+supabase\.co\/storage\/[^\s]*/g, '')
+    // Eliminar anotaciones internas que la IA a veces reproduce
+    .replace(/\[(?:CLIENTE|CONTEXTO|INSTRUCCION|ARREGLO|TODOS|EXPRESIÓN|POSIBLE)[^\]]*\]\n?/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 }
