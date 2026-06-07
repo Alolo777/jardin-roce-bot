@@ -25,6 +25,16 @@ export interface ZonaEnvio {
   creado_en: string
 }
 
+export interface MunicipioEnvio {
+  id: string
+  municipio: string
+  codigo_postal: string
+  colonia: string | null
+  zona: string
+  precio_envio: number
+  creado_en: string
+}
+
 export interface AIResponse {
   mensaje: string               // Texto limpio para enviar al cliente
   ventaCerrada: VentaCerrada | null  // Datos de venta si se detectó el token

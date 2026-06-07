@@ -123,17 +123,42 @@ export default function PromptPage() {
           <div className="flex-shrink-0 w-10 h-10 bg-amber-200/50 rounded-xl flex items-center justify-center">
             <span className="text-lg">💡</span>
           </div>
-          <div>
+          <div className="flex-1">
             <h3 className="font-semibold text-amber-900 mb-1">Token de Venta Cerrada</h3>
             <p className="text-sm text-amber-800/80 mb-3">
-              Para que el bot te notifique por Telegram cuando se cierre una venta,
-              incluye esta instrucción al final del mensaje de confirmación:
+              Flora genera automáticamente este token al final del mensaje cuando el cliente confirma el pago.
+              No necesitas hacer nada. Si ves que no lo detecta, el bot tiene un fallback que notifica igual.
             </p>
             <div className="bg-white/80 backdrop-blur-sm border border-amber-200/60 rounded-xl px-4 py-3">
               <code className="text-xs font-mono text-amber-900 break-all">
                 {'[VENTA_CERRADA: {nombre} | {producto} | ${precio} | {direccion}]'}
               </code>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Municipios guide */}
+      <div className="relative overflow-hidden bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200/60 rounded-2xl p-6">
+        <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-200/20 rounded-full -translate-y-1/2 translate-x-1/3" />
+        <div className="relative flex items-start gap-4">
+          <div className="flex-shrink-0 w-10 h-10 bg-emerald-200/50 rounded-xl flex items-center justify-center">
+            <span className="text-lg">🏘️</span>
+          </div>
+          <div className="flex-1">
+            <h3 className="font-semibold text-emerald-900 mb-1">Municipios de Envío</h3>
+            <p className="text-sm text-emerald-800/80 mb-1">
+              Ahora puedes importar todos los municipios de Tlaxcala con códigos postales y precios de envío exactos.
+              Ve a la sección <strong>Municipios</strong> en el menú para:
+            </p>
+            <ul className="text-sm text-emerald-700 list-disc list-inside space-y-0.5">
+              <li>Importar tu CSV con columnas: municipio, codigo_postal, zona, precio_envio</li>
+              <li>Agregar municipios manualmente uno por uno</li>
+              <li>Buscar por municipio, colonia o código postal</li>
+            </ul>
+            <p className="text-sm text-emerald-800/80 mt-2">
+              Cuando un cliente mencione su colonia o municipio, el sistema lo buscará automáticamente y le asignará el precio de envío correcto.
+            </p>
           </div>
         </div>
       </div>

@@ -471,7 +471,7 @@ async function obtenerArreglosConFotos(): Promise<ArregloConFoto[]> {
 }
 
 // ════════════════════════════════════════════════════════════════
-// ZONAS DE ENVÍO
+// ZONAS DE ENVÍO (keywords — fallback)
 // ════════════════════════════════════════════════════════════════
 
 interface ZonaEnvioData {
@@ -490,6 +490,58 @@ async function obtenerZonasEnvio(): Promise<ZonaEnvioData[]> {
     cacheZonas = { zonas: data ?? [], ts: ahora }
     return data ?? []
   } catch (err) { console.error('[bot] Error obteniendo zonas:', err); return [] }
+}
+
+// ════════════════════════════════════════════════════════════════
+// MUNICIPIOS DE ENVÍO (datos exactos desde Supabase)
+// ════════════════════════════════════════════════════════════════
+
+interface MunicipioEnvioData {
+  id: string; municipio: string; codigo_postal: string
+  colonia: string | null; zona: string; precio_envio: number
+}
+
+let cacheMunicipios: { data: MunicipioEnvioData[]; ts: number } | null = null
+
+async function obtenerMunicipiosEnvio(): Promise<MunicipioEnvioData[]> {
+  const ahora = Date.now()
+  if (cacheMunicipios && ahora - cacheMunicipios.ts < 120_000) return cacheMunicipios.data
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('municipios_envio').select('*').order('municipio', { ascending: true })
+    if (error) throw error
+    cacheMunicipios = { data: data ?? [], ts: ahora }
+    return data ?? []
+  } catch (err) { console.error('[bot] Error obteniendo municipios:', err); return [] }
+}
+
+async function buscarPrecioEnvio(texto: string): Promise<{ zona: string; precio: number; fuente: string } | null> {
+  const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
+
+  // 1. Buscar en municipios_envio (más preciso)
+  const municipios = await obtenerMunicipiosEnvio()
+  if (municipios.length > 0) {
+    const match = municipios.find(m => {
+      const nomMunicipio = m.municipio.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      const nomColonia = (m.colonia ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      const cp = m.codigo_postal.trim()
+      return n.includes(nomMunicipio) || (nomColonia && n.includes(nomColonia)) || n.includes(cp)
+    })
+    if (match) return { zona: match.zona, precio: match.precio_envio, fuente: 'municipios' }
+  }
+
+  // 2. Fallback: buscar en zonas_envio por palabras clave
+  const zonas = await obtenerZonasEnvio()
+  if (zonas.length > 0) {
+    const zonaMatch = zonas.find(z =>
+      z.palabras_clave.split(',').some(p =>
+        n.includes(p.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''))
+      )
+    )
+    if (zonaMatch) return { zona: zonaMatch.zona, precio: zonaMatch.precio, fuente: 'zonas' }
+  }
+
+  return null
 }
 
 const GOOGLE_MAPS_REGEX = /https?:\/\/(?:www\.)?(?:google\.[a-z]+\/maps|goo\.gl\/maps)[^\s]*/i
@@ -745,31 +797,24 @@ async function procesarMensaje(message: any): Promise<void> {
     // ── GOOGLE MAPS / ZONAS DE ENVÍO ──────────────────────────────
     if (detectarLinkMaps(textoCliente)) {
       const zonas = await obtenerZonasEnvio()
-      if (zonas.length > 0) {
+      const hayMunicipios = cacheMunicipios && cacheMunicipios.data.length > 0
+      if (zonas.length > 0 || hayMunicipios) {
         contextoExtra +=
           `\n\n[CLIENTE COMPARTIÓ LINK DE GOOGLE MAPS]\n` +
           `ZONAS DE ENVÍO DISPONIBLES:\n${formatearZonasParaPrompt(zonas)}\n\n` +
           `INSTRUCCION: Pregunta amablemente el nombre de su colonia o municipio para asignar la zona correcta. ` +
-          `NUNCA inventes el precio del envío, solo di lo que está en las zonas.`
+          `NUNCA inventes el precio del envío, solo di lo que está en las zonas. Cuando el cliente responda con un municipio o colonia, el sistema lo reconocerá automáticamente.`
       } else {
         contextoExtra +=
           `\n\n[CLIENTE COMPARTIÓ LINK DE GOOGLE MAPS]\n` +
           `INSTRUCCION: No hay zonas de envío configuradas. Di: "Déjame verificarlo y te confirmo el costo 🌸"`
       }
     } else {
-      const textoLower = textoCliente.toLowerCase()
-      const zonas = await obtenerZonasEnvio()
-      if (zonas.length > 0) {
-        const zonaMatch = zonas.find(z =>
-          z.palabras_clave.split(',').some(p =>
-            textoLower.includes(p.trim().toLowerCase())
-          )
-        )
-        if (zonaMatch) {
-          contextoExtra +=
-            `\n\n[CLIENTE MENCIONÓ UNA ZONA: "${zonaMatch.zona}" — $${zonaMatch.precio.toFixed(2)} MXN]\n` +
-            `INSTRUCCION: Usa este precio de envío si el cliente pregunta. No lo inventes.`
-        }
+      const envioMatch = await buscarPrecioEnvio(textoCliente)
+      if (envioMatch) {
+        contextoExtra +=
+          `\n\n[CLIENTE MENCIONÓ UNA ZONA: "${envioMatch.zona}" — $${envioMatch.precio.toFixed(2)} MXN (${envioMatch.fuente})]\n` +
+          `INSTRUCCION: Usa este precio de envío exacto. Confirma: "El envío a esa zona cuesta $${envioMatch.precio.toFixed(2)} MXN, ¿te parece bien?" NUNCA inventes precios.`
       }
     }
 
@@ -809,14 +854,16 @@ async function procesarMensaje(message: any): Promise<void> {
     }
 
     // Detectar continuacion de venta (pago/envio)
-    const KW_PAGO = /pago|pagar|transferencia|deposito|depósito|bbva|banco|tarjeta|efectivo|oxxo|okei|okis|okas|ok|va|dale|acuerdo|confirmo|si[^a-zA-Z]|simon|sip|sipo|está bien|esta bien|le pago|voy a pagar|ya pague|ya pagué|comprobante/i.test(textoCliente)
+    const KW_PAGO = /pago|pagar|transferencia|deposito|depósito|bbva|banco|tarjeta|efectivo|oxxo|okei|okis|okas|ok|va|dale|acuerdo|confirmo|si[^a-zA-Z]|simon|sip|sipo|está bien|esta bien|le pago|voy a pagar|ya pague|ya pagué|ya me dijo|listo|comprobante/i.test(textoCliente)
+    const KW_CONFIRMA_PAGO = /ya pague|ya pagué|listo|transfer|comprobante|ya quedó|ya quedo|ya la hice|ya la hizo|ya llegó|ya llego|sipi|si ya|confirmo|confirmado|ya esta pagado/i.test(textoCliente)
+
     if (KW_PAGO && intencion === 'normal') {
       contextoExtra +=
-        `\n\n[CONTEXTO DE PAGO] El usuario parece estar respondiendo sobre pago o confirmación. ` +
-        `Revisa el historial de la conversación. Si ya se acordó un costo de envío, ` +
-        `SUMA el precio del producto + costo de envío y da el TOTAL. ` +
-        `Proporciona los datos de pago: BBVA | 4152314097305273 | Devi América Cerenil. ` +
-        `Pregunta si ya realizó la transferencia para confirmar.`
+        `\n\n[CONTEXTO DE PAGO] El usuario está respondiendo sobre pago o confirmación. ` +
+        `Revisa el historial. Si el usuario YA CONFIRMÓ el pago (dijo "ya pague", "listo", "comprobante", "transfer"): ` +
+        `AGRADECE el pago, confirma que el pedido queda apartado y CIERRA con el token. ` +
+        `NO le pidas más confirmación ni le digas "déjame revisar". ` +
+        `El token [VENTA_CERRADA:...] debe ir AL FINAL de tu mensaje.`
     }
 
     await chat.sendStateTyping()
@@ -863,6 +910,38 @@ async function procesarMensaje(message: any): Promise<void> {
       }).catch(err => console.error('[bot] Telegram venta:', err))
       apartarArreglo(ventaCerrada.producto, numeroReal)
         .catch(err => console.error('[bot] Error apartando:', err))
+    }
+
+    // Fallback: si el cliente confirmó pago pero la IA no generó el token
+    if (!ventaCerrada && KW_CONFIRMA_PAGO && mensajeFinal.length < 150 && !mensajeFinal.includes('?')) {
+      const ultimos = ULTIMOS_ARREGLOS.get(clienteId)
+      const nombreArreglo = ultimos?.[0]?.nombre ?? 'Pedido'
+      const precioArreglo = ultimos?.[0]?.precio ?? 0
+      console.log(`[bot] ⚠️ Cliente confirmó pago pero IA no generó token. Notificando igual.`)
+      enviarAlertaVentaCerrada({
+        cliente: 'Verificar en chat',
+        producto: nombreArreglo,
+        total: `$${precioArreglo.toFixed(2)} MXN`,
+        direccion: 'Por confirmar',
+        numeroCliente: numeroReal,
+      }).catch(err => console.error('[bot] Telegram venta fallback:', err))
+    }
+
+    // Detectar "venta cerrada" explícito del usuario/humano
+    if (/venta\s*cerrada|venta.*cerrada|sale.*closed|closed.*sale/i.test(textoCliente)) {
+      console.log(`[bot] 🚨 Usuario indicó venta cerrada manualmente: ${numeroReal}`)
+      const ultimos = ULTIMOS_ARREGLOS.get(clienteId)
+      const nombreArreglo = ultimos?.[0]?.nombre ?? 'Pedido'
+      const precioArreglo = ultimos?.[0]?.precio ?? 0
+      enviarAlertaVentaCerrada({
+        cliente: 'Manual',
+        producto: nombreArreglo,
+        total: `$${precioArreglo.toFixed(2)} MXN`,
+        direccion: 'Verificar en chat',
+        numeroCliente: numeroReal,
+      }).catch(err => console.error('[bot] Telegram venta manual:', err))
+      apartarArreglo(nombreArreglo, numeroReal)
+        .catch(err => console.error('[bot] Error apartando manual:', err))
     }
 
     // Fotos — desde intent detection o desde FOTOS_PENDIENTES
