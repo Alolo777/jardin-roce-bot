@@ -466,6 +466,7 @@ function parsearPedidoCotizador(texto: string): PedidoWebParseado {
 
 const FOTOS_PENDIENTES = new Map<string, { arreglos: ArregloConFoto[] }>()
 const ULTIMOS_ARREGLOS = new Map<string, ArregloConFoto[]>()
+const VENTAS_CERRADAS  = new Set<string>()
 
 // ════════════════════════════════════════════════════════════════
 // DETECCIÓN DE INTENCIÓN
@@ -497,6 +498,11 @@ const KW_COTIZADOR = [
 
 function detectarIntencion(texto: string, clienteId: string): 'inventario' | 'catalogo' | 'cotizador' | 'normal' {
   const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
+  if (VENTAS_CERRADAS.has(clienteId)) {
+    // Cliente ya compró — no ofrecer inventario ni fotos
+    return 'normal'
+  }
 
   if (FOTOS_PENDIENTES.has(clienteId)) {
     const esAfirmativo = /^(s[ií]+|si+|ok|dale|va|quiero|enseñame|muestra|ci|claro|por favor|porfavor|sip|sii+|ándale|andele|yes|adelante|manda|mandame|envía|enviame|oka+s?|hí|súbelas|súbelos|muéstralos)/i.test(n.trim())
@@ -628,9 +634,29 @@ async function apartarArreglo(nombreProducto: string, numeroCliente: string): Pr
     if (error) { console.error('[bot] ❌ Error DB:', error.message); return }
     if (!arreglos?.length) { console.log('[bot] ⚠️ No hay arreglos disponibles.'); return }
 
-    const norm     = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
+    const quitarEmojis = (s: string) => s.replace(/[\u{1F300}-\u{1F9FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}]/gu, '').trim()
+    const norm     = (s: string) => quitarEmojis(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
     const normProd = norm(prodSeguro)
-    const match    = arreglos.find(a => { const n = norm(a.nombre); return n === normProd || n.includes(normProd) || normProd.includes(n) })
+    const normPals = normProd.split(/\s+/).filter(Boolean)
+
+    let match: { id: string; nombre: string; precio: number } | undefined
+    for (const a of arreglos) {
+      const n = norm(a.nombre)
+      if (n === normProd) { match = a; break }
+    }
+    if (!match) {
+      for (const a of arreglos) {
+        const n = norm(a.nombre)
+        if (n.includes(normProd) || normProd.includes(n)) { match = a; break }
+      }
+    }
+    if (!match && normPals.length >= 2) {
+      for (const a of arreglos) {
+        const n = norm(a.nombre)
+        const aciertos = normPals.filter(p => n.includes(p))
+        if (aciertos.length >= normPals.length * 0.6) { match = a; break }
+      }
+    }
 
     if (match) {
       const { error: updateError } = await supabaseAdmin
@@ -901,6 +927,15 @@ async function procesarMensaje(message: any): Promise<void> {
         `\nINSTRUCCION: El usuario respondió específicamente a ese mensaje. Úsalo para entender a qué se refiere.`
     }
 
+    // ── Cliente con venta ya cerrada ─────────────────────────────
+    if (VENTAS_CERRADAS.has(clienteId)) {
+      contextoExtra +=
+        `\n\n[VENTA YA CERRADA PARA ESTE CLIENTE] El usuario ya completó su compra. ` +
+        `Atiende dudas post-venta (seguimiento, quejas, cambios) pero NO ofrezcas nuevos arreglos ni preguntes "cuál te gustó". ` +
+        `Si pide fotos, dile que su pedido ya está apartado y confirma los detalles.`
+      enviarFotos = false // no enviar fotos nuevas
+    }
+
     // Detectar si el usuario está eligiendo un arreglo de la lista mostrada
     const ultimosArreglos = ULTIMOS_ARREGLOS.get(clienteId)
     if (ultimosArreglos?.length && textoCliente.length < 200) {
@@ -982,6 +1017,8 @@ async function procesarMensaje(message: any): Promise<void> {
       }).catch(err => console.error('[bot] Telegram venta:', err))
       apartarArreglo(ventaCerrada.producto, numeroReal)
         .catch(err => console.error('[bot] Error apartando:', err))
+      VENTAS_CERRADAS.add(clienteId)
+      FOTOS_PENDIENTES.delete(clienteId) // limpiar fotos pendientes
     }
 
     // Fallback: si el cliente confirmó pago pero la IA no generó el token
@@ -1014,10 +1051,12 @@ async function procesarMensaje(message: any): Promise<void> {
       }).catch(err => console.error('[bot] Telegram venta manual:', err))
       apartarArreglo(nombreArreglo, numeroReal)
         .catch(err => console.error('[bot] Error apartando manual:', err))
+      VENTAS_CERRADAS.add(clienteId)
+      FOTOS_PENDIENTES.delete(clienteId)
     }
 
     // Fotos — desde intent detection o desde FOTOS_PENDIENTES
-    const fotosPendientes = FOTOS_PENDIENTES.get(clienteId)
+    const fotosPendientes = VENTAS_CERRADAS.has(clienteId) ? undefined : FOTOS_PENDIENTES.get(clienteId)
     const arreglosFinales = arreglosParaEnviar.length > 0 ? arreglosParaEnviar : (fotosPendientes?.arreglos ?? [])
 
     if (enviarFotos || fotosPendientes) {
