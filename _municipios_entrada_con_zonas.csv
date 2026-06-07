@@ -1,0 +1,1407 @@
+cp,asentamiento,municipio,zona,precio_envio
+90000,Tlaxcala Centro,Tlaxcala,Intermedia,100
+90000,Huertas de San Francisco,Tlaxcala,Intermedia,100
+90006,Universidad Autónoma de Tlaxcala,Tlaxcala,Intermedia,100
+90010,San Buenaventura Atempan,Tlaxcala,Intermedia,100
+90013,Xicohténcatl,Tlaxcala,Intermedia,100
+90014,Vista Malintzi,Tlaxcala,Intermedia,100
+90014,El Bosque,Tlaxcala,Intermedia,100
+90014,Los Potrillos,Tlaxcala,Intermedia,100
+90014,Vista Hermosa,Tlaxcala,Intermedia,100
+90014,Los Causes,Tlaxcala,Intermedia,100
+90014,Magisterial Vista Hermosa,Tlaxcala,Intermedia,100
+90014,Cuarto Señorío,Tlaxcala,Intermedia,100
+90014,Los Volcanes,Tlaxcala,Intermedia,100
+90019,Los Pinos,Tlaxcala,Intermedia,100
+90020,Pensionados Militares,Tlaxcala,Intermedia,100
+90030,Felipe Santiago Xicoténcatl,Tlaxcala,Intermedia,100
+90030,Los Volcanes,Tlaxcala,Intermedia,100
+90030,Las Ánimas,Tlaxcala,Intermedia,100
+90030,Paso de Cortés,Tlaxcala,Intermedia,100
+90030,Cuarto Señoríos,Tlaxcala,Intermedia,100
+90030,Real del Sol,Tlaxcala,Intermedia,100
+90030,Lomas de Coyotepec,Tlaxcala,Intermedia,100
+90030,Las Ánimas,Tlaxcala,Intermedia,100
+90030,Ameyal,Tlaxcala,Intermedia,100
+90030,Residencial Jardines de San Gabriel,Tlaxcala,Intermedia,100
+90030,Villa de los Ángeles,Tlaxcala,Intermedia,100
+90030,Los Girasoles,Tlaxcala,Intermedia,100
+90030,Los Pinos,Tlaxcala,Intermedia,100
+90030,El Real,Tlaxcala,Intermedia,100
+90040,Adolfo López Mateos,Tlaxcala,Intermedia,100
+90050,Ocotlán INFONAVIT,Tlaxcala,Intermedia,100
+90060,San Isidro,Tlaxcala,Intermedia,100
+90062,Xicohténcatl,Tlaxcala,Intermedia,100
+90062,Tlapala,Tlaxcala,Intermedia,100
+90090,Loma Bonita,Tlaxcala,Intermedia,100
+90099,Loma Linda,Tlaxcala,Intermedia,100
+90100,El Mirador,Tlaxcala,Intermedia,100
+90100,Ocotlán,Tlaxcala,Intermedia,100
+90100,Rinconada de Ocotlán,Tlaxcala,Intermedia,100
+90100,San Esteban Tizatlán,Tlaxcala,Intermedia,100
+90100,Las Rosas,Tlaxcala,Intermedia,100
+90100,El Potrero,Tlaxcala,Intermedia,100
+90102,El Sabinal,Tlaxcala,Intermedia,100
+90102,La Cañada,Tlaxcala,Intermedia,100
+90102,San Lucas,Tlaxcala,Intermedia,100
+90102,Las Rosas,Tlaxcala,Intermedia,100
+90102,Mirasol,Tlaxcala,Intermedia,100
+90105,San Lazaro,Tlaxcala,Intermedia,100
+90105,Santa María Ixtulco,Tlaxcala,Intermedia,100
+90105,Tepetlapa,Tlaxcala,Intermedia,100
+90110,Tlayecac,Tlaxcala,Intermedia,100
+90110,San Diego Metepec,Tlaxcala,Intermedia,100
+90110,San Lucas Cuauhtelulpan,Tlaxcala,Intermedia,100
+90110,Santa María Acuitlapilco,Tlaxcala,Intermedia,100
+90110,Balcón de las Ánimas,Tlaxcala,Intermedia,100
+90110,Colinas del Sur,Tlaxcala,Intermedia,100
+90110,Insurgentes,Tlaxcala,Intermedia,100
+90110,San Diego,Tlaxcala,Intermedia,100
+90110,Geo Villas San Diego,Tlaxcala,Intermedia,100
+90110,Xilotzingo,Tlaxcala,Intermedia,100
+90110,Guadalupe,Tlaxcala,Intermedia,100
+90110,Grande,Tlaxcala,Intermedia,100
+90110,El Alto,Tlaxcala,Intermedia,100
+90110,Zapotla,Tlaxcala,Intermedia,100
+90110,Los Pirules,Tlaxcala,Intermedia,100
+90111,San Sebastián Atlahapa,Tlaxcala,Intermedia,100
+90112,San Hipolito Chimalpa,Tlaxcala,Intermedia,100
+90114,La Joya,Tlaxcala,Intermedia,100
+90114,Lomas de Guadalupe,Tlaxcala,Intermedia,100
+90114,Amapotla,Tlaxcala,Intermedia,100
+90114,El Tejocote,Tlaxcala,Intermedia,100
+90114,UAT,Tlaxcala,Intermedia,100
+90114,La Laguna,Tlaxcala,Intermedia,100
+90114,El Rincón o Los Rosales,Tlaxcala,Intermedia,100
+90114,Miraflores,Tlaxcala,Intermedia,100
+90114,Tlacomulco,Tlaxcala,Intermedia,100
+90114,Santa Agueda,Tlaxcala,Intermedia,100
+90114,La Vista,Tlaxcala,Intermedia,100
+90114,La Herradura,Tlaxcala,Intermedia,100
+90114,El Cortijo,Tlaxcala,Intermedia,100
+90114,El Fresno,Tlaxcala,Intermedia,100
+90114,El Rocío,Tlaxcala,Intermedia,100
+90115,La Trinidad Tepehitec,Tlaxcala,Intermedia,100
+90115,San Fernando,Tlaxcala,Intermedia,100
+90115,Esmeralda,Tlaxcala,Intermedia,100
+90115,3 Volcanes,Tlaxcala,Intermedia,100
+90115,El Llanito,Tlaxcala,Intermedia,100
+90115,Del Valle,Tlaxcala,Intermedia,100
+90115,Las Arboledas,Tlaxcala,Intermedia,100
+90115,Puesta del Sol,Tlaxcala,Intermedia,100
+90117,San Gabriel Cuauhtla,Tlaxcala,Intermedia,100
+90117,Bugambilias,Tlaxcala,Intermedia,100
+90118,Tlapancalco,Tlaxcala,Intermedia,100
+90120,Santa Cruz El Porvenir,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90120,Espíritu Santo,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90120,Villa Mariano Matamoros Centro,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90120,Barranco,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90120,Cerro Gordo,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90120,Chapultepec,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90120,La Escondida,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90120,El Calvario,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90120,San José Buenavista,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90120,Ejido Santa Justina Ecatepec,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90120,San José Escandona,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90120,Capula,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90121,La Trinidad Tenexyecac,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90121,Tetlapa,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90121,Analco,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90122,San Diego Xocoyucan,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90123,Santa Justina Ecatepec,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90124,La Soledad,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90125,San Antonio Atotonilco,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90125,Fracción la Virgen,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90125,Las Rositas,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90125,Las Torres,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90125,Miguel Ángel,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90125,Agustín López,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90125,Las Huertas,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90125,La Virgen,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90125,San Cristóbal,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90125,Tláloc,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90126,Santa Inés Tecuexcomac,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90126,San Isidro,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90127,San Antonio Tecóac,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90127,San Antonio Tizostoc,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90128,Arcos Altos,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90128,San Gabriel Popocatla,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90128,Las Moras (Las Moradillas),Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90130,Alpotzonga de Lira y Ortega,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90130,San Carlos,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90130,La Suiza,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90130,Santo Domingo,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90130,Alpotzonga,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90131,La Caridad Cuaxonacayo,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90132,Santa Rosa de Lima,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90133,San Juan Nepopualco,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90133,San Miguel la Presa,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90133,San Cristóbal Oxtotlapango,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90134,San Marcos Jilotepec,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90134,Santiago Xochimilco,Ixtacuixtla de Mariano Matamoros,Intermedia,100
+90135,Santa Ana Nopalucan Centro,Santa Ana Nopalucan,Intermedia,100
+90137,De México,Santa Ana Nopalucan,Intermedia,100
+90137,Guadalupe,Santa Ana Nopalucan,Intermedia,100
+90138,Unidad Deportiva,Santa Ana Nopalucan,Intermedia,100
+90138,Nuevo México,Santa Ana Nopalucan,Intermedia,100
+90139,De Puebla,Santa Ana Nopalucan,Intermedia,100
+90139,El Cerrito,Santa Ana Nopalucan,Intermedia,100
+90139,San Ignacio,Santa Ana Nopalucan,Intermedia,100
+90140,San Mateo Huexoyucan,Panotla,Intermedia,100
+90140,San Nicolás Panotla,Panotla,Intermedia,100
+90140,San Tadeo Huiloapan,Panotla,Intermedia,100
+90140,Primero,Panotla,Intermedia,100
+90140,Segundo,Panotla,Intermedia,100
+90140,Tercero,Panotla,Intermedia,100
+90140,Cuarto,Panotla,Intermedia,100
+90140,Quinto,Panotla,Intermedia,100
+90140,Santa Elena,Panotla,Intermedia,100
+90140,Militar,Panotla,Intermedia,100
+90140,Zona Militar,Panotla,Intermedia,100
+90140,La Virgen,Panotla,Intermedia,100
+90145,Santa Cruz Techachalco,Panotla,Intermedia,100
+90147,San Jorge Tezoquipan,Panotla,Intermedia,100
+90150,Emiliano Zapata,Panotla,Intermedia,100
+90150,Las Ánimas,Panotla,Intermedia,100
+90151,San Ambrosio Texantla,Panotla,Intermedia,100
+90152,Jesús Acatitla,Panotla,Intermedia,100
+90155,Santa Catalina Apatlahco,Panotla,Intermedia,100
+90155,San Francisco Temetzontla,Panotla,Intermedia,100
+90160,Acxotla del Río,Totolac,Intermedia,100
+90160,Los Reyes Quiahuixtlán,Totolac,Intermedia,100
+90160,San Juan Totolac,Totolac,Intermedia,100
+90160,San Miguel Tlamahuco,Totolac,Intermedia,100
+90160,Villa Riverena,Totolac,Intermedia,100
+90160,Cerro del Metecatzi,Totolac,Intermedia,100
+90163,Santiago Tepeticpac,Totolac,Intermedia,100
+90163,Lomas del Sol,Totolac,Intermedia,100
+90163,San Marcos I,Totolac,Intermedia,100
+90163,San Marcos II,Totolac,Intermedia,100
+90163,Tepectipac,Totolac,Intermedia,100
+90163,San Marcos Tepeticpac,Totolac,Intermedia,100
+90164,Zaragoza,Totolac,Intermedia,100
+90164,Ejido Totolac,Totolac,Intermedia,100
+90164,Eucaliptos,Totolac,Intermedia,100
+90165,San Francisco Ocotelulco,Totolac,Intermedia,100
+90166,La Trinidad Chimalpa,Totolac,Intermedia,100
+90166,Chamizal,Totolac,Intermedia,100
+90168,La Candelaria Teotlalpan,Totolac,Intermedia,100
+90168,El Bosque,Totolac,Intermedia,100
+90180,Antorcha Campesina,Tepeyanco,Intermedia,100
+90180,San Cosme Atlamaxac,Tepeyanco,Intermedia,100
+90180,Tepeyanco Centro,Tepeyanco,Intermedia,100
+90180,Santiago Tlacochcalco,Tepeyanco,Intermedia,100
+90180,San Pedro Xalcaltzinco,Tepeyanco,Intermedia,100
+90180,Guerrero,Tepeyanco,Intermedia,100
+90180,Las Águilas,Tepeyanco,Intermedia,100
+90180,Gerardo Franco,Tepeyanco,Intermedia,100
+90182,La Aurora,Tepeyanco,Intermedia,100
+90193,Villas de Santa Isabel,Santa Isabel Xiloxoxtla,Intermedia,100
+90193,Contla,Santa Isabel Xiloxoxtla,Intermedia,100
+90193,Teotitla,Santa Isabel Xiloxoxtla,Intermedia,100
+90193,Chimalpa,Santa Isabel Xiloxoxtla,Intermedia,100
+90193,Quiahuixtla Norte,Santa Isabel Xiloxoxtla,Intermedia,100
+90193,INFONAVIT 5 de Mayo,Santa Isabel Xiloxoxtla,Intermedia,100
+90194,Parque Industrial Xiloxoxtla,Santa Isabel Xiloxoxtla,Intermedia,100
+90194,Quiahuixtla Sur,Santa Isabel Xiloxoxtla,Intermedia,100
+90194,Culhuaca,Santa Isabel Xiloxoxtla,Intermedia,100
+90194,Independencia,Santa Isabel Xiloxoxtla,Intermedia,100
+90195,San Juan Huactzinco,San Juan Huactzinco,Intermedia,100
+90200,Calpulalpan Centro,Calpulalpan,Lejana,150
+90202,Xahuanxolco,Calpulalpan,Lejana,150
+90202,San Rafael,Calpulalpan,Lejana,150
+90202,La Cañada,Calpulalpan,Lejana,150
+90203,El Palmar,Calpulalpan,Lejana,150
+90203,San Pedro,Calpulalpan,Lejana,150
+90203,La Rosa,Calpulalpan,Lejana,150
+90203,Calpulli,Calpulalpan,Lejana,150
+90203,INFONAVIT,Calpulalpan,Lejana,150
+90203,Coesillos,Calpulalpan,Lejana,150
+90203,Loma Bonita,Calpulalpan,Lejana,150
+90203,Trabajadores Federados,Calpulalpan,Lejana,150
+90203,Europa,Calpulalpan,Lejana,150
+90203,Argos,Calpulalpan,Lejana,150
+90203,San Miguel,Calpulalpan,Lejana,150
+90203,Las Dalias,Calpulalpan,Lejana,150
+90204,Villas del Sur,Calpulalpan,Lejana,150
+90204,El Mirador (Las Conchitas),Calpulalpan,Lejana,150
+90204,La Nopalera,Calpulalpan,Lejana,150
+90204,Esmeralda,Calpulalpan,Lejana,150
+90205,La Herradura (El Calvario),Calpulalpan,Lejana,150
+90205,Arboledas,Calpulalpan,Lejana,150
+90205,Los Volcanes,Calpulalpan,Lejana,150
+90205,Pocitos,Calpulalpan,Lejana,150
+90205,San Antonio Calpulalpan,Calpulalpan,Lejana,150
+90205,San Isidro,Calpulalpan,Lejana,150
+90207,Los Ángeles,Calpulalpan,Lejana,150
+90207,Santa Cecilia,Calpulalpan,Lejana,150
+90207,Francisco Sarabia,Calpulalpan,Lejana,150
+90207,Salvador Guarneros,Calpulalpan,Lejana,150
+90207,San Bartolomé del Monte,Calpulalpan,Lejana,150
+90208,El Refugio,Calpulalpan,Lejana,150
+90208,Alfonso Espejel,Calpulalpan,Lejana,150
+90208,Belén,Calpulalpan,Lejana,150
+90208,Nazaret,Calpulalpan,Lejana,150
+90208,Independencia,Calpulalpan,Lejana,150
+90208,Los Pinos,Calpulalpan,Lejana,150
+90210,San Mateo Aticpac,Calpulalpan,Lejana,150
+90210,Amantla,Calpulalpan,Lejana,150
+90210,San Benigno,Calpulalpan,Lejana,150
+90210,Los Tres Hermanos,Calpulalpan,Lejana,150
+90213,Las Palomas,Calpulalpan,Lejana,150
+90218,San Vicente,Calpulalpan,Lejana,150
+90218,Marcelino Cruz,Calpulalpan,Lejana,150
+90218,Las Auras,Calpulalpan,Lejana,150
+90218,El Piñón,Calpulalpan,Lejana,150
+90220,La Soledad,Calpulalpan,Lejana,150
+90220,Mazapa,Calpulalpan,Lejana,150
+90220,Santa Cruz,Calpulalpan,Lejana,150
+90220,Santa Teresa,Calpulalpan,Lejana,150
+90220,La Palma,Calpulalpan,Lejana,150
+90220,Santa Isabel Mixtitlán,Calpulalpan,Lejana,150
+90220,San Francisco,Calpulalpan,Lejana,150
+90220,La Ocotera,Calpulalpan,Lejana,150
+90220,Jacarandas,Calpulalpan,Lejana,150
+90220,Del Venado,Calpulalpan,Lejana,150
+90220,El Cacalote,Calpulalpan,Lejana,150
+90220,Monte de San Agustín,Calpulalpan,Lejana,150
+90220,Hermanos García,Calpulalpan,Lejana,150
+90220,Loma de San Agustín,Calpulalpan,Lejana,150
+90220,Pacheco (De la Rosa),Calpulalpan,Lejana,150
+90220,Analco Dos,Calpulalpan,Lejana,150
+90220,Ángel Pelcastre,Calpulalpan,Lejana,150
+90222,San Felipe Sultepec,Calpulalpan,Lejana,150
+90222,Los Compadres,Calpulalpan,Lejana,150
+90222,La Quebradora,Calpulalpan,Lejana,150
+90222,Los Mogotes,Calpulalpan,Lejana,150
+90224,San Marcos Guaquilpan,Calpulalpan,Lejana,150
+90224,Santiago Cuaula,Calpulalpan,Lejana,150
+90224,San Cristóbal Zacacalco,Calpulalpan,Lejana,150
+90224,La Venta,Calpulalpan,Lejana,150
+90224,El Rosario,Calpulalpan,Lejana,150
+90224,Barranca del Tizar,Calpulalpan,Lejana,150
+90224,Puente del Ocomique,Calpulalpan,Lejana,150
+90225,San Rodrigo,Calpulalpan,Lejana,150
+90225,Los Capulines,Calpulalpan,Lejana,150
+90225,Los Palacios,Calpulalpan,Lejana,150
+90225,Los Pinos,Calpulalpan,Lejana,150
+90225,La Blanca,Calpulalpan,Lejana,150
+90225,San José (Los Hornos),Calpulalpan,Lejana,150
+90226,Finca Guadalupe Velázquez,Calpulalpan,Lejana,150
+90226,San Juan Temazcales,Calpulalpan,Lejana,150
+90226,San José,Calpulalpan,Lejana,150
+90226,El Carmen,Calpulalpan,Lejana,150
+90226,Zoquiapan,Calpulalpan,Lejana,150
+90226,Gustavo Díaz Ordaz,Calpulalpan,Lejana,150
+90226,Tlazalán,Calpulalpan,Lejana,150
+90226,San Isidro,Calpulalpan,Lejana,150
+90226,El Padrino,Calpulalpan,Lejana,150
+90226,El Triángulo,Calpulalpan,Lejana,150
+90230,Sanctórum,Sanctórum de Lázaro Cárdenas,Intermedia,100
+90231,Francisco Villa,Sanctórum de Lázaro Cárdenas,Intermedia,100
+90231,San Nicolás el Grande,Sanctórum de Lázaro Cárdenas,Intermedia,100
+90231,Juan Antonio,Sanctórum de Lázaro Cárdenas,Intermedia,100
+90231,San Nicolás (Farfán),Sanctórum de Lázaro Cárdenas,Intermedia,100
+90233,Pachuquilla,Sanctórum de Lázaro Cárdenas,Intermedia,100
+90234,Estación Contadero,Sanctórum de Lázaro Cárdenas,Intermedia,100
+90234,Doña Evelia (Los Alpinos),Sanctórum de Lázaro Cárdenas,Intermedia,100
+90234,Esquibajas,Sanctórum de Lázaro Cárdenas,Intermedia,100
+90234,La Garita,Sanctórum de Lázaro Cárdenas,Intermedia,100
+90234,La Presa de Pozuelos,Sanctórum de Lázaro Cárdenas,Intermedia,100
+90234,La Providencia,Sanctórum de Lázaro Cárdenas,Intermedia,100
+90234,Las Palomas,Sanctórum de Lázaro Cárdenas,Intermedia,100
+90234,Los Alpinos,Sanctórum de Lázaro Cárdenas,Intermedia,100
+90234,San Leonardo Arroyo,Sanctórum de Lázaro Cárdenas,Intermedia,100
+90234,Santa Cruz,Sanctórum de Lázaro Cárdenas,Intermedia,100
+90235,NCP Álvaro Obregón,Benito Juárez,Intermedia,100
+90235,Benito Juárez,Benito Juárez,Intermedia,100
+90235,Ampliación Progreso,Benito Juárez,Intermedia,100
+90240,San Ildefonso Hueyotlipan,Hueyotlipan,Lejana,150
+90240,Los Hornitos,Hueyotlipan,Lejana,150
+90240,La Cañada,Hueyotlipan,Lejana,150
+90240,El Jardín,Hueyotlipan,Lejana,150
+90240,El Resumidero,Hueyotlipan,Lejana,150
+90240,La Ardilla,Hueyotlipan,Lejana,150
+90240,Los Caifanes (La Purísima),Hueyotlipan,Lejana,150
+90240,Playa Azul,Hueyotlipan,Lejana,150
+90241,San Simeon Xipetzinco,Hueyotlipan,Lejana,150
+90243,San Andrés Cuaximala,Hueyotlipan,Lejana,150
+90243,El Carmen (Las Carrozas),Hueyotlipan,Lejana,150
+90243,Agua Limpia,Hueyotlipan,Lejana,150
+90244,Santa María Ixcontla,Hueyotlipan,Lejana,150
+90244,Santiago Tlalpan,Hueyotlipan,Lejana,150
+90244,Las Tórtolas,Hueyotlipan,Lejana,150
+90244,Potrero Grande,Hueyotlipan,Lejana,150
+90244,San Manuel Tlalpan,Hueyotlipan,Lejana,150
+90245,San Diego Recoba,Hueyotlipan,Lejana,150
+90246,Ignacio Zaragoza,Hueyotlipan,Lejana,150
+90246,Adolfo López Mateos,Hueyotlipan,Lejana,150
+90246,Emilio Sánchez Piedras,Hueyotlipan,Lejana,150
+90246,Hacienda San Blas Cuaxomulco,Hueyotlipan,Lejana,150
+90247,La Cruz Techalote,Hueyotlipan,Lejana,150
+90247,San Lorenzo Techalote,Hueyotlipan,Lejana,150
+90247,Hacienda San Fernando,Hueyotlipan,Lejana,150
+90247,Loma Bonita,Hueyotlipan,Lejana,150
+90247,NCP San Antonio Techalote,Hueyotlipan,Lejana,150
+90247,El Pilar,Hueyotlipan,Lejana,150
+90247,La Purísima,Hueyotlipan,Lejana,150
+90247,Santo Tomás (El Nopal),Hueyotlipan,Lejana,150
+90247,San Antonio Techalote,Hueyotlipan,Lejana,150
+90247,San Fernando,Hueyotlipan,Lejana,150
+90247,Santa Lucía,Hueyotlipan,Lejana,150
+90250,San José Atotonilco,Tlaxco,Intermedia,100
+90250,José María Morelos Buenavista,Tlaxco,Intermedia,100
+90250,Tlaxco,Tlaxco,Intermedia,100
+90250,Tepatlaxco,Tlaxco,Intermedia,100
+90250,San Juan,Tlaxco,Intermedia,100
+90250,Ejidal,Tlaxco,Intermedia,100
+90250,Iturbide,Tlaxco,Intermedia,100
+90250,Postal,Tlaxco,Intermedia,100
+90250,Las Ánimas,Tlaxco,Intermedia,100
+90250,Xomitla,Tlaxco,Intermedia,100
+90250,Las Maravillas,Tlaxco,Intermedia,100
+90250,La Mesa del Cielo,Tlaxco,Intermedia,100
+90250,Juan Arroyo (San Isidro),Tlaxco,Intermedia,100
+90250,La Vega,Tlaxco,Intermedia,100
+90250,Tablon de Guadalupe Payuca,Tlaxco,Intermedia,100
+90250,Los Serranos,Tlaxco,Intermedia,100
+90250,El Calvario,Tlaxco,Intermedia,100
+90251,San Antonio Huexotitla,Tlaxco,Intermedia,100
+90251,Guadalupe Huexotitla,Tlaxco,Intermedia,100
+90251,Xochuca,Tlaxco,Intermedia,100
+90251,NCPE la Herradura,Tlaxco,Intermedia,100
+90253,Vista Hermosa,Tlaxco,Intermedia,100
+90255,Acopinalco del Peñón,Tlaxco,Intermedia,100
+90255,Grande,Tlaxco,Intermedia,100
+90255,Chico,Tlaxco,Intermedia,100
+90255,El Sabinal,Tlaxco,Intermedia,100
+90255,Santiago Tlatepoxco,Tlaxco,Intermedia,100
+90255,El Nacimiento,Tlaxco,Intermedia,100
+90255,La Candelaria,Tlaxco,Intermedia,100
+90256,El Rosario,Tlaxco,Intermedia,100
+90257,San Pedro la Cueva,Tlaxco,Intermedia,100
+90257,La Pedregosa,Tlaxco,Intermedia,100
+90257,El Tintero,Tlaxco,Intermedia,100
+90257,El Limón,Tlaxco,Intermedia,100
+90257,El Mirador,Tlaxco,Intermedia,100
+90257,El Paraje,Tlaxco,Intermedia,100
+90257,Clemente Muñoz,Tlaxco,Intermedia,100
+90257,El Sotol,Tlaxco,Intermedia,100
+90257,San José el Escombro,Tlaxco,Intermedia,100
+90257,El Catorce,Tlaxco,Intermedia,100
+90257,Diego Muñoz Camargo,Tlaxco,Intermedia,100
+90257,Piedra Blanca,Tlaxco,Intermedia,100
+90257,La Herradura,Tlaxco,Intermedia,100
+90258,Río Blanco (El Doce),Tlaxco,Intermedia,100
+90258,La Cieneguilla,Tlaxco,Intermedia,100
+90258,Al final de la Senda,Tlaxco,Intermedia,100
+90258,Juan Antonio Burle Lomelí,Tlaxco,Intermedia,100
+90258,La Paz,Tlaxco,Intermedia,100
+90258,Llanos de Teopa (Valle Escondido),Tlaxco,Intermedia,100
+90258,Kilómetro 31,Tlaxco,Intermedia,100
+90259,Nuevo,Tlaxco,Intermedia,100
+90259,Corralillos,Tlaxco,Intermedia,100
+90259,Los Panchos,Tlaxco,Intermedia,100
+90260,La Magdalena Soltepec,Tlaxco,Intermedia,100
+90260,Lagunilla,Tlaxco,Intermedia,100
+90260,Soltepec,Tlaxco,Intermedia,100
+90261,Las Vigas,Tlaxco,Intermedia,100
+90261,Profesor Graciano Sánchez,Tlaxco,Intermedia,100
+90261,El Desierto,Tlaxco,Intermedia,100
+90261,Cinegético Cruz Verde,Tlaxco,Intermedia,100
+90262,Mariano Matamoros,Tlaxco,Intermedia,100
+90262,Mazaquiáhuac,Tlaxco,Intermedia,100
+90263,Casa Blanca,Tlaxco,Intermedia,100
+90264,Ex-Hacienda San Miguel Mimiahuapan,Tlaxco,Intermedia,100
+90264,Unión Ejidal Tierra y Libertad,Tlaxco,Intermedia,100
+90264,Maguey Cenizo,Tlaxco,Intermedia,100
+90264,La Trasquila,Tlaxco,Intermedia,100
+90265,San Lorenzo Soltepec,Tlaxco,Intermedia,100
+90265,El Perpetuo Socorro,Tlaxco,Intermedia,100
+90265,San Agustín,Tlaxco,Intermedia,100
+90265,El Pato,Tlaxco,Intermedia,100
+90265,El Santísimo,Tlaxco,Intermedia,100
+90265,Ex-hacienda San Buenaventura,Tlaxco,Intermedia,100
+90265,Santa María,Tlaxco,Intermedia,100
+90265,Santa Inés,Tlaxco,Intermedia,100
+90265,Santa Cruz,Tlaxco,Intermedia,100
+90266,La Providencia,Tlaxco,Intermedia,100
+90266,San Francisco Quintanilla,Tlaxco,Intermedia,100
+90266,Alta Luz,Tlaxco,Intermedia,100
+90266,San Diego Quintanilla,Tlaxco,Intermedia,100
+90266,El Fresno,Tlaxco,Intermedia,100
+90267,San José Tepeyahualco,Tlaxco,Intermedia,100
+90270,Tecomalucan,Tlaxco,Intermedia,100
+90270,El Paraíso,Tlaxco,Intermedia,100
+90270,Conzoquio,Tlaxco,Intermedia,100
+90271,Máximo Rojas Xalóstoc,Tlaxco,Intermedia,100
+90273,El Convento,Tlaxco,Intermedia,100
+90273,Ex-hacienda San Pedro Metla,Tlaxco,Intermedia,100
+90273,Santa Rosa de Lima,Tlaxco,Intermedia,100
+90273,El Chupadero,Tlaxco,Intermedia,100
+90274,La Palma,Tlaxco,Intermedia,100
+90274,Las Arandelas,Tlaxco,Intermedia,100
+90274,El Mirador,Tlaxco,Intermedia,100
+90274,La Lobera,Tlaxco,Intermedia,100
+90274,La Rosa,Tlaxco,Intermedia,100
+90274,Los Capulines,Tlaxco,Intermedia,100
+90274,Loma de Enmedio,Tlaxco,Intermedia,100
+90274,Tetzitzilica,Tlaxco,Intermedia,100
+90274,Los Charcos,Tlaxco,Intermedia,100
+90274,La Ciénega,Tlaxco,Intermedia,100
+90274,Las Palomas,Tlaxco,Intermedia,100
+90275,Capilla de Tepeyahualco,Tlaxco,Intermedia,100
+90275,Rancho Ojo de Agua,Tlaxco,Intermedia,100
+90275,Las Mesas,Tlaxco,Intermedia,100
+90276,El Potrero,Tlaxco,Intermedia,100
+90276,El Potrero Mazayolo,Tlaxco,Intermedia,100
+90276,El Llano,Tlaxco,Intermedia,100
+90276,La Loma del Cortijo,Tlaxco,Intermedia,100
+90276,Metla (Los Pinos),Tlaxco,Intermedia,100
+90276,Toltecapa,Tlaxco,Intermedia,100
+90276,Tlaquexpa,Tlaxco,Intermedia,100
+90276,La Pera,Tlaxco,Intermedia,100
+90277,Ciudad Industrial Xicohténcatl III,Tlaxco,Intermedia,100
+90277,Comisión Federal de Electricidad-La Martinica,Tlaxco,Intermedia,100
+90277,La Tronconera,Tlaxco,Intermedia,100
+90277,El Grullo,Tlaxco,Intermedia,100
+90277,El Volador,Tlaxco,Intermedia,100
+90277,Santa Fe,Tlaxco,Intermedia,100
+90277,San Pablo el Mirador,Tlaxco,Intermedia,100
+90277,Tierra Nueva,Tlaxco,Intermedia,100
+90277,El Jardín,Tlaxco,Intermedia,100
+90277,El Tecorral,Tlaxco,Intermedia,100
+90277,Las Tórtolas,Tlaxco,Intermedia,100
+90277,San Baltazar,Tlaxco,Intermedia,100
+90277,El Mirador (Teresa Rivera),Tlaxco,Intermedia,100
+90277,La Loma del Jardín,Tlaxco,Intermedia,100
+90278,Titichilco,Tlaxco,Intermedia,100
+90278,San Antonio Chapultepec,Tlaxco,Intermedia,100
+90278,Dos Barrancas,Tlaxco,Intermedia,100
+90278,San Martín,Tlaxco,Intermedia,100
+90278,Agua Escondida,Tlaxco,Intermedia,100
+90278,Los Polos,Tlaxco,Intermedia,100
+90278,Seco el Viejo,Tlaxco,Intermedia,100
+90278,Los Laureles,Tlaxco,Intermedia,100
+90278,Santa María Zotoluca,Tlaxco,Intermedia,100
+90278,San José Atotonilco,Tlaxco,Intermedia,100
+90278,Seco,Tlaxco,Intermedia,100
+90278,Santa Cruz Rancho Seco,Tlaxco,Intermedia,100
+90278,Campo David,Tlaxco,Intermedia,100
+90280,Niños Héroes de Chapultepec,Nanacamilpa de Mariano Arista,Lejana,150
+90280,Mifive,Nanacamilpa de Mariano Arista,Lejana,150
+90280,Los Rosales,Nanacamilpa de Mariano Arista,Lejana,150
+90280,La Unión,Nanacamilpa de Mariano Arista,Lejana,150
+90280,Media Caballería,Nanacamilpa de Mariano Arista,Lejana,150
+90280,El Carmen,Nanacamilpa de Mariano Arista,Lejana,150
+90280,Agua Escondida,Nanacamilpa de Mariano Arista,Lejana,150
+90280,Antorchista San Cayetano,Nanacamilpa de Mariano Arista,Lejana,150
+90280,Domingo Arenas,Nanacamilpa de Mariano Arista,Lejana,150
+90280,Chapultepec,Nanacamilpa de Mariano Arista,Lejana,150
+90280,Francisco Villa,Nanacamilpa de Mariano Arista,Lejana,150
+90280,Obregón,Nanacamilpa de Mariano Arista,Lejana,150
+90280,INFONAVIT Mineros,Nanacamilpa de Mariano Arista,Lejana,150
+90280,Loma Bonita,Nanacamilpa de Mariano Arista,Lejana,150
+90280,Loreto,Nanacamilpa de Mariano Arista,Lejana,150
+90280,La Villa,Nanacamilpa de Mariano Arista,Lejana,150
+90283,Amaxac,Nanacamilpa de Mariano Arista,Lejana,150
+90283,La Candelaria,Nanacamilpa de Mariano Arista,Lejana,150
+90283,Los Delgadillo,Nanacamilpa de Mariano Arista,Lejana,150
+90283,José Eduardo Hernández Fernández,Nanacamilpa de Mariano Arista,Lejana,150
+90284,Ixtafiayuca,Nanacamilpa de Mariano Arista,Lejana,150
+90284,Domingo Arenas (La Calera),Nanacamilpa de Mariano Arista,Lejana,150
+90284,Francisco I. Madero,Nanacamilpa de Mariano Arista,Lejana,150
+90284,Entronque Nanacamilpa,Nanacamilpa de Mariano Arista,Lejana,150
+90286,Constantino Zavala,Nanacamilpa de Mariano Arista,Lejana,150
+90286,Manuel Estrada,Nanacamilpa de Mariano Arista,Lejana,150
+90286,Tepuente,Nanacamilpa de Mariano Arista,Lejana,150
+90288,San Isidro,Nanacamilpa de Mariano Arista,Lejana,150
+90288,Miguel Lira y Ortega,Nanacamilpa de Mariano Arista,Lejana,150
+90288,San Felipe Hidalgo,Nanacamilpa de Mariano Arista,Lejana,150
+90290,Españita,Españita,Intermedia,100
+90290,El Carmen,Españita,Intermedia,100
+90290,San Miguel,Españita,Intermedia,100
+90291,San Juan Mitepec,Españita,Intermedia,100
+90292,San Francisco Mitepec,Españita,Intermedia,100
+90292,San Miguel Pipiyola,Españita,Intermedia,100
+90292,San Pablo,Españita,Intermedia,100
+90293,Álvaro Obregón,Españita,Intermedia,100
+90293,San Agustín,Españita,Intermedia,100
+90293,La Joya,Españita,Intermedia,100
+90293,Francisco I. Madero el Viejo,Españita,Intermedia,100
+90293,La Concepción,Españita,Intermedia,100
+90293,Pablo García Sánchez (Rancho Tecuicuilco),Españita,Intermedia,100
+90293,Rancho Nuevo,Españita,Intermedia,100
+90293,Lindavista,Españita,Intermedia,100
+90294,Miguel Aldama,Españita,Intermedia,100
+90294,La Soledad,Españita,Intermedia,100
+90294,Las Pilas,Españita,Intermedia,100
+90294,El Relicario,Españita,Intermedia,100
+90294,Guillén,Españita,Intermedia,100
+90294,San Miguel Tepalca,Españita,Intermedia,100
+90295,La Magdalena Cuextotitla,Españita,Intermedia,100
+90295,Barrio de Torres,Españita,Intermedia,100
+90297,Vicente Guerrero,Españita,Intermedia,100
+90297,Lagunitas,Españita,Intermedia,100
+90297,El Ocotal (Roque Sánchez),Españita,Intermedia,100
+90297,El Agua Santa (Las Tinas),Españita,Intermedia,100
+90297,El Calicanto,Españita,Intermedia,100
+90298,La Constancia,Españita,Intermedia,100
+90298,La Reforma,Españita,Intermedia,100
+90298,La Valentina,Españita,Intermedia,100
+90298,Los Capulines,Españita,Intermedia,100
+90298,San Miguel el Piñón,Españita,Intermedia,100
+90298,Asilo de Anciano San Judas Tadeo,Españita,Intermedia,100
+90298,El Potrero,Españita,Intermedia,100
+90298,San José Bellavista,Españita,Intermedia,100
+90298,El Capulín,Españita,Intermedia,100
+90298,San Antonio,Españita,Intermedia,100
+90300,Centro,Apizaco,Apizaco Centro,50
+90319,Rodan,Apizaco,Apizaco Centro,50
+90320,Granjas de Guadalupe,Apizaco,Apizaco Centro,50
+90323,Cerrito de Guadalupe,Apizaco,Apizaco Centro,50
+90329,Fuentes de Actipan,Apizaco,Apizaco Centro,50
+90329,Hogares Ferrocarrileros,Apizaco,Apizaco Centro,50
+90329,Hogares Ferrocarrileros 3,Apizaco,Apizaco Centro,50
+90329,Atenco,Apizaco,Apizaco Centro,50
+90330,Guadalupe,Apizaco,Apizaco Centro,50
+90337,San Martín de Porres,Apizaco,Apizaco Centro,50
+90338,Bellavista,Apizaco,Apizaco Centro,50
+90338,El Carmen,Apizaco,Apizaco Centro,50
+90338,San Diego Crom,Apizaco,Apizaco Centro,50
+90339,San Miguel,Apizaco,Apizaco Centro,50
+90340,Santa Rosa,Apizaco,Apizaco Centro,50
+90341,20 de Noviembre,Apizaco,Apizaco Centro,50
+90342,Ferrocarrilera,Apizaco,Apizaco Centro,50
+90342,Adolfo López Mateos,Apizaco,Apizaco Centro,50
+90342,Emilio Sánchez Piedras,Apizaco,Apizaco Centro,50
+90347,La Ciénega,Apizaco,Apizaco Centro,50
+90350,Buenos Aires,Apizaco,Apizaco Centro,50
+90350,INFONAVIT CTM,Apizaco,Apizaco Centro,50
+90350,INFONAVIT San Rafael Atlixtac,Apizaco,Apizaco Centro,50
+90355,Villa Santa Clara,Apizaco,Apizaco Centro,50
+90355,Villas del Monte,Apizaco,Apizaco Centro,50
+90355,Parque Ingles Residencial,Apizaco,Apizaco Centro,50
+90355,Villas de Apizaco,Apizaco,Apizaco Centro,50
+90355,Villa Santa Anita,Apizaco,Apizaco Centro,50
+90355,Loma Paraíso,Apizaco,Apizaco Centro,50
+90355,FOVISSSTE Loma Verde,Apizaco,Apizaco Centro,50
+90355,INFONAVIT Loma Verde,Apizaco,Apizaco Centro,50
+90355,Real del Bosque,Apizaco,Apizaco Centro,50
+90355,Real del Valle,Apizaco,Apizaco Centro,50
+90355,Paso de Cortés I,Apizaco,Apizaco Centro,50
+90355,Paso de Cortés II,Apizaco,Apizaco Centro,50
+90355,La Perla,Apizaco,Apizaco Centro,50
+90355,La Perla II,Apizaco,Apizaco Centro,50
+90355,Apatlahuaya,Apizaco,Apizaco Centro,50
+90355,San Diego,Apizaco,Apizaco Centro,50
+90356,Loma Florida 1a Secc,Apizaco,Apizaco Centro,50
+90356,Loma Florida 2a Secc,Apizaco,Apizaco Centro,50
+90356,Los Sauces,Apizaco,Apizaco Centro,50
+90356,Nuevo México,Apizaco,Apizaco Centro,50
+90357,Benito Juárez,Apizaco,Apizaco Centro,50
+90357,Fátima,Apizaco,Apizaco Centro,50
+90357,Lindavista,Apizaco,Apizaco Centro,50
+90358,Jesús y San Juan,Apizaco,Apizaco Centro,50
+90360,Bryc,Apizaco,Apizaco Centro,50
+90360,La Cañada,Apizaco,Apizaco Centro,50
+90360,Los Morales II,Apizaco,Apizaco Centro,50
+90370,INDECO San Rafael Atlixtac,Apizaco,Apizaco Centro,50
+90370,Zaragoza,Apizaco,Apizaco Centro,50
+90370,Campestre los Sabinos,Apizaco,Apizaco Centro,50
+90378,Loma Santa Anita,Apizaco,Apizaco Centro,50
+90380,Agrícola Covadonga,Apizaco,Apizaco Centro,50
+90380,Jardines de Apizaco,Apizaco,Apizaco Centro,50
+90380,La Soledad,Apizaco,Apizaco Centro,50
+90380,El Llano,Apizaco,Apizaco Centro,50
+90401,Villas el Pilar,Apizaco,Apizaco Centro,50
+90401,La Presa,Apizaco,Apizaco Centro,50
+90401,Benito Juárez Apizaquito,Apizaco,Apizaco Centro,50
+90401,El Calvario,Apizaco,Apizaco Centro,50
+90401,San Luis Apizaquito,Apizaco,Apizaco Centro,50
+90401,Tulio Hernández,Apizaco,Apizaco Centro,50
+90401,CERESO Apizaco,Apizaco,Apizaco Centro,50
+90401,Coporo y Cerro Azul,Apizaco,Apizaco Centro,50
+90401,San Luis,Apizaco,Apizaco Centro,50
+90401,La Paz,Apizaco,Apizaco Centro,50
+90401,El Farallon,Apizaco,Apizaco Centro,50
+90401,Residencial Las Flores,Apizaco,Apizaco Centro,50
+90401,La Colina,Apizaco,Apizaco Centro,50
+90401,Lomas de Apizaquito,Apizaco,Apizaco Centro,50
+90402,Santa Maria Texcalac,Apizaco,Apizaco Centro,50
+90402,10 de Mayo,Apizaco,Apizaco Centro,50
+90402,Francisco I. Madero,Apizaco,Apizaco Centro,50
+90402,El Cerrito,Apizaco,Apizaco Centro,50
+90403,Guadalupe Texcalac,Apizaco,Apizaco Centro,50
+90405,Cuarta Manzana,Apizaco,Apizaco Centro,50
+90405,Actipan,Apizaco,Apizaco Centro,50
+90405,Jardines de San Francisco,Apizaco,Apizaco Centro,50
+90405,José María Morelos,Apizaco,Apizaco Centro,50
+90406,San Isidro,Apizaco,Apizaco Centro,50
+90406,Lomas del Bosque,Apizaco,Apizaco Centro,50
+90406,Lomas del Bosque II,Apizaco,Apizaco Centro,50
+90406,Jardines de San Isidro,Apizaco,Apizaco Centro,50
+90407,Santa Anita Huiloac,Apizaco,Apizaco Centro,50
+90407,San Marcos,Apizaco,Apizaco Centro,50
+90407,Atlayoalco,Apizaco,Apizaco Centro,50
+90410,Atlangatepec,Atlangatepec,Intermedia,100
+90410,Segunda Fracción de Olivares,Atlangatepec,Intermedia,100
+90410,Tepezilapan,Atlangatepec,Intermedia,100
+90410,Tercera Fracción de Olivares,Atlangatepec,Intermedia,100
+90410,Cuarta Fracción de Olivares,Atlangatepec,Intermedia,100
+90410,El Paraíso,Atlangatepec,Intermedia,100
+90410,La Troje,Atlangatepec,Intermedia,100
+90411,Agrícola San Luis,Atlangatepec,Intermedia,100
+90411,Santa Clara Ozumba,Atlangatepec,Intermedia,100
+90411,San Simón,Atlangatepec,Intermedia,100
+90411,Cerro de las Flores,Atlangatepec,Intermedia,100
+90411,El Catorce,Atlangatepec,Intermedia,100
+90411,La Loma (El Cerrito),Atlangatepec,Intermedia,100
+90411,La Palma,Atlangatepec,Intermedia,100
+90411,La Providencia,Atlangatepec,Intermedia,100
+90413,Zumpango,Atlangatepec,Intermedia,100
+90413,La Flor,Atlangatepec,Intermedia,100
+90413,San Felipe,Atlangatepec,Intermedia,100
+90413,San José Atlanga,Atlangatepec,Intermedia,100
+90413,La Cuchilla (El Alcanfor),Atlangatepec,Intermedia,100
+90414,Las Barrancas,Atlangatepec,Intermedia,100
+90414,Las Tinajas,Atlangatepec,Intermedia,100
+90414,Los Capulines,Atlangatepec,Intermedia,100
+90414,Los Encinos,Atlangatepec,Intermedia,100
+90414,Santiago Villalta,Atlangatepec,Intermedia,100
+90414,El Huérfano,Atlangatepec,Intermedia,100
+90414,El Ocote,Atlangatepec,Intermedia,100
+90414,La Joya,Atlangatepec,Intermedia,100
+90414,Las Tinajas (La Tepozanera),Atlangatepec,Intermedia,100
+90414,El Potrero,Atlangatepec,Intermedia,100
+90414,El Encino,Atlangatepec,Intermedia,100
+90415,San Pedro Ecatepec,Atlangatepec,Intermedia,100
+90415,Jericó,Atlangatepec,Intermedia,100
+90415,La Herradura,Atlangatepec,Intermedia,100
+90415,Tenopala,Atlangatepec,Intermedia,100
+90415,Sabino Grande (El Carmen),Atlangatepec,Intermedia,100
+90415,San José de Santa Rosa Zacapexco,Atlangatepec,Intermedia,100
+90415,San Marcos,Atlangatepec,Intermedia,100
+90415,Santa Elena,Atlangatepec,Intermedia,100
+90415,Santa María Tepetzala,Atlangatepec,Intermedia,100
+90415,Villa de las Flores,Atlangatepec,Intermedia,100
+90415,Vista Hermosa,Atlangatepec,Intermedia,100
+90415,Xuxtepec,Atlangatepec,Intermedia,100
+90415,El Alemán,Atlangatepec,Intermedia,100
+90415,El Ocotal,Atlangatepec,Intermedia,100
+90415,El Recuerdo,Atlangatepec,Intermedia,100
+90415,San Antonio Tepetzala,Atlangatepec,Intermedia,100
+90415,La Cañada,Atlangatepec,Intermedia,100
+90416,Xalnene,Atlangatepec,Intermedia,100
+90416,Los Patos,Atlangatepec,Intermedia,100
+90416,Unidad Habitacional I,Atlangatepec,Intermedia,100
+90416,Centro Vacacional Villa Quinta Olivares,Atlangatepec,Intermedia,100
+90416,La Trasquila,Atlangatepec,Intermedia,100
+90416,La Cañada,Atlangatepec,Intermedia,100
+90417,Fracción San Pedro Ecatepec,Atlangatepec,Intermedia,100
+90418,Benito Juárez (Tezoyo),Atlangatepec,Intermedia,100
+90418,Loma Bonita,Atlangatepec,Intermedia,100
+90420,Muñoz,Muñoz de Domingo Arenas,Intermedia,100
+90420,Los Álamos,Muñoz de Domingo Arenas,Intermedia,100
+90421,Guadalupe Estación,Muñoz de Domingo Arenas,Intermedia,100
+90421,San José Cuamantzingo,Muñoz de Domingo Arenas,Intermedia,100
+90421,San Bartolo Cuamantzingo,Muñoz de Domingo Arenas,Intermedia,100
+90423,La Bodega,Muñoz de Domingo Arenas,Intermedia,100
+90423,Cuatro Caballos,Muñoz de Domingo Arenas,Intermedia,100
+90423,Los Rodríguez,Muñoz de Domingo Arenas,Intermedia,100
+90425,San Isidro Chipila,Muñoz de Domingo Arenas,Intermedia,100
+90425,De Zacatepec,Muñoz de Domingo Arenas,Intermedia,100
+90427,Guadalupe Cuauhtémoc,Muñoz de Domingo Arenas,Intermedia,100
+90427,Muñoz,Muñoz de Domingo Arenas,Intermedia,100
+90427,Ex-hacienda de Guadalupe,Muñoz de Domingo Arenas,Intermedia,100
+90430,2da. San Bartolomé Matlalohcan,Tetla de la Solidaridad,Cercana,80
+90430,Prados Residencial,Tetla de la Solidaridad,Cercana,80
+90430,Antorcha Revolucionaria INFONAVIT Tetla,Tetla de la Solidaridad,Cercana,80
+90430,1ra. San Bartolomé Matlalohcan,Tetla de la Solidaridad,Cercana,80
+90430,Teotlalpan,Tetla de la Solidaridad,Cercana,80
+90430,Los Robles,Tetla de la Solidaridad,Cercana,80
+90430,La Cañada,Tetla de la Solidaridad,Cercana,80
+90430,Jardines de San Bartolo,Tetla de la Solidaridad,Cercana,80
+90430,Metenco,Tetla de la Solidaridad,Cercana,80
+90430,4ta. San Bartolomé Matlalohcan,Tetla de la Solidaridad,Cercana,80
+90430,3ra. San Bartolomé Matlalohcan,Tetla de la Solidaridad,Cercana,80
+90430,Actipac,Tetla de la Solidaridad,Cercana,80
+90430,Cuatepec,Tetla de la Solidaridad,Cercana,80
+90430,Villa Celeste,Tetla de la Solidaridad,Cercana,80
+90430,El Pedregal,Tetla de la Solidaridad,Cercana,80
+90430,Villa de las Flores,Tetla de la Solidaridad,Cercana,80
+90430,Vista de Sol,Tetla de la Solidaridad,Cercana,80
+90430,América del Sur,Tetla de la Solidaridad,Cercana,80
+90430,Las Arboledas,Tetla de la Solidaridad,Cercana,80
+90430,Los Sabinales,Tetla de la Solidaridad,Cercana,80
+90430,Paseos de Tetla,Tetla de la Solidaridad,Cercana,80
+90430,Alberto Juárez Blancas,Tetla de la Solidaridad,Cercana,80
+90430,Villas de Tetla,Tetla de la Solidaridad,Cercana,80
+90430,Ocotitla,Tetla de la Solidaridad,Cercana,80
+90430,Las Cabañas,Tetla de la Solidaridad,Cercana,80
+90432,1ra. Manzana San Francisco Atezcatzinco,Tetla de la Solidaridad,Cercana,80
+90432,Paseos de Xolalpa,Tetla de la Solidaridad,Cercana,80
+90432,San Francisco Atexcatzinco 3ra. Manzana,Tetla de la Solidaridad,Cercana,80
+90432,4ta. Manzana San Francisco Atexcatzinco,Tetla de la Solidaridad,Cercana,80
+90432,San Francisco Atexcatzinco 2da. Manzana,Tetla de la Solidaridad,Cercana,80
+90432,Anastacio Lemus,Tetla de la Solidaridad,Cercana,80
+90432,La Loma,Tetla de la Solidaridad,Cercana,80
+90432,Alejandro López Ávila (Los Temontones),Tetla de la Solidaridad,Cercana,80
+90432,Santa Margarita,Tetla de la Solidaridad,Cercana,80
+90433,Chautzingo,Tetla de la Solidaridad,Cercana,80
+90433,Los Dolores,Tetla de la Solidaridad,Cercana,80
+90433,De Apizaquito,Tetla de la Solidaridad,Cercana,80
+90433,San Juan,Tetla de la Solidaridad,Cercana,80
+90434,José María Morelos y Pavón,Tetla de la Solidaridad,Cercana,80
+90434,Ciudad Industrial Xicohténcatl,Tetla de la Solidaridad,Cercana,80
+90434,Campo David,Tetla de la Solidaridad,Cercana,80
+90434,El Ocote,Tetla de la Solidaridad,Cercana,80
+90434,Felipe Gutiérrez,Tetla de la Solidaridad,Cercana,80
+90434,Ricardo Flores Magón,Tetla de la Solidaridad,Cercana,80
+90434,La Caridad,Tetla de la Solidaridad,Cercana,80
+90434,San Miguel,Tetla de la Solidaridad,Cercana,80
+90434,De Gómez,Tetla de la Solidaridad,Cercana,80
+90434,Las Arenas,Tetla de la Solidaridad,Cercana,80
+90435,Capulac,Tetla de la Solidaridad,Cercana,80
+90435,San Gregorio,Tetla de la Solidaridad,Cercana,80
+90435,La Divina Providencia,Tetla de la Solidaridad,Cercana,80
+90435,Santa Fe la Troje,Tetla de la Solidaridad,Cercana,80
+90435,Guillermo Macías,Tetla de la Solidaridad,Cercana,80
+90435,El Pozo,Tetla de la Solidaridad,Cercana,80
+90435,El Prado,Tetla de la Solidaridad,Cercana,80
+90435,Fracción el Derramadero,Tetla de la Solidaridad,Cercana,80
+90436,NCPE San Francisco Tepeyanco,Tetla de la Solidaridad,Cercana,80
+90436,Juan Lima Olivares,Tetla de la Solidaridad,Cercana,80
+90437,San José Piedras Negras,Tetla de la Solidaridad,Cercana,80
+90437,San Isidro Piedras Negras,Tetla de la Solidaridad,Cercana,80
+90438,Santa Rosa Mena,Tetla de la Solidaridad,Cercana,80
+90438,San Isidro,Tetla de la Solidaridad,Cercana,80
+90438,Plan de Ayala,Tetla de la Solidaridad,Cercana,80
+90438,El Corazón,Tetla de la Solidaridad,Cercana,80
+90438,La Concepción,Tetla de la Solidaridad,Cercana,80
+90440,San Martín Xaltocan,Xaltocan,Intermedia,100
+90440,San Simón Tlatlahuquitepec,Xaltocan,Intermedia,100
+90440,Cuatla,Xaltocan,Intermedia,100
+90440,Topilco de Juárez,Xaltocan,Intermedia,100
+90440,Puerto Arturo,Xaltocan,Intermedia,100
+90440,Jardines de Xaltocan,Xaltocan,Intermedia,100
+90440,Atzacoalco,Xaltocan,Intermedia,100
+90440,Alva,Xaltocan,Intermedia,100
+90440,Tlalapechco,Xaltocan,Intermedia,100
+90440,Loma Dorada,Xaltocan,Intermedia,100
+90443,Santa Bárbara Acuicuizcatepec,Xaltocan,Intermedia,100
+90443,Cañada de Chipila,Xaltocan,Intermedia,100
+90443,Nueva Ampliación Adolfo Ruiz Cortínez,Xaltocan,Intermedia,100
+90443,San José Texopa,Xaltocan,Intermedia,100
+90443,Las Mesas,Xaltocan,Intermedia,100
+90443,La Retama,Xaltocan,Intermedia,100
+90444,La Ascensión Huitzcolotepec,Xaltocan,Intermedia,100
+90445,San Lucas Tecopilco,San Lucas Tecopilco,Intermedia,100
+90445,Toltecapa,San Lucas Tecopilco,Intermedia,100
+90445,Cauatla,San Lucas Tecopilco,Intermedia,100
+90445,Loma Bonita,San Lucas Tecopilco,Intermedia,100
+90446,Las Cañadas,San Lucas Tecopilco,Intermedia,100
+90446,El Llano,San Lucas Tecopilco,Intermedia,100
+90448,San José Rosastitla,San Lucas Tecopilco,Intermedia,100
+90448,Tlaxcantitla,San Lucas Tecopilco,Intermedia,100
+90450,La Noria,Yauhquemehcan,Intermedia,100
+90450,San Dionisio Yauhquemehcan,Yauhquemehcan,Intermedia,100
+90450,San Francisco Tlacuilohcan,Yauhquemehcan,Intermedia,100
+90450,San Lorenzo Tlacualoyan,Yauhquemehcan,Intermedia,100
+90450,Santa Úrsula Zimatepec,Yauhquemehcan,Intermedia,100
+90450,La Noria II,Yauhquemehcan,Intermedia,100
+90450,Viky,Yauhquemehcan,Intermedia,100
+90450,La Corona,Yauhquemehcan,Intermedia,100
+90450,Cruztitla,Yauhquemehcan,Intermedia,100
+90450,Malintzi I,Yauhquemehcan,Intermedia,100
+90450,El Padrino II,Yauhquemehcan,Intermedia,100
+90450,El Padrino I,Yauhquemehcan,Intermedia,100
+90450,La Cima de Piedra II,Yauhquemehcan,Intermedia,100
+90450,Los Sauces IV,Yauhquemehcan,Intermedia,100
+90450,La Esperanza,Yauhquemehcan,Intermedia,100
+90450,Los Sauces I,Yauhquemehcan,Intermedia,100
+90450,La Palma,Yauhquemehcan,Intermedia,100
+90450,La Huerta,Yauhquemehcan,Intermedia,100
+90450,La Aurora,Yauhquemehcan,Intermedia,100
+90450,Xalcuentla,Yauhquemehcan,Intermedia,100
+90450,La Huerta I,Yauhquemehcan,Intermedia,100
+90450,Jardines de Santa Úrsula,Yauhquemehcan,Intermedia,100
+90450,Los Sauces II,Yauhquemehcan,Intermedia,100
+90450,Los Sauces III,Yauhquemehcan,Intermedia,100
+90450,El Padrino III,Yauhquemehcan,Intermedia,100
+90450,Los Sauces V,Yauhquemehcan,Intermedia,100
+90450,Villa Hermosa,Yauhquemehcan,Intermedia,100
+90450,El Pedregal,Yauhquemehcan,Intermedia,100
+90450,Ahuaxtla,Yauhquemehcan,Intermedia,100
+90450,La Cima de Piedra I,Yauhquemehcan,Intermedia,100
+90450,Las Rosas 2000,Yauhquemehcan,Intermedia,100
+90450,La Soledad (El Charco),Yauhquemehcan,Intermedia,100
+90453,San Benito Xaltocan,Yauhquemehcan,Intermedia,100
+90453,Doctores,Yauhquemehcan,Intermedia,100
+90453,Villa Alta,Yauhquemehcan,Intermedia,100
+90453,La Libertad,Yauhquemehcan,Intermedia,100
+90453,La Joya,Yauhquemehcan,Intermedia,100
+90453,Las Torres,Yauhquemehcan,Intermedia,100
+90454,Arenal,Yauhquemehcan,Intermedia,100
+90454,San José Tetel,Yauhquemehcan,Intermedia,100
+90454,Axotecatl,Yauhquemehcan,Intermedia,100
+90454,Coyotla,Yauhquemehcan,Intermedia,100
+90454,Pentágono,Yauhquemehcan,Intermedia,100
+90454,Paraíso,Yauhquemehcan,Intermedia,100
+90454,El Mirador II,Yauhquemehcan,Intermedia,100
+90454,Emilio Sánchez Piedras,Yauhquemehcan,Intermedia,100
+90454,El Palmar,Yauhquemehcan,Intermedia,100
+90454,Vista los Volcanes II,Yauhquemehcan,Intermedia,100
+90454,Vista los Volcanes I,Yauhquemehcan,Intermedia,100
+90454,Villas la Monumental,Yauhquemehcan,Intermedia,100
+90454,Modulo el Mirador,Yauhquemehcan,Intermedia,100
+90454,Acuario,Yauhquemehcan,Intermedia,100
+90454,La Unión,Yauhquemehcan,Intermedia,100
+90454,Los Patios,Yauhquemehcan,Intermedia,100
+90454,Arcos Tetel I,Yauhquemehcan,Intermedia,100
+90454,Arboledas,Yauhquemehcan,Intermedia,100
+90454,Arcos Tetel II,Yauhquemehcan,Intermedia,100
+90455,Calapa,Yauhquemehcan,Intermedia,100
+90455,Jazmín,Yauhquemehcan,Intermedia,100
+90455,Atencingo,Yauhquemehcan,Intermedia,100
+90456,El Rosario Ocotoxco,Yauhquemehcan,Intermedia,100
+90457,Magdalena Tepepa,Yauhquemehcan,Intermedia,100
+90457,La Luz,Yauhquemehcan,Intermedia,100
+90457,Villa Arboledas,Yauhquemehcan,Intermedia,100
+90459,Santa María Atlihuetzian,Yauhquemehcan,Intermedia,100
+90459,Lomas de la Misión,Yauhquemehcan,Intermedia,100
+90459,Cuarta Sección,Yauhquemehcan,Intermedia,100
+90459,Hualcaltzinco,Yauhquemehcan,Intermedia,100
+90459,San José Tepoxtla,Yauhquemehcan,Intermedia,100
+90460,Conjunto habitacional Pronavi San Cosme,Xaloztoc,Cercana,80
+90460,San Cosme Xaloztoc,Xaloztoc,Cercana,80
+90460,San Pedro Tlacotepec,Xaloztoc,Cercana,80
+90460,Guadalupe Texmolac,Xaloztoc,Cercana,80
+90460,Venustiano Carranza,Xaloztoc,Cercana,80
+90460,Tetitla,Xaloztoc,Cercana,80
+90460,Santa Martha,Xaloztoc,Cercana,80
+90460,La Sierra,Xaloztoc,Cercana,80
+90460,Santa Cruz Zacatzontetla,Xaloztoc,Cercana,80
+90460,El Jagüey Prieto,Xaloztoc,Cercana,80
+90460,Florencia Sánchez Nava,Xaloztoc,Cercana,80
+90463,José López Portillo,Xaloztoc,Cercana,80
+90465,Velazco,Xaloztoc,Cercana,80
+90465,Los Corrales,Xaloztoc,Cercana,80
+90480,Santa María Tocatlán,Tocatlán,Intermedia,100
+90480,San José,Tocatlán,Intermedia,100
+90482,Venustiano Carranza,Tocatlán,Intermedia,100
+90484,Acocotla,Tocatlán,Intermedia,100
+90490,El Divino Salvador,Tzompantepec,Cercana,80
+90490,San Salvador Tzompantepec,Tzompantepec,Cercana,80
+90490,Jean Charlot II,Tzompantepec,Cercana,80
+90490,San Pablo,Tzompantepec,Cercana,80
+90490,Los Girasoles,Tzompantepec,Cercana,80
+90490,Zauhtla,Tzompantepec,Cercana,80
+90490,Doña María,Tzompantepec,Cercana,80
+90490,San Andrés,Tzompantepec,Cercana,80
+90490,San Juan,Tzompantepec,Cercana,80
+90490,Jean Charlot I,Tzompantepec,Cercana,80
+90490,Jean Charlot III,Tzompantepec,Cercana,80
+90490,Tepozotenco,Tzompantepec,Cercana,80
+90491,San Andrés Ahuashuatepec,Tzompantepec,Cercana,80
+90491,Cuayecatl,Tzompantepec,Cercana,80
+90491,El Llano,Tzompantepec,Cercana,80
+90491,Cruztitla (Coyoeca),Tzompantepec,Cercana,80
+90491,Meyalco,Tzompantepec,Cercana,80
+90491,La Estrella,Tzompantepec,Cercana,80
+90491,Loma Dorada,Tzompantepec,Cercana,80
+90491,19 de Noviembre,Tzompantepec,Cercana,80
+90493,San Juan Quetzalcoapan,Tzompantepec,Cercana,80
+90493,Mazapa (Rancho los Juanes),Tzompantepec,Cercana,80
+90494,San Mateo Inophil,Tzompantepec,Cercana,80
+90494,La Providencia las Huertas,Tzompantepec,Cercana,80
+90494,Amoltepec,Tzompantepec,Cercana,80
+90494,Xaltianquisco,Tzompantepec,Cercana,80
+90495,1ra. Sección San José Teacalco,San José Teacalco,Intermedia,100
+90495,4ta. Sección San José Teacalco,San José Teacalco,Intermedia,100
+90496,5ta. Sección San José Teacalco,San José Teacalco,Intermedia,100
+90496,3ra. Sección San José Teacalco,San José Teacalco,Intermedia,100
+90497,2da. Sección San José Teacalco,San José Teacalco,Intermedia,100
+90497,Ex-rancho San Nicolás Cuatlapanga,San José Teacalco,Intermedia,100
+90497,El Encinal Dos de Mayo,San José Teacalco,Intermedia,100
+90497,San Pedro Mártir,San José Teacalco,Intermedia,100
+90497,Ecológica,San José Teacalco,Intermedia,100
+90498,San Luis,San José Teacalco,Intermedia,100
+90500,Huamantla Centro,Huamantla,Intermedia,100
+90502,El Calvario,Huamantla,Intermedia,100
+90502,Santa Cruz,Huamantla,Intermedia,100
+90502,La Santísima,Huamantla,Intermedia,100
+90502,El Encanto,Huamantla,Intermedia,100
+90502,Del Dulce Nombre,Huamantla,Intermedia,100
+90502,De Jesús,Huamantla,Intermedia,100
+90503,San Carlos,Huamantla,Intermedia,100
+90503,San Juan,Huamantla,Intermedia,100
+90503,Santa Ana,Huamantla,Intermedia,100
+90503,Cuamanco,Huamantla,Intermedia,100
+90503,Villa de las Flores,Huamantla,Intermedia,100
+90503,El Cornejal,Huamantla,Intermedia,100
+90505,La Preciosa,Huamantla,Intermedia,100
+90505,San Francisco Yancuitlalpan,Huamantla,Intermedia,100
+90505,San José,Huamantla,Intermedia,100
+90505,San Antonio,Huamantla,Intermedia,100
+90505,Santa Maria Yancuitlalpan,Huamantla,Intermedia,100
+90505,San Miguel,Huamantla,Intermedia,100
+90505,Jardines de San Manuel,Huamantla,Intermedia,100
+90506,Ignacio Zaragoza,Huamantla,Intermedia,100
+90506,Nuevos Horizontes,Huamantla,Intermedia,100
+90506,Emiliano Zapata,Huamantla,Intermedia,100
+90506,La Estación,Huamantla,Intermedia,100
+90506,Viva,Huamantla,Intermedia,100
+90506,Tierra y Libertad,Huamantla,Intermedia,100
+90507,San Lucas,Huamantla,Intermedia,100
+90507,San Francisco,Huamantla,Intermedia,100
+90507,Unión y Progreso,Huamantla,Intermedia,100
+90507,San Francisquito,Huamantla,Intermedia,100
+90508,La Palma,Huamantla,Intermedia,100
+90508,INFONAVIT 15 de Agosto,Huamantla,Intermedia,100
+90508,San Sebastián,Huamantla,Intermedia,100
+90508,Santa Anita,Huamantla,Intermedia,100
+90508,La Giralda,Huamantla,Intermedia,100
+90508,La Cañada,Huamantla,Intermedia,100
+90508,Juárez,Huamantla,Intermedia,100
+90508,Los Volcanes II,Huamantla,Intermedia,100
+90508,Los Volcanes,Huamantla,Intermedia,100
+90508,La Esmeralda,Huamantla,Intermedia,100
+90508,Arboledas,Huamantla,Intermedia,100
+90508,El Jagüey,Huamantla,Intermedia,100
+90508,Los Álamos,Huamantla,Intermedia,100
+90509,Ciudad Industrial Xicohténcatl,Huamantla,Intermedia,100
+90509,Agrícola San Martín Notario,Huamantla,Intermedia,100
+90510,Los Pilares,Huamantla,Intermedia,100
+90510,Ignacio Zaragoza,Huamantla,Intermedia,100
+90513,Hermenegildo Galeana,Huamantla,Intermedia,100
+90513,El Carmen Xalpatlahuaya,Huamantla,Intermedia,100
+90513,N.C.P. San Diego Xalpatlahuaya,Huamantla,Intermedia,100
+90514,Benito Juárez,Huamantla,Intermedia,100
+90514,Francisco I. Madero la Mesa,Huamantla,Intermedia,100
+90514,Francisco I. Madero Tecoac,Huamantla,Intermedia,100
+90514,Francisco Villa Tecoac,Huamantla,Intermedia,100
+90514,El Molino,Huamantla,Intermedia,100
+90514,De Torres,Huamantla,Intermedia,100
+90514,La Lima,Huamantla,Intermedia,100
+90515,El Valle,Huamantla,Intermedia,100
+90515,San José Xicohtencatl,Huamantla,Intermedia,100
+90515,Ampliación Felipe Carrillo Puerto,Huamantla,Intermedia,100
+90515,NCP José María Morelos,Huamantla,Intermedia,100
+90520,San Francisco Tecoac,Huamantla,Intermedia,100
+90520,Lázaro Cárdenas,Huamantla,Intermedia,100
+90520,San Francisco Notario,Huamantla,Intermedia,100
+90525,Chapultepec,Huamantla,Intermedia,100
+90525,La Cruz,Huamantla,Intermedia,100
+90525,Licenciado Mauro Angulo,Huamantla,Intermedia,100
+90525,N.C.P. San José Teacalco,Huamantla,Intermedia,100
+90526,General Francisco Villa,Huamantla,Intermedia,100
+90526,San Martín Notario,Huamantla,Intermedia,100
+90526,Acasillados San Martín Notario,Huamantla,Intermedia,100
+90527,Cuauhtémoc,Huamantla,Intermedia,100
+90530,José María Morelos,Huamantla,Intermedia,100
+90530,De Jesús,Huamantla,Intermedia,100
+90530,San Miguel Báez,Huamantla,Intermedia,100
+90530,De la Cruz,Huamantla,Intermedia,100
+90534,Mariano Matamoros,Huamantla,Intermedia,100
+90534,Altamira Guadalupe,Huamantla,Intermedia,100
+90540,Terrenate,Terrenate,Intermedia,100
+90540,Chipilo,Terrenate,Intermedia,100
+90540,Chapultepec,Terrenate,Intermedia,100
+90542,La Caldera,Terrenate,Intermedia,100
+90542,San José Villarreal,Terrenate,Intermedia,100
+90542,El Pilancón,Terrenate,Intermedia,100
+90542,El Capulín,Terrenate,Intermedia,100
+90543,Nicolás Bravo,Terrenate,Intermedia,100
+90543,El Capulín,Terrenate,Intermedia,100
+90543,Guadalupe Victoria,Terrenate,Intermedia,100
+90543,Los Ameles (Acolco),Terrenate,Intermedia,100
+90544,Toluca de Guadalupe,Terrenate,Intermedia,100
+90545,Lázaro Cárdenas,Lázaro Cárdenas,Intermedia,100
+90545,La Mancera,Lázaro Cárdenas,Intermedia,100
+90545,Maribel,Lázaro Cárdenas,Intermedia,100
+90545,Atlixtaca,Lázaro Cárdenas,Intermedia,100
+90546,El Palomar,Lázaro Cárdenas,Intermedia,100
+90546,San José de la Laguna,Lázaro Cárdenas,Intermedia,100
+90547,Emiliano Zapata,Emiliano Zapata,Lejana,150
+90547,Guadalupe,Emiliano Zapata,Lejana,150
+90547,Las Palomas,Emiliano Zapata,Lejana,150
+90547,Guardamonte,Emiliano Zapata,Lejana,150
+90547,La Venta,Emiliano Zapata,Lejana,150
+90547,Coamila,Emiliano Zapata,Lejana,150
+90547,Atotonilco,Emiliano Zapata,Lejana,150
+90547,Los Encinos,Emiliano Zapata,Lejana,150
+90547,Tipitzila,Emiliano Zapata,Lejana,150
+90548,Ahilitla,Emiliano Zapata,Lejana,150
+90548,San Nicolás,Emiliano Zapata,Lejana,150
+90548,Vista Hermosa,Emiliano Zapata,Lejana,150
+90548,Cruz Verde,Emiliano Zapata,Lejana,150
+90548,Tlaximaloya (La Amapola),Emiliano Zapata,Lejana,150
+90548,Ojo de Agua,Emiliano Zapata,Lejana,150
+90548,Gustavo Díaz Ordaz,Emiliano Zapata,Lejana,150
+90548,La Loma,Emiliano Zapata,Lejana,150
+90548,Tecoaquillo,Emiliano Zapata,Lejana,150
+90548,El Ciprés,Emiliano Zapata,Lejana,150
+90548,Tres Ríos,Emiliano Zapata,Lejana,150
+90548,El Epazote,Emiliano Zapata,Lejana,150
+90550,De la Concepción,Atltzayanca,Intermedia,100
+90550,Santiago,Atltzayanca,Intermedia,100
+90550,San Antonio,Atltzayanca,Intermedia,100
+90550,San José Miravalle,Atltzayanca,Intermedia,100
+90553,La Garita,Atltzayanca,Intermedia,100
+90554,Xaltitla,Atltzayanca,Intermedia,100
+90554,San José Buenavista,Atltzayanca,Intermedia,100
+90554,San José Pilancón,Atltzayanca,Intermedia,100
+90554,San Francisco Axopilco,Atltzayanca,Intermedia,100
+90554,Carreta,Atltzayanca,Intermedia,100
+90554,José Fernández,Atltzayanca,Intermedia,100
+90554,Aurelio Aguilar,Atltzayanca,Intermedia,100
+90554,Techachalco,Atltzayanca,Intermedia,100
+90554,Xarero Xaltitla,Atltzayanca,Intermedia,100
+90554,San Antonio Tecopilco,Atltzayanca,Intermedia,100
+90555,Concepción Hidalgo,Atltzayanca,Intermedia,100
+90555,Felipe Carrillo Puerto,Atltzayanca,Intermedia,100
+90555,Lázaro Cárdenas,Atltzayanca,Intermedia,100
+90555,La Rincona,Atltzayanca,Intermedia,100
+90555,Blanco,Atltzayanca,Intermedia,100
+90555,Mazehualpa,Atltzayanca,Intermedia,100
+90555,San José Xalasco,Atltzayanca,Intermedia,100
+90555,Ocotla,Atltzayanca,Intermedia,100
+90556,Mesa Redonda,Atltzayanca,Intermedia,100
+90556,San Juan Ocotitla,Atltzayanca,Intermedia,100
+90557,Nexnopala,Atltzayanca,Intermedia,100
+90557,Jesús,Atltzayanca,Intermedia,100
+90557,La Higuera,Atltzayanca,Intermedia,100
+90557,Nazareth,Atltzayanca,Intermedia,100
+90557,San Miguel Franco,Atltzayanca,Intermedia,100
+90557,Santa Martha,Atltzayanca,Intermedia,100
+90557,Guadalupe,Atltzayanca,Intermedia,100
+90557,Delicias,Atltzayanca,Intermedia,100
+90558,Santa Cruz Pocitos,Atltzayanca,Intermedia,100
+90558,Santa María las Cuevas,Atltzayanca,Intermedia,100
+90558,El Piñonal (Guadalupe el Piñonal),Atltzayanca,Intermedia,100
+90558,Los Ocalitos,Atltzayanca,Intermedia,100
+90558,Miahuapan el Alto,Atltzayanca,Intermedia,100
+90558,Miahuapan el Bajo,Atltzayanca,Intermedia,100
+90558,Pocitos,Atltzayanca,Intermedia,100
+90558,Loma de Junguito,Atltzayanca,Intermedia,100
+90560,San Antonio,Cuapiaxtla,Cercana,80
+90560,Los Ángeles,Cuapiaxtla,Cercana,80
+90560,Alta Luz,Cuapiaxtla,Cercana,80
+90560,De Guadalupe,Cuapiaxtla,Cercana,80
+90560,San Miguel,Cuapiaxtla,Cercana,80
+90562,San Francisco Cuexcontzi,Cuapiaxtla,Cercana,80
+90562,San Francisco Cuexcomatepec,Cuapiaxtla,Cercana,80
+90563,La Soledad,Cuapiaxtla,Cercana,80
+90563,San Cristóbal del Río,Cuapiaxtla,Cercana,80
+90563,Egipto,Cuapiaxtla,Cercana,80
+90563,José María Morelos,Cuapiaxtla,Cercana,80
+90564,Granja de Guadalupe,Cuapiaxtla,Cercana,80
+90564,El Tejocote,Cuapiaxtla,Cercana,80
+90564,Mazarraza,Cuapiaxtla,Cercana,80
+90564,Del Valle,Cuapiaxtla,Cercana,80
+90564,Santa Rebeca,Cuapiaxtla,Cercana,80
+90564,Plan de Ayala,Cuapiaxtla,Cercana,80
+90565,Loma Bonita,Cuapiaxtla,Cercana,80
+90565,Santa Fe Uno,Cuapiaxtla,Cercana,80
+90565,Manuel Ávila Camacho,Cuapiaxtla,Cercana,80
+90565,Santa Beatriz la Nueva,Cuapiaxtla,Cercana,80
+90567,La Asunción Rascona,Cuapiaxtla,Cercana,80
+90568,Ignacio Allende,Cuapiaxtla,Cercana,80
+90568,Allende,Cuapiaxtla,Cercana,80
+90568,San Rafael Tepatlaxco (Unión y Progreso),Cuapiaxtla,Cercana,80
+90568,San Miguel Teometitla,Cuapiaxtla,Cercana,80
+90568,La Granja (Camino a Franco),Cuapiaxtla,Cercana,80
+90570,Villa del Carmen Tequexquitla,El Carmen Tequexquitla,Lejana,150
+90570,De Guadalupe,El Carmen Tequexquitla,Lejana,150
+90573,Mazatepec,El Carmen Tequexquitla,Lejana,150
+90575,La Soledad,El Carmen Tequexquitla,Lejana,150
+90576,Vicente Guerrero,El Carmen Tequexquitla,Lejana,150
+90577,Ocotlán Temalacayucan,El Carmen Tequexquitla,Lejana,150
+90580,San Juan Primero,Ixtenco,Intermedia,100
+90580,San Gabriel Primero,Ixtenco,Intermedia,100
+90580,San Gabriel Segundo,Ixtenco,Intermedia,100
+90580,San Juan Segundo,Ixtenco,Intermedia,100
+90583,Santiago,Ixtenco,Intermedia,100
+90583,Resurrección Segundo,Ixtenco,Intermedia,100
+90583,Resurrección Primero,Ixtenco,Intermedia,100
+90585,San Antonio Primero,Ixtenco,Intermedia,100
+90585,San Antonio Segundo,Ixtenco,Intermedia,100
+90585,La Era,Ixtenco,Intermedia,100
+90590,Zitlaltépec,Ziltlaltépec de Trinidad Sánchez Santos,Intermedia,100
+90590,Guadalupe,Ziltlaltépec de Trinidad Sánchez Santos,Intermedia,100
+90590,El Lindero,Ziltlaltépec de Trinidad Sánchez Santos,Intermedia,100
+90592,San Juan Bautista Mier,Ziltlaltépec de Trinidad Sánchez Santos,Intermedia,100
+90595,Guadalupe los Capulines,Ziltlaltépec de Trinidad Sánchez Santos,Intermedia,100
+90596,Francisco Javier Mina,Ziltlaltépec de Trinidad Sánchez Santos,Intermedia,100
+90600,Providencia,Apetatitlán de Antonio Carvajal,Intermedia,100
+90600,Apetatitlán,Apetatitlán de Antonio Carvajal,Intermedia,100
+90600,Petroquímica,Apetatitlán de Antonio Carvajal,Intermedia,100
+90600,Tlahuicole IMSS,Apetatitlán de Antonio Carvajal,Intermedia,100
+90604,La Loma,Apetatitlán de Antonio Carvajal,Intermedia,100
+90605,Belén Atzitzimititlán,Apetatitlán de Antonio Carvajal,Intermedia,100
+90606,San Matías Tepetomatitlán,Apetatitlán de Antonio Carvajal,Intermedia,100
+90608,Tecolotla,Apetatitlán de Antonio Carvajal,Intermedia,100
+90610,Tlatempan,Apetatitlán de Antonio Carvajal,Intermedia,100
+90610,Jesús,Apetatitlán de Antonio Carvajal,Intermedia,100
+90620,Amaxac de Guerrero,Amaxac de Guerrero,Intermedia,100
+90623,Tercera Sección,Amaxac de Guerrero,Intermedia,100
+90624,Primera Sección,Amaxac de Guerrero,Intermedia,100
+90635,San Damián Tlacocalpan,Amaxac de Guerrero,Intermedia,100
+90635,La Preciosa,Amaxac de Guerrero,Intermedia,100
+90640,Punta Real,Santa Cruz Tlaxcala,Cercana,80
+90640,Guadalupe Tlachco,Santa Cruz Tlaxcala,Cercana,80
+90640,San Lucas Tlacochcalco,Santa Cruz Tlaxcala,Cercana,80
+90640,San Miguel Contla,Santa Cruz Tlaxcala,Cercana,80
+90640,Santa Cruz Tlaxcala,Santa Cruz Tlaxcala,Cercana,80
+90640,Ex-Hacienda San Manuel,Santa Cruz Tlaxcala,Cercana,80
+90640,Los Vecinos (Llano Viejo),Santa Cruz Tlaxcala,Cercana,80
+90640,El Arcángel,Santa Cruz Tlaxcala,Cercana,80
+90640,Villas de San Miguel II,Santa Cruz Tlaxcala,Cercana,80
+90643,Tepetlacinco,Santa Cruz Tlaxcala,Cercana,80
+90644,El Progreso,Santa Cruz Tlaxcala,Cercana,80
+90644,Tetzotzocola,Santa Cruz Tlaxcala,Cercana,80
+90644,El Alto,Santa Cruz Tlaxcala,Cercana,80
+90644,Analco,Santa Cruz Tlaxcala,Cercana,80
+90644,Ixaquixtla,Santa Cruz Tlaxcala,Cercana,80
+90645,Centro Vacacional la Trinidad,Santa Cruz Tlaxcala,Cercana,80
+90646,Potrero Viejo,Santa Cruz Tlaxcala,Cercana,80
+90650,Jesús Huitznáhuac,Santa Cruz Tlaxcala,Cercana,80
+90653,Xamistla,Santa Cruz Tlaxcala,Cercana,80
+90660,San Miguel Buenavista,Cuaxomulco,Intermedia,100
+90660,San Antonio,Cuaxomulco,Intermedia,100
+90660,San Lorenzo Xaltelulco,Cuaxomulco,Intermedia,100
+90660,Tepechapa,Cuaxomulco,Intermedia,100
+90660,Zacamolpa,Cuaxomulco,Intermedia,100
+90660,Primera Sección Atenco,Cuaxomulco,Intermedia,100
+90660,Segunda Sección Tecuicuilco,Cuaxomulco,Intermedia,100
+90660,Centro,Cuaxomulco,Intermedia,100
+90660,Coxtla,Cuaxomulco,Intermedia,100
+90660,Tecola,Cuaxomulco,Intermedia,100
+90670,San Bernardino Contla Centro,Contla de Juan Cuamatzi,Intermedia,100
+90670,Colhuaca,Contla de Juan Cuamatzi,Intermedia,100
+90670,Netzahuala,Contla de Juan Cuamatzi,Intermedia,100
+90670,Zencalco,Contla de Juan Cuamatzi,Intermedia,100
+90670,Villa Chica,Contla de Juan Cuamatzi,Intermedia,100
+90670,San Antonio,Contla de Juan Cuamatzi,Intermedia,100
+90670,Xopantla,Contla de Juan Cuamatzi,Intermedia,100
+90670,La Conchita,Contla de Juan Cuamatzi,Intermedia,100
+90676,Santa María Tlacatecpa,Contla de Juan Cuamatzi,Intermedia,100
+90680,San Miguel Xaltipa,Contla de Juan Cuamatzi,Intermedia,100
+90690,San Felipe Cuauhtenco,Contla de Juan Cuamatzi,Intermedia,100
+90690,La Luz,Contla de Juan Cuamatzi,Intermedia,100
+90692,San José Aztatla,Contla de Juan Cuamatzi,Intermedia,100
+90692,Ocotlán de Tepatlaxco,Contla de Juan Cuamatzi,Intermedia,100
+90693,Santa María Aquiáhuac,Contla de Juan Cuamatzi,Intermedia,100
+90693,Ixtlahuaca,Contla de Juan Cuamatzi,Intermedia,100
+90700,San Mateo Ayecac,Tepetitla de Lardizábal,Intermedia,100
+90700,Tepetitla,Tepetitla de Lardizábal,Intermedia,100
+90700,Villa Alta,Tepetitla de Lardizábal,Intermedia,100
+90700,Residencial las Palomas,Tepetitla de Lardizábal,Intermedia,100
+90700,Atalaya,Tepetitla de Lardizábal,Intermedia,100
+90700,Guadalupe Victoria,Tepetitla de Lardizábal,Intermedia,100
+90710,La Concordia,Nativitas,Intermedia,100
+90710,Nativitas,Nativitas,Intermedia,100
+90710,San Miguel Tlale,Nativitas,Intermedia,100
+90710,San Juan Tepactepec,Nativitas,Intermedia,100
+90712,San Bernabé Capula,Nativitas,Intermedia,100
+90712,San Miguel del Milagro,Nativitas,Intermedia,100
+90712,San Miguel Xochitecatitla,Nativitas,Intermedia,100
+90713,Jesús Tepactepec,Nativitas,Intermedia,100
+90715,Guadalupe Victoria,Nativitas,Intermedia,100
+90716,San Vicente Xiloxochitla,Nativitas,Intermedia,100
+90716,San Francisco Tenexyecac,Nativitas,Intermedia,100
+90716,Emiliano Zapata,Nativitas,Intermedia,100
+90716,Santa Cruz,Nativitas,Intermedia,100
+90717,San José Atoyatenco,Nativitas,Intermedia,100
+90717,Matamoros,Nativitas,Intermedia,100
+90717,El Rosario,Nativitas,Intermedia,100
+90718,San Rafael Tenanyecac,Nativitas,Intermedia,100
+90718,Colecturía,Nativitas,Intermedia,100
+90718,Zanja Real,Nativitas,Intermedia,100
+90721,Santiago Michac,Nativitas,Intermedia,100
+90721,Santa Elena,Nativitas,Intermedia,100
+90721,Segura Michac,Nativitas,Intermedia,100
+90721,La Remolacha,Nativitas,Intermedia,100
+90721,Loma Verde,Nativitas,Intermedia,100
+90721,NCP Santa Elena Teacalco,Nativitas,Intermedia,100
+90721,San Antonio,Nativitas,Intermedia,100
+90721,San Antonio Teacalco,Nativitas,Intermedia,100
+90722,San Miguel Analco,Nativitas,Intermedia,100
+90722,Santa Clara Atoyac,Nativitas,Intermedia,100
+90725,Santa Apolonia Teacalco Centro,Santa Apolonia Teacalco,Intermedia,100
+90725,El Ranchito,Santa Apolonia Teacalco,Intermedia,100
+90725,El Carril,Santa Apolonia Teacalco,Intermedia,100
+90730,Santa Isabel Tetlatlahuca,Tetlatlahuca,Intermedia,100
+90730,Santa Cruz Aquiahuac,Tetlatlahuca,Intermedia,100
+90730,Atenco,Tetlatlahuca,Intermedia,100
+90733,Val Quirico,Tetlatlahuca,Intermedia,100
+90733,Equiah Villa Sustentable,Tetlatlahuca,Intermedia,100
+90733,Santa Ana Portales,Tetlatlahuca,Intermedia,100
+90733,Santa Águeda,Tetlatlahuca,Intermedia,100
+90734,San Bartolomé Tenango,Tetlatlahuca,Intermedia,100
+90734,San Andrés Cuamilpa,Tetlatlahuca,Intermedia,100
+90734,Santa Cruz Capulinares,Tetlatlahuca,Intermedia,100
+90735,El Alto,San Damián Texóloc,Intermedia,100
+90736,Monterrey,San Damián Texóloc,Intermedia,100
+90736,Zavaleta,San Damián Texóloc,Intermedia,100
+90736,La Cueva,San Damián Texóloc,Intermedia,100
+90737,Luis Echeverría,San Damián Texóloc,Intermedia,100
+90738,San Jerónimo Zacualpan,San Jerónimo Zacualpan,Intermedia,100
+90740,Sección Segunda,Zacatelco,Intermedia,100
+90740,Sección Primera,Zacatelco,Intermedia,100
+90740,La Libertad,Zacatelco,Intermedia,100
+90740,Alberto Juárez Blancas,Zacatelco,Intermedia,100
+90740,Las Palomas,Zacatelco,Intermedia,100
+90750,Sección Tercera Gurdia,Zacatelco,Intermedia,100
+90750,Sección Cuarta,Zacatelco,Intermedia,100
+90750,Sección Quinta,Zacatelco,Intermedia,100
+90750,Exquitla,Zacatelco,Intermedia,100
+90750,Xochicalco,Zacatelco,Intermedia,100
+90750,CROM Santa Inés,Zacatelco,Intermedia,100
+90750,Girasoles,Zacatelco,Intermedia,100
+90750,Guardia,Zacatelco,Intermedia,100
+90750,Las Américas,Zacatelco,Intermedia,100
+90750,Privansa,Zacatelco,Intermedia,100
+90754,Domingo Arenas,Zacatelco,Intermedia,100
+90760,San Lorenzo Axocomanitla,San Lorenzo Axocomanitla,Intermedia,100
+90770,Santa Catarina Ayometla,Santa Catarina Ayometla,Intermedia,100
+90773,Estocapa,Santa Catarina Ayometla,Intermedia,100
+90774,Tlapayatla,Santa Catarina Ayometla,Intermedia,100
+90775,Tlaxcaltecatla,Santa Catarina Ayometla,Intermedia,100
+90780,Xicohtzingo,Xicohtzinco,Intermedia,100
+90780,Santa Filomena,Xicohtzinco,Intermedia,100
+90780,San Isidro,Xicohtzinco,Intermedia,100
+90780,Guadalupe,Xicohtzinco,Intermedia,100
+90780,El Rancho,Xicohtzinco,Intermedia,100
+90780,El Llano,Xicohtzinco,Intermedia,100
+90780,Capulín,Xicohtzinco,Intermedia,100
+90780,El Cerrito,Xicohtzinco,Intermedia,100
+90780,Chalma,Xicohtzinco,Intermedia,100
+90780,Techaloya,Xicohtzinco,Intermedia,100
+90780,El Llano 2,Xicohtzinco,Intermedia,100
+90780,El Llano 1,Xicohtzinco,Intermedia,100
+90790,San Francisco Papalotla Centro,Papalotla de Xicohténcatl,Intermedia,100
+90790,Xilotzingo,Papalotla de Xicohténcatl,Intermedia,100
+90790,Xolalpa,Papalotla de Xicohténcatl,Intermedia,100
+90790,Xaltipa,Papalotla de Xicohténcatl,Intermedia,100
+90790,El Carmen,Papalotla de Xicohténcatl,Intermedia,100
+90790,La Trinidad,Papalotla de Xicohténcatl,Intermedia,100
+90790,Los Reyes,Papalotla de Xicohténcatl,Intermedia,100
+90790,Tenantitla,Papalotla de Xicohténcatl,Intermedia,100
+90791,San Marcos Contla,Papalotla de Xicohténcatl,Intermedia,100
+90794,Zacatecoma,Papalotla de Xicohténcatl,Intermedia,100
+90796,Panzacola,Papalotla de Xicohténcatl,Intermedia,100
+90796,San Juan Bosco,Papalotla de Xicohténcatl,Intermedia,100
+90796,San Buenaventura,Papalotla de Xicohténcatl,Intermedia,100
+90796,La Ciénega,Papalotla de Xicohténcatl,Intermedia,100
+90800,Santa Ana Chiautempan Centro,Chiautempan,Intermedia,100
+90800,Xaltantla,Chiautempan,Intermedia,100
+90800,Lucero,Chiautempan,Intermedia,100
+90802,Buenos Aires,Chiautempan,Intermedia,100
+90802,Industrial,Chiautempan,Intermedia,100
+90802,Los Pinos,Chiautempan,Intermedia,100
+90802,Puente Picazo,Chiautempan,Intermedia,100
+90802,Ximentla,Chiautempan,Intermedia,100
+90802,Santa Cruz,Chiautempan,Intermedia,100
+90802,San Onofre,Chiautempan,Intermedia,100
+90802,Santa Cruz Tetela,Chiautempan,Intermedia,100
+90802,Llanos de Tepetlapa,Chiautempan,Intermedia,100
+90802,La Magdalena,Chiautempan,Intermedia,100
+90803,Tlapacoyac,Chiautempan,Intermedia,100
+90803,Villa de las Flores,Chiautempan,Intermedia,100
+90804,Chalma,Chiautempan,Intermedia,100
+90804,El Llanito,Chiautempan,Intermedia,100
+90804,De Fátima,Chiautempan,Intermedia,100
+90804,La Laguna,Chiautempan,Intermedia,100
+90804,Los Álamos,Chiautempan,Intermedia,100
+90805,La Concha,Chiautempan,Intermedia,100
+90805,Panzacola,Chiautempan,Intermedia,100
+90805,Reforma,Chiautempan,Intermedia,100
+90805,Nueva,Chiautempan,Intermedia,100
+90805,Tepetlapa,Chiautempan,Intermedia,100
+90805,Del Carmen,Chiautempan,Intermedia,100
+90805,La Soledad,Chiautempan,Intermedia,100
+90805,San Sebastián,Chiautempan,Intermedia,100
+90806,José Agustín Arrieta,Chiautempan,Intermedia,100
+90806,Texcacoac,Chiautempan,Intermedia,100
+90806,Xaxala,Chiautempan,Intermedia,100
+90806,Constitución,Chiautempan,Intermedia,100
+90806,Texcacoac,Chiautempan,Intermedia,100
+90807,El Alto,Chiautempan,Intermedia,100
+90807,La Malinche,Chiautempan,Intermedia,100
+90807,Villas del Sabinal,Chiautempan,Intermedia,100
+90810,Guadalupe Ixcotla,Chiautempan,Intermedia,100
+90810,Santa Cruz Guadalupe,Chiautempan,Intermedia,100
+90820,San Bartolomé Cuahuixmatlac,Chiautempan,Intermedia,100
+90820,San Pedro Xochiteotla,Chiautempan,Intermedia,100
+90820,San Pedro Muñoztla,Chiautempan,Intermedia,100
+90820,San Pedro Tlalcuapan de Nicolás Bravo,Chiautempan,Intermedia,100
+90820,Ramontla,Chiautempan,Intermedia,100
+90821,San Rafael Tepatlaxco,Chiautempan,Intermedia,100
+90830,La Magdalena Tlaltelulco,La Magdalena Tlaltelulco,Intermedia,100
+90833,Tecpa Morales,La Magdalena Tlaltelulco,Intermedia,100
+90833,Tecpa Pluma,La Magdalena Tlaltelulco,Intermedia,100
+90833,Santa Cruz Progreso,La Magdalena Tlaltelulco,Intermedia,100
+90833,1901,La Magdalena Tlaltelulco,Intermedia,100
+90833,Tezoquipan,La Magdalena Tlaltelulco,Intermedia,100
+90833,Estocapa,La Magdalena Tlaltelulco,Intermedia,100
+90833,Villa de las Flores,La Magdalena Tlaltelulco,Intermedia,100
+90833,Progreso,La Magdalena Tlaltelulco,Intermedia,100
+90833,Independencia,La Magdalena Tlaltelulco,Intermedia,100
+90833,La Loma,La Magdalena Tlaltelulco,Intermedia,100
+90834,Poxtla 1a Sección,La Magdalena Tlaltelulco,Intermedia,100
+90834,Poxtla 2a Sección,La Magdalena Tlaltelulco,Intermedia,100
+90834,Calnahuac,La Magdalena Tlaltelulco,Intermedia,100
+90834,Comalteopan,La Magdalena Tlaltelulco,Intermedia,100
+90834,Satelite,La Magdalena Tlaltelulco,Intermedia,100
+90834,San Nicolás,La Magdalena Tlaltelulco,Intermedia,100
+90835,Teotlalpan,La Magdalena Tlaltelulco,Intermedia,100
+90835,Santa Cruz Yoalcoatl,La Magdalena Tlaltelulco,Intermedia,100
+90835,Yoalcoatl,La Magdalena Tlaltelulco,Intermedia,100
+90835,La Venta,La Magdalena Tlaltelulco,Intermedia,100
+90843,Jesús Xolalpan,San Francisco Tetlanohcan,Intermedia,100
+90843,Santa Cruz Matlacahuacan,San Francisco Tetlanohcan,Intermedia,100
+90845,Dolores Aquiahuac,San Francisco Tetlanohcan,Intermedia,100
+90850,Santa Maria Acxotla Del Monte,Teolocholco,Intermedia,100
+90850,Cuaxinca,Teolocholco,Intermedia,100
+90850,Cuauhtla,Teolocholco,Intermedia,100
+90850,Actipa,Teolocholco,Intermedia,100
+90850,Primera,Teolocholco,Intermedia,100
+90850,Segunda,Teolocholco,Intermedia,100
+90850,Tercera,Teolocholco,Intermedia,100
+90855,El Carmen Aztama,Teolocholco,Intermedia,100
+90860,Acuamanala,Acuamanala de Miguel Hidalgo,Intermedia,100
+90860,Concepción Chimalpa,Acuamanala de Miguel Hidalgo,Intermedia,100
+90861,Guadalupe Hidalgo,Acuamanala de Miguel Hidalgo,Intermedia,100
+90864,Olextla de Juárez,Acuamanala de Miguel Hidalgo,Intermedia,100
+90867,Santa Cruz Quilehtla,Santa Cruz Quilehtla,Intermedia,100
+90867,Ayometitla,Santa Cruz Quilehtla,Intermedia,100
+90870,Primera,Mazatecochco de José María Morelos,Intermedia,100
+90873,Cuarta,Mazatecochco de José María Morelos,Intermedia,100
+90874,Tercera,Mazatecochco de José María Morelos,Intermedia,100
+90875,Segunda,Mazatecochco de José María Morelos,Intermedia,100
+90876,Ramos Muñoz Manzano,Mazatecochco de José María Morelos,Intermedia,100
+90880,Tenancingo,Tenancingo,Intermedia,100
+90880,Tecoac,Tenancingo,Intermedia,100
+90880,Tepepantlalpa (Magdalena Reyes),Tenancingo,Intermedia,100
+90886,Concepción Acopilco,Tenancingo,Intermedia,100
+90890,San Isidro Buen Suceso,San Pablo del Monte,Intermedia,100
+90890,Hueyocotl,San Pablo del Monte,Intermedia,100
+90894,Tetzacual,San Pablo del Monte,Intermedia,100
+90895,Cacamila San Antonio,San Pablo del Monte,Intermedia,100
+90897,Ex-hacienda Guadalupe Xaltelulco,San Pablo del Monte,Intermedia,100
+90898,Acopilco,San Pablo del Monte,Intermedia,100
+90900,Villa Vicente Guerrero,San Pablo del Monte,Intermedia,100
+90920,Cristo,San Pablo del Monte,Intermedia,100
+90930,Xahuén Vargas,San Pablo del Monte,Intermedia,100
+90930,San Nicolás,San Pablo del Monte,Intermedia,100
+90940,San Miguel,San Pablo del Monte,Intermedia,100
+90940,Santiago,San Pablo del Monte,Intermedia,100
+90950,La Santísima,San Pablo del Monte,Intermedia,100
+90960,San Cosme,San Pablo del Monte,Intermedia,100
+90970,Jesús,San Pablo del Monte,Intermedia,100
+90970,San Bartolomé,San Pablo del Monte,Intermedia,100
+90970,San Sebastián,San Pablo del Monte,Intermedia,100
+90980,San Pedro,San Pablo del Monte,Intermedia,100
+90990,Tlaltepango,San Pablo del Monte,Intermedia,100
