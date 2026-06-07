@@ -1,4 +1,5 @@
-import Link from 'next/link';
+import Link from 'next/link'
+import QrSection from '@/componets/admin/QrSection'
 
 const FEATURES = [
   {
@@ -37,6 +38,9 @@ export default function AdminDashboard() {
           </p>
         </div>
       </div>
+
+      {/* QR section */}
+      <QrSection />
 
       {/* Feature cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

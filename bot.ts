@@ -659,18 +659,13 @@ async function procesarMensaje(message: any): Promise<void> {
       const arreglos = await obtenerArreglosConFotos()
       if (arreglos.length > 0) {
         const resumen = arreglos.map((a, i) => `Foto ${i + 1}: "${a.nombre}" — $${a.precio} MXN`).join('\n')
-        if (!yaSeEnviaronFotos(clienteId)) {
-          contextoExtra +=
-            `\n\nINVENTARIO HOY:\n${resumen}\n\n` +
-            `INSTRUCCION CRITICA: Las fotos se envían automáticamente. NUNCA digas que no puedes enviarlas. ` +
-            `Responde máximo 1 línea cálida.`
-          arreglosParaEnviar = arreglos
-          enviarFotos        = true
-        } else {
-          contextoExtra +=
-            `\n\nINVENTARIO HOY (fotos ya enviadas):\n${resumen}\n\n` +
-            `INSTRUCCION: Menciona por nombre y precio. NUNCA digas que no puedes enviar fotos.`
-        }
+        contextoExtra +=
+          `\n\nINVENTARIO HOY:\n${resumen}\n\n` +
+          `INSTRUCCION CRITICA: Las fotos se envían automáticamente. ` +
+          `NUNCA digas que no puedes enviarlas. ` +
+          `Responde máximo 1 línea cálida.`
+        arreglosParaEnviar = arreglos
+        enviarFotos        = true
       } else {
         contextoExtra += `\n\nHoy NO hay arreglos listos. Ofrece pedido personalizado 24-48h. Máximo 2 líneas.`
       }
@@ -687,7 +682,7 @@ async function procesarMensaje(message: any): Promise<void> {
       const arreglosHoy = await obtenerArreglosConFotos()
 
       if (!estaEnHorario()) {
-        if (arreglosHoy.length > 0 && !yaSeEnviaronFotos(clienteId)) {
+        if (arreglosHoy.length > 0) {
           FOTOS_PENDIENTES.set(clienteId, { arreglos: arreglosHoy })
         }
         contextoExtra +=
@@ -696,7 +691,7 @@ async function procesarMensaje(message: any): Promise<void> {
           `${arreglosHoy.length > 0 ? 'También ofrecele ver las fotos de los ramos del día que sí podemos apartar para mañana.' : ''} ` +
           `Para envío complejo: confirmamos a las 10am. Máximo 4 líneas.`
       } else {
-        if (arreglosHoy.length > 0 && !yaSeEnviaronFotos(clienteId)) {
+        if (arreglosHoy.length > 0) {
           const resumen = arreglosHoy.map((a, i) => `Foto ${i + 1}: "${a.nombre}" — $${a.precio} MXN`).join('\n')
           FOTOS_PENDIENTES.set(clienteId, { arreglos: arreglosHoy })
           contextoExtra +=
@@ -970,17 +965,25 @@ const whatsappClient = new Client({
 })
 
 let BOT_QR_EMITIDO = false
+let BOT_QR_ACTUAL: string | null = null
 
 whatsappClient.on('qr', async (qr) => {
   BOT_QR_EMITIDO = true
+  BOT_QR_ACTUAL = qr
   console.log('\n⚡ ¡NUEVO QR! Escanéalo ahora:')
   qrcode.generate(qr, { small: true })
   console.log('\n📱 Subiendo a Supabase como respaldo...')
-  try {
-    const { error } = await supabaseAdmin.from('configuracion_agente').update({ qr_code: qr }).eq('id', 1)
-    if (error) throw error
-    console.log('✅ QR guardado.')
-  } catch (err) { console.error('❌ Error QR Supabase:', err) }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const { error } = await supabaseAdmin.from('configuracion_agente').update({ qr_code: qr }).eq('id', 1)
+      if (error) throw error
+      console.log('✅ QR guardado.')
+      break
+    } catch (err) {
+      console.error(`❌ Error QR Supabase (intento ${attempt + 1}/3):`, err)
+      if (attempt < 2) await new Promise(r => setTimeout(r, 3000))
+    }
+  }
 })
 
 whatsappClient.on('ready', async () => {
@@ -1026,6 +1029,7 @@ whatsappClient.on('ready', async () => {
     }
   }, 5 * 60_000)
 
+  BOT_QR_ACTUAL = null
   try {
     await supabaseAdmin.from('configuracion_agente').update({ qr_code: null }).eq('id', 1)
   } catch (err) { console.error('[bot] Error limpiando QR:', err) }
@@ -1189,6 +1193,10 @@ app.post('/resume', (_req, res) => {
   ultimaVerifPausa = Date.now()
   console.log('[bot] ▶️ Reanudado vía API')
   res.json({ ok: true, pausado: false })
+})
+
+app.get('/qr', (_req, res) => {
+  res.json({ qr: BOT_QR_ACTUAL })
 })
 
 app.get('/status', (_req, res) => {

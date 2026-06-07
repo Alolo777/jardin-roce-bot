@@ -11,7 +11,7 @@ if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error('Falta SUPABASE_SERVICE_ROLE_KEY')
 }
 
-const TIMEOUT_MS = 15_000
+const TIMEOUT_MS = 30_000
 
 async function fetchConTimeout(
   input: RequestInfo | URL,
