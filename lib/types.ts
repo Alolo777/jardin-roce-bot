@@ -17,6 +17,14 @@ export interface VentaCerrada {
   rawToken: string
 }
 
+export interface ZonaEnvio {
+  id: string
+  zona: string
+  precio: number
+  palabras_clave: string
+  creado_en: string
+}
+
 export interface AIResponse {
   mensaje: string               // Texto limpio para enviar al cliente
   ventaCerrada: VentaCerrada | null  // Datos de venta si se detectó el token

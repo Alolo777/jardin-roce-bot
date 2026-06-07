@@ -14,6 +14,8 @@ import {
   enviarAlertaCotizacion,
   enviarAlertaClienteFrustrado,
   enviarAlertaArregloApartado,
+  enviarAlertaQr,
+  enviarAlertaReconectado,
 } from './lib/telegram'
 import { supabaseAdmin } from './lib/supabase'
 import type { MensajeChat } from './lib/ai'
@@ -468,6 +470,40 @@ async function obtenerArreglosConFotos(): Promise<ArregloConFoto[]> {
   } catch (err) { console.error('[bot] Error obteniendo arreglos:', err); return [] }
 }
 
+// ════════════════════════════════════════════════════════════════
+// ZONAS DE ENVÍO
+// ════════════════════════════════════════════════════════════════
+
+interface ZonaEnvioData {
+  id: string; zona: string; precio: number; palabras_clave: string
+}
+
+let cacheZonas: { zonas: ZonaEnvioData[]; ts: number } | null = null
+
+async function obtenerZonasEnvio(): Promise<ZonaEnvioData[]> {
+  const ahora = Date.now()
+  if (cacheZonas && ahora - cacheZonas.ts < 120_000) return cacheZonas.zonas
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('zonas_envio').select('id, zona, precio, palabras_clave').order('precio', { ascending: true })
+    if (error) throw error
+    cacheZonas = { zonas: data ?? [], ts: ahora }
+    return data ?? []
+  } catch (err) { console.error('[bot] Error obteniendo zonas:', err); return [] }
+}
+
+const GOOGLE_MAPS_REGEX = /https?:\/\/(?:www\.)?(?:google\.[a-z]+\/maps|goo\.gl\/maps)[^\s]*/i
+const COORDS_REGEX = /@(-?\d+\.\d+),(-?\d+\.\d+)/
+
+function detectarLinkMaps(texto: string): boolean {
+  return GOOGLE_MAPS_REGEX.test(texto)
+}
+
+function formatearZonasParaPrompt(zonas: ZonaEnvioData[]): string {
+  if (!zonas.length) return ''
+  return zonas.map(z => `- ${z.zona}: $${z.precio.toFixed(2)} MXN (${z.palabras_clave})`).join('\n')
+}
+
 async function apartarArreglo(nombreProducto: string, numeroCliente: string): Promise<void> {
   try {
     const prodSeguro = nombreProducto ? String(nombreProducto).trim() : 'Desconocido'
@@ -702,6 +738,37 @@ async function procesarMensaje(message: any): Promise<void> {
           contextoExtra +=
             `\n\nINSTRUCCION: Envía DIRECTAMENTE el cotizador: ` +
             `https://floreria-app-mauve.vercel.app/ Menciona que puede subir foto de referencia. Máximo 3 líneas.`
+        }
+      }
+    }
+
+    // ── GOOGLE MAPS / ZONAS DE ENVÍO ──────────────────────────────
+    if (detectarLinkMaps(textoCliente)) {
+      const zonas = await obtenerZonasEnvio()
+      if (zonas.length > 0) {
+        contextoExtra +=
+          `\n\n[CLIENTE COMPARTIÓ LINK DE GOOGLE MAPS]\n` +
+          `ZONAS DE ENVÍO DISPONIBLES:\n${formatearZonasParaPrompt(zonas)}\n\n` +
+          `INSTRUCCION: Pregunta amablemente el nombre de su colonia o municipio para asignar la zona correcta. ` +
+          `NUNCA inventes el precio del envío, solo di lo que está en las zonas.`
+      } else {
+        contextoExtra +=
+          `\n\n[CLIENTE COMPARTIÓ LINK DE GOOGLE MAPS]\n` +
+          `INSTRUCCION: No hay zonas de envío configuradas. Di: "Déjame verificarlo y te confirmo el costo 🌸"`
+      }
+    } else {
+      const textoLower = textoCliente.toLowerCase()
+      const zonas = await obtenerZonasEnvio()
+      if (zonas.length > 0) {
+        const zonaMatch = zonas.find(z =>
+          z.palabras_clave.split(',').some(p =>
+            textoLower.includes(p.trim().toLowerCase())
+          )
+        )
+        if (zonaMatch) {
+          contextoExtra +=
+            `\n\n[CLIENTE MENCIONÓ UNA ZONA: "${zonaMatch.zona}" — $${zonaMatch.precio.toFixed(2)} MXN]\n` +
+            `INSTRUCCION: Usa este precio de envío si el cliente pregunta. No lo inventes.`
         }
       }
     }
@@ -984,6 +1051,7 @@ whatsappClient.on('qr', async (qr) => {
       if (attempt < 2) await new Promise(r => setTimeout(r, 3000))
     }
   }
+  enviarAlertaQr()
 })
 
 whatsappClient.on('ready', async () => {
@@ -991,6 +1059,7 @@ whatsappClient.on('ready', async () => {
   console.log('\n✅ Bot de Jardín RoCe conectado!')
   console.log('🌸 Flora está escuchando...\n')
   ultimaActividad = Date.now()
+  if (BOT_QR_EMITIDO) enviarAlertaReconectado()
 
   setInterval(async () => {
     const minSinMensajes = Math.round((Date.now() - ultimaActividad) / 60_000)

@@ -174,6 +174,33 @@ export async function enviarAlertaClienteFrustrado(
   await enviar(msg)
 }
 
+// ════════════════════════════════════════════════════════════════
+// 6. QR / DESCONEXIÓN
+// ════════════════════════════════════════════════════════════════
+
+export async function enviarAlertaQr(): Promise<void> {
+  const msg = [
+    '📱 *BOT DESCONECTADO*',
+    '',
+    'La sesión de WhatsApp expiró o se perdió.',
+    'Escanea el QR en el dashboard para reconectar:',
+    'https://floreria-app-mauve.vercel.app/admin',
+    '',
+    `⏰ *Hora:* ${esc(horaActual())}`,
+  ].join('\n')
+  await enviar(msg)
+}
+
+export async function enviarAlertaReconectado(): Promise<void> {
+  const msg = [
+    '✅ *BOT RECONECTADO*',
+    '',
+    'WhatsApp conectado exitosamente.',
+    `⏰ *Hora:* ${esc(horaActual())}`,
+  ].join('\n')
+  await enviar(msg)
+}
+
 // ── Export legacy ─────────────────────────────────────────────────────────────
 export async function enviarAlertaTelegram(datos: DatosVentaCerrada): Promise<void> {
   return enviarAlertaVentaCerrada(datos)
