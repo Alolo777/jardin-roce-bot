@@ -175,19 +175,67 @@ export async function enviarAlertaClienteFrustrado(
 }
 
 // ════════════════════════════════════════════════════════════════
-// 6. QR / DESCONEXIÓN
+// 6. QR / DESCONEXIÓN — Alertas inteligentes
 // ════════════════════════════════════════════════════════════════
 
+let ultimaAlertaQr     = 0
+let ultimoDiaAlerta    = ''
+let alertaNocturnaEnviada = false
+
+function horaCDMX(): { hora: number; dia: string } {
+  const ahora = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' })
+  const d     = new Date(ahora)
+  return {
+    hora: d.getHours(),
+    dia:  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+  }
+}
+
+/** ¿Podemos enviar una alerta ahora según las reglas de horario? */
+function puedeEnviarAlerta(): boolean {
+  const { hora, dia } = horaCDMX()
+  const ahora = Date.now()
+
+  // Si cambió el día, reiniciamos contadores nocturnos
+  if (dia !== ultimoDiaAlerta) {
+    ultimoDiaAlerta    = dia
+    alertaNocturnaEnviada = false
+  }
+
+  // Horario nocturno (23:00 - 07:59): NO enviar (ya se avisó a las 23:00)
+  if (hora >= 23 || hora < 8) {
+    if (!alertaNocturnaEnviada && hora >= 23) {
+      // Una última alerta a las 23:00
+      alertaNocturnaEnviada = true
+      return true
+    }
+    return false
+  }
+
+  // Horario diurno (08:00 - 22:59): máximo 1 vez por hora
+  if (ahora - ultimaAlertaQr < 60 * 60 * 1000) return false
+
+  ultimaAlertaQr = ahora
+  return true
+}
+
 export async function enviarAlertaQr(): Promise<void> {
+  const { hora } = horaCDMX()
+  const esNoche   = hora >= 23 || hora < 8
+
+  // Si no podemos enviar ahora, salir silenciosamente
+  if (!puedeEnviarAlerta()) return
+
   const msg = [
     '📱 *BOT DESCONECTADO*',
     '',
     'La sesión de WhatsApp expiró o se perdió.',
     'Escanea el QR en el dashboard para reconectar:',
-    'https://floreria-app-mauve.vercel.app/admin',
+    'https://jardin-roce-bot.vercel.app/admin',
     '',
+    esNoche ? '🌙 *Último aviso de la noche. Se reanudará a las 8 AM.*' : '',
     `⏰ *Hora:* ${esc(horaActual())}`,
-  ].join('\n')
+  ].filter(Boolean).join('\n')
   await enviar(msg)
 }
 
@@ -196,6 +244,22 @@ export async function enviarAlertaReconectado(): Promise<void> {
     '✅ *BOT RECONECTADO*',
     '',
     'WhatsApp conectado exitosamente.',
+    `⏰ *Hora:* ${esc(horaActual())}`,
+  ].join('\n')
+  await enviar(msg)
+  // Resetear contadores al reconectar
+  ultimaAlertaQr = 0
+  alertaNocturnaEnviada = false
+}
+
+export async function enviarAlertaDiariaDesconexion(): Promise<void> {
+  const msg = [
+    '☀️ *BUENOS DÍAS — BOT SIGUE DESCONECTADO*',
+    '',
+    'Anoche no se pudo restablecer la conexión de WhatsApp.',
+    'Escanea el QR en el dashboard para reconectar:',
+    'https://jardin-roce-bot.vercel.app/admin',
+    '',
     `⏰ *Hora:* ${esc(horaActual())}`,
   ].join('\n')
   await enviar(msg)

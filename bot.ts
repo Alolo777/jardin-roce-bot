@@ -16,6 +16,7 @@ import {
   enviarAlertaArregloApartado,
   enviarAlertaQr,
   enviarAlertaReconectado,
+  enviarAlertaDiariaDesconexion,
 } from './lib/telegram'
 import { supabaseAdmin } from './lib/supabase'
 import type { MensajeChat } from './lib/ai'
@@ -272,6 +273,34 @@ let ultimaActividad = Date.now()
 function registrarActividad(): void { ultimaActividad = Date.now() }
 
 // ════════════════════════════════════════════════════════════════
+// CONTADOR DE REINICIOS — limpia sesión tras 3 fallos en 10 min
+// ════════════════════════════════════════════════════════════════
+
+let crashCount      = 0
+let crashWindowStart = Date.now()
+const MAX_CRASHES    = 3
+const CRASH_WINDOW_MS = 10 * 60 * 1000
+
+function registrarCrash(): void {
+  const ahora = Date.now()
+  if (ahora - crashWindowStart > CRASH_WINDOW_MS) {
+    crashCount = 0
+    crashWindowStart = ahora
+  }
+  crashCount++
+  console.warn(`[Crash] ${crashCount}/${MAX_CRASHES} reinicios en ventana de 10 min`)
+
+  if (crashCount >= MAX_CRASHES) {
+    const sessionPath = process.env.WWEBJS_AUTH_PATH || '.wwebjs_auth'
+    console.warn(`[Crash] 🧹 Demasiados reinicios — limpiando sesión WhatsApp en ${sessionPath}...`)
+    import('fs').then(fs => {
+      fs.rmSync(sessionPath, { recursive: true, force: true })
+      console.warn('[Crash] ✅ Sesión eliminada. Se generará QR fresco al reiniciar.')
+    }).catch(err => console.error('[Crash] Error limpiando sesión:', err))
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
 // MONITOR DE MEMORIA
 // ════════════════════════════════════════════════════════════════
 
@@ -307,6 +336,25 @@ setInterval(async () => {
     console.log('[bot] ✨ Caché limpia.')
   } catch { /* ignorar si la página se estaba recargando */ }
 }, 45 * 60_000)
+
+// ════════════════════════════════════════════════════════════════
+// ALERTA PERIÓDICA DE DESCONEXIÓN — cada 30 min revisa si toca avisar
+// ════════════════════════════════════════════════════════════════
+
+let ultimoDiaAlertaDiaria = ''
+setInterval(() => {
+  if (BOT_READY) return
+  const ahora = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' })
+  const d     = new Date(ahora)
+  const hora  = d.getHours()
+  const dia   = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+  // A las 8:00-8:30 AM, si sigue desconectado y no hemos avisado hoy
+  if (hora === 8 && dia !== ultimoDiaAlertaDiaria) {
+    ultimoDiaAlertaDiaria = dia
+    enviarAlertaDiariaDesconexion().catch(() => {})
+  }
+}, 30 * 60_000)
 
 // ════════════════════════════════════════════════════════════════
 // LÍMITES Y RATE LIMITING
@@ -1122,6 +1170,13 @@ whatsappClient.on('qr', async (qr) => {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const { error } = await supabaseAdmin.from('configuracion_agente').update({ qr_code: qr }).eq('id', 1)
+      if (error?.message?.includes('0 rows')) {
+        // La fila no existe — crearla
+        const { error: insErr } = await supabaseAdmin.from('configuracion_agente').insert({ id: 1, qr_code: qr, bot_pausado: false })
+        if (insErr) throw insErr
+        console.log('✅ QR guardado (INSERT).')
+        break
+      }
       if (error) throw error
       console.log('✅ QR guardado.')
       break
@@ -1172,6 +1227,7 @@ whatsappClient.on('ready', async () => {
       // getState() falló — el cliente está desconectado
       if (minSinMensajes >= 5) {
         console.error('[Watchdog] Error crítico en getState — forzando reinicio:', err)
+        registrarCrash()
         process.exit(1)
       }
     }
@@ -1189,22 +1245,31 @@ whatsappClient.on('ready', async () => {
     const page = whatsappClient.pupPage
     if (page) {
       page.removeAllListeners('framenavigated')
+      let reconectando = false
       page.on('framenavigated', async (frame: any) => {
-        if (frame !== page.mainFrame()) return
+        if (frame !== page.mainFrame() || reconectando) return
+        reconectando = true
 
-        console.warn('[bot] 🔄 WhatsApp Web recargado. Reiniciando en 8s para limpiar hooks...')
-        // Dar tiempo para que mensajes en vuelo terminen antes de matar el proceso
-        const t = setTimeout(() => {
-          console.log('[bot] 💀 Forzando reinicio limpio vía systemd...')
+        console.warn('[bot] 🔄 WhatsApp Web recargado. Intentando reconectar sin reiniciar proceso...')
+
+        try {
+          await whatsappClient.destroy().catch(() => {})
+          await new Promise(r => setTimeout(r, 5000))
+          BOT_READY = false
+          BOT_QR_EMITIDO = false
+          await whatsappClient.initialize()
+          console.log('[bot] ✅ Reconexión tras recarga exitosa.')
+        } catch (err) {
+          console.error('[bot] ❌ No se pudo reconectar tras recarga — forzando reinicio:', err)
+          registrarCrash()
           process.exit(1)
-        }, 8_000)
-        t.unref() // No bloquear el event loop
+        }
       })
     }
   } catch (err) { console.warn('[bot] No se pudo registrar framenavigated:', err) }
 })
 
-whatsappClient.on('auth_failure', (msg) => { console.error('❌ Auth:', msg); process.exit(1) })
+whatsappClient.on('auth_failure', (msg) => { console.error('❌ Auth:', msg); registrarCrash(); process.exit(1) })
 
 whatsappClient.on('disconnected', (reason) => {
   console.warn('⚠️ Desconectado:', reason)
@@ -1285,12 +1350,13 @@ const startupWatchdog = setInterval(() => {
     // Forzar reconexión completa
     console.warn('[Startup] 🔄 Forzando reinicio por timeout de inicialización...')
     clearInterval(startupWatchdog)
+    registrarCrash()
     process.exit(1)
   }
 }, 30_000)
 startupWatchdog.unref()
 
-whatsappClient.initialize().catch((err) => { console.error('❌ Error:', err); process.exit(1) })
+whatsappClient.initialize().catch((err) => { console.error('❌ Error:', err); registrarCrash(); process.exit(1) })
 
 async function gracefulShutdown(signal: string): Promise<void> {
   console.log(`\n⚠️ ${signal} recibido — cerrando graceful...`)
