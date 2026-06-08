@@ -110,6 +110,7 @@ export default function MunicipiosPage() {
   const [importando, setImportando] = useState(false)
   const [mensajeImport, setMensajeImport] = useState<string | null>(null)
   const [importExitoso, setImportExitoso] = useState(false)
+  const [exportando, setExportando] = useState(false)
 
   async function cargarMunicipios(buscar?: string) {
     try {
@@ -222,11 +223,33 @@ export default function MunicipiosPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-800">🏘️ Municipios de Envío</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          {municipios.length} municipios/colonias registrados
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-800">🏘️ Municipios de Envío</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {municipios.length} municipios/colonias registrados
+          </p>
+        </div>
+        <button onClick={async () => {
+          setExportando(true)
+          try {
+            const res = await fetch('/api/municipios/export')
+            if (!res.ok) throw new Error('No hay datos')
+            const blob = await res.blob()
+            const url = window.URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `municipios_envio_${new Date().toISOString().split('T')[0]}.csv`
+            a.click()
+            window.URL.revokeObjectURL(url)
+          } catch (err) {
+            alert(err instanceof Error ? err.message : 'Error al exportar')
+          } finally { setExportando(false) }
+        }} disabled={exportando}
+          className="flex items-center gap-1.5 px-4 py-2 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition shadow-sm disabled:opacity-50">
+          <span>📥</span>
+          <span className="hidden sm:inline">{exportando ? 'Exportando...' : 'Exportar CSV'}</span>
+        </button>
       </div>
 
       {/* Buscador */}

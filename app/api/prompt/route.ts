@@ -39,6 +39,15 @@ export async function PUT(request: NextRequest) {
       )
     }
 
+    // Obtener prompt actual antes de actualizar
+    const { data: actual, error: getError } = await supabaseAdmin
+      .from('configuracion_bot')
+      .select('valor')
+      .eq('clave', CLAVE_PROMPT)
+      .single()
+
+    if (getError) throw getError
+
     const { data, error } = await supabaseAdmin
       .from('configuracion_bot')
       .update({ valor: prompt.trim() })
@@ -47,6 +56,17 @@ export async function PUT(request: NextRequest) {
       .single()
 
     if (error) throw error
+
+    // Guardar en historial
+    const { error: historialError } = await supabaseAdmin.from('historial_prompt').insert({
+      prompt_anterior: actual?.valor ?? '',
+      prompt_nuevo: prompt.trim(),
+      editado_por: 'admin',
+    })
+
+    if (historialError) {
+      console.error('[API /prompt] Error guardando historial:', historialError)
+    }
 
     return NextResponse.json({
       ok: true,

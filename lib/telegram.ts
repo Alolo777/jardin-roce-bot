@@ -265,6 +265,64 @@ export async function enviarAlertaDiariaDesconexion(): Promise<void> {
   await enviar(msg)
 }
 
+// ════════════════════════════════════════════════════════════════
+// 7. SOLICITUD DE CANCELACIÓN
+// ════════════════════════════════════════════════════════════════
+
+export async function enviarAlertaCancelacion(
+  numeroCliente: string,
+  descripcion: string
+): Promise<void> {
+  const msg = [
+    '🚫 *SOLICITUD DE CANCELACIÓN*',
+    '',
+    `📱 *Teléfono:* ${ultimos4(numeroCliente)}`,
+    `💬 *Motivo:* ${esc(descripcion.slice(0, 300))}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '⚠️ _Revisar pedido y contactar al cliente_',
+  ].join('\n')
+  await enviar(msg)
+}
+
+// ════════════════════════════════════════════════════════════════
+// 8. QUEJA O PRODUCTO DAÑADO
+// ════════════════════════════════════════════════════════════════
+
+export async function enviarAlertaQueja(
+  numeroCliente: string,
+  descripcion: string
+): Promise<void> {
+  const msg = [
+    '⚠️ *QUEJA DEL CLIENTE*',
+    '',
+    `📱 *Teléfono:* ${ultimos4(numeroCliente)}`,
+    `💬 *Reporta:* ${esc(descripcion.slice(0, 300))}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '🙋 _Atención prioritaria requerida_',
+  ].join('\n')
+  await enviar(msg)
+}
+
+// ════════════════════════════════════════════════════════════════
+// 9. VENTA DEL DÍA (para reportes)
+// ════════════════════════════════════════════════════════════════
+
+export async function enviarAlertaVentaDelDia(
+  totalVentas: number,
+  cantidadVentas: number
+): Promise<void> {
+  const msg = [
+    '📊 *RESUMEN DE VENTAS*',
+    '',
+    `💰 *Total vendido:* $${totalVentas.toFixed(2)} MXN`,
+    `📦 *Ventas hoy:* ${cantidadVentas}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+  ].join('\n')
+  await enviar(msg)
+}
+
 // ── Export legacy ─────────────────────────────────────────────────────────────
 export async function enviarAlertaTelegram(datos: DatosVentaCerrada): Promise<void> {
   return enviarAlertaVentaCerrada(datos)

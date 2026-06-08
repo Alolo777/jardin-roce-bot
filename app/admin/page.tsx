@@ -1,3 +1,6 @@
+'use client'
+
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import QrSection from '@/componets/admin/QrSection'
 
@@ -18,7 +21,128 @@ const FEATURES = [
     gradient: 'from-emerald-400 to-teal-400',
     shadow: 'shadow-emerald-200/40',
   },
+  {
+    href: '/admin/municipios',
+    icon: '🏘️',
+    title: 'Municipios de Envío',
+    desc: 'Gestiona las zonas de envío, precios y colonias. Importa o exporta datos fácilmente.',
+    gradient: 'from-cyan-400 to-blue-400',
+    shadow: 'shadow-cyan-200/40',
+  },
+  {
+    href: '/admin/ignorados',
+    icon: '🔇',
+    title: 'Números Silenciados',
+    desc: 'Administra qué números de WhatsApp debe ignorar Flora (repartidor, administradores).',
+    gradient: 'from-amber-400 to-orange-400',
+    shadow: 'shadow-amber-200/40',
+  },
 ]
+
+function BotStatusPanel() {
+  const [status, setStatus] = useState<any>(null)
+  const [cargando, setCargando] = useState(true)
+
+  useEffect(() => {
+    async function cargar() {
+      try {
+        const res = await fetch('/api/bot/status')
+        const data = await res.json()
+        setStatus(data)
+      } catch {
+        setStatus({ connected: false, pausado: false })
+      } finally {
+        setCargando(false)
+      }
+    }
+    cargar()
+    const interval = setInterval(cargar, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
+  if (cargando) {
+    return (
+      <div className="bg-white/80 rounded-2xl p-6 border border-gray-100 animate-pulse">
+        <div className="h-16 bg-gray-100 rounded-xl" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-md border border-gray-100/80 p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <span className="w-1 h-6 bg-gradient-to-b from-rose-400 to-pink-400 rounded-full" />
+          <h2 className="text-lg font-semibold text-gray-800">🤖 Estado del Bot</h2>
+        </div>
+        <span className="text-xs text-gray-400">Se actualiza cada 30s</span>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {/* Conexión */}
+        <div className="bg-gray-50/80 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`relative flex w-2.5 h-2.5 ${status.connected ? '' : ''}`}>
+              <span className={`absolute inset-0 rounded-full ${status.connected ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+              {status.connected && (
+                <span className="absolute inset-0 rounded-full bg-emerald-500 animate-ping opacity-40" />
+              )}
+            </span>
+            <span className="text-xs text-gray-500">WhatsApp</span>
+          </div>
+          <p className={`text-sm font-bold ${status.connected ? 'text-emerald-700' : 'text-rose-700'}`}>
+            {status.connected ? 'Conectado' : 'Desconectado'}
+          </p>
+        </div>
+
+        {/* Bot activo/pausado */}
+        <div className="bg-gray-50/80 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`relative flex w-2.5 h-2.5`}>
+              <span className={`absolute inset-0 rounded-full ${status.pausado ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+            </span>
+            <span className="text-xs text-gray-500">Flora</span>
+          </div>
+          <p className={`text-sm font-bold ${status.pausado ? 'text-amber-700' : 'text-emerald-700'}`}>
+            {status.pausado ? 'Pausada' : 'Activa'}
+          </p>
+        </div>
+
+        {/* Ventas hoy */}
+        <div className="bg-gray-50/80 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs">💰</span>
+            <span className="text-xs text-gray-500">Ventas hoy</span>
+          </div>
+          <p className="text-sm font-bold text-gray-800">
+            {status.ventasHoy ?? '—'} ventas
+          </p>
+          {status.totalVentasHoy !== undefined && (
+            <p className="text-xs text-gray-500">
+              ${(status.totalVentasHoy || 0).toFixed(2)} MXN
+            </p>
+          )}
+        </div>
+
+        {/* Actividad */}
+        <div className="bg-gray-50/80 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs">⏱️</span>
+            <span className="text-xs text-gray-500">Actividad</span>
+          </div>
+          <p className="text-sm font-bold text-gray-800">
+            {status.ultimaActividad ?? '—'}
+          </p>
+          {status.clientesAtendidosHoy !== undefined && (
+            <p className="text-xs text-gray-500">
+              {status.clientesAtendidosHoy} msgs hoy
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function AdminDashboard() {
   return (
@@ -41,6 +165,9 @@ export default function AdminDashboard() {
 
       {/* QR section */}
       <QrSection />
+
+      {/* Bot Status */}
+      <BotStatusPanel />
 
       {/* Feature cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

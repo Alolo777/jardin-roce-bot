@@ -148,6 +148,7 @@ function QrDisplay() {
 }
 
 const NAV_LINKS = [
+  { href: '/admin', label: 'Dashboard', icon: '📊' },
   { href: '/admin/inventario', label: 'Inventario', icon: '🌷' },
   { href: '/admin/prompt', label: 'Cerebro', icon: '🧠' },
   { href: '/admin/municipios', label: 'Municipios', icon: '🏘️' },

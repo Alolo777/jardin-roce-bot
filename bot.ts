@@ -17,9 +17,12 @@ import {
   enviarAlertaQr,
   enviarAlertaReconectado,
   enviarAlertaDiariaDesconexion,
+  enviarAlertaCancelacion,
+  enviarAlertaQueja,
 } from './lib/telegram'
 import { supabaseAdmin } from './lib/supabase'
 import type { MensajeChat } from './lib/ai'
+import type { VentaCerrada } from './lib/types'
 
 // ════════════════════════════════════════════════════════════════
 // HISTORIAL DE CONVERSACIONES
@@ -201,6 +204,80 @@ async function obtenerNumeroReal(message: any): Promise<string> {
     CACHE_NUMEROS.set(raw, numero)
     return numero
   }
+}
+
+// ════════════════════════════════════════════════════════════════
+// DETECCIÓN DE CANCELACIÓN, QUEJAS Y EVENTOS ESPECIALES
+// ════════════════════════════════════════════════════════════════
+
+const KW_CANCELACION = [
+  'cancelar', 'cancela', 'cancelación', 'cancelacion', 'ya no quiero',
+  'quiero cancelar', 'mejor ya no', 'ya no lo quiero', 'cancel',
+  'quiero revertir', 'reversar',
+]
+
+const KW_QUEJA = [
+  'queja', 'reclamo', 'producto dañado', 'llegó mal', 'llegó roto',
+  'flores marchitas', 'flores feas', 'no es lo que pedí', 'pedido incorrecto',
+  'devolución', 'devolucion', 'reembolso', 'me cobraron mal',
+  'no llegó', 'no llego', 'pedido incompleto',
+]
+
+const KW_EVENTOS = [
+  'boda', 'casamiento', 'me caso', 'me voy a casar',
+  'xv años', 'quinceañera', 'quince años', 'xv',
+  'funeral', 'velorio', 'falleció', 'fallecio', 'muerte', 'luto',
+  'aniversario', 'graduación', 'graduacion', 'baby shower',
+  'san valentín', 'san valentin', '14 de febrero', '10 de mayo',
+  'día de las madres', 'dia de las madres',
+]
+
+function detectarCancelacion(texto: string): boolean {
+  const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  return KW_CANCELACION.some(k => n.includes(k))
+}
+
+function detectarQueja(texto: string): boolean {
+  const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  return KW_QUEJA.some(k => n.includes(k))
+}
+
+function detectarEvento(texto: string): string | null {
+  const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  const matched = KW_EVENTOS.find(k => n.includes(k))
+  return matched || null
+}
+
+// ════════════════════════════════════════════════════════════════
+// VALIDACIÓN POST-AI DE PRECIOS
+// ════════════════════════════════════════════════════════════════
+
+function validarPreciosEnRespuesta(respuesta: string, arreglos: ArregloConFoto[]): { valido: boolean; advertencia?: string } {
+  // Extraer montos en formato $XXX del texto
+  const preciosMencionados = respuesta.match(/\$\s*([\d,]+(?:\.\d{1,2})?)\s*MXN/g)
+  if (!preciosMencionados) return { valido: true }
+
+  const preciosReales = new Set(arreglos.map(a => a.precio))
+  const preciosConTexto = respuesta.match(/\$\s*([\d,]+(?:\.\d{1,2})?)\s*MXN/g) || []
+
+  for (const p of preciosConTexto) {
+    const monto = parseFloat(p.replace(/[$,]\s*/g, '').replace(/,/g, ''))
+    // Si menciona un precio que no existe en inventario ni es $60 (precio general) ni es precio de envío
+    if (!preciosReales.has(monto) && monto !== 60 && !respuesta.includes('envío') && !respuesta.includes('Envío')) {
+      // Checar si está mencionando un arreglo específico con este precio
+      const contextoAlrededor = respuesta.substring(
+        Math.max(0, respuesta.indexOf(p) - 40),
+        Math.min(respuesta.length, respuesta.indexOf(p) + 40)
+      )
+      // Si el contexto incluye "desde" o "base", es un precio general, no un arreglo específico
+      if (contextoAlrededor.includes('desde') || contextoAlrededor.includes('base')) continue
+      return {
+        valido: false,
+        advertencia: `La IA mencionó el precio ${p} que no coincide con ningún arreglo disponible (${arreglos.map(a => `$${a.precio}`).join(', ')})`
+      }
+    }
+  }
+  return { valido: true }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -401,6 +478,72 @@ function avisarRateLimitUnaVez(message: any, id: string): void {
   setTimeout(() => RATE_AVISADOS.delete(id), RATE_LIMIT_WINDOW_MS)
 }
 
+// ════════════════════════════════════════════════════════════════
+// REPORTE DE VENTAS
+// ════════════════════════════════════════════════════════════════
+
+async function registrarVenta(clienteNombre: string, telefono: string, producto: string, total: string, direccion: string): Promise<void> {
+  try {
+    const precioNumerico = parseFloat(total.replace(/[^0-9.]/g, '')) || 0
+    const { error } = await supabaseAdmin.from('reporte_ventas').insert({
+      cliente_telefono: telefono,
+      cliente_nombre: clienteNombre,
+      producto,
+      precio_total: precioNumerico,
+      direccion_entrega: direccion,
+      metodo_pago: 'transferencia',
+      estado: 'pagado',
+    })
+    if (error) console.error('[bot] Error registrando venta:', error)
+  } catch (err) { console.error('[bot] Error en registrarVenta:', err) }
+}
+
+async function obtenerVentasHoy(): Promise<{ total: number; cantidad: number }> {
+  try {
+    const hoy = new Date().toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' })
+    const inicio = new Date(hoy)
+    inicio.setHours(0, 0, 0, 0)
+    const fin = new Date(hoy)
+    fin.setHours(23, 59, 59, 999)
+
+    const { data, error } = await supabaseAdmin
+      .from('reporte_ventas')
+      .select('precio_total')
+      .gte('creado_en', inicio.toISOString())
+      .lte('creado_en', fin.toISOString())
+
+    if (error) throw error
+    const cantidad = data?.length ?? 0
+    const total = data?.reduce((sum, r) => sum + (r.precio_total || 0), 0) ?? 0
+    return { total, cantidad }
+  } catch (err) {
+    console.error('[bot] Error obteniendo ventas hoy:', err)
+    return { total: 0, cantidad: 0 }
+  }
+}
+
+async function obtenerClientesAtendidosHoy(): Promise<number> {
+  try {
+    const hoy = new Date().toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' })
+    const inicio = new Date(hoy)
+    inicio.setHours(0, 0, 0, 0)
+    const fin = new Date(hoy)
+    fin.setHours(23, 59, 59, 999)
+
+    const { count, error } = await supabaseAdmin
+      .from('historial_chat')
+      .select('*', { count: 'exact', head: true })
+      .gte('creado_en', inicio.toISOString())
+      .lte('creado_en', fin.toISOString())
+
+    if (error) throw error
+    return count ?? 0
+  } catch (err) {
+    console.error('[bot] Error obteniendo clientes hoy:', err)
+    return 0
+  }
+}
+
 const COLA_POR_CLIENTE = new Map<string, Promise<void>>()
 
 function encolarPorCliente(id: string, tarea: () => Promise<void>): void {
@@ -467,6 +610,8 @@ function parsearPedidoCotizador(texto: string): PedidoWebParseado {
 const FOTOS_PENDIENTES = new Map<string, { arreglos: ArregloConFoto[] }>()
 const ULTIMOS_ARREGLOS = new Map<string, ArregloConFoto[]>()
 const VENTAS_CERRADAS  = new Set<string>()
+const VENTA_ACTUAL     = new Map<string, VentaCerrada>()
+const ARREGLO_ELEGIDO  = new Map<string, ArregloConFoto>()
 
 // ════════════════════════════════════════════════════════════════
 // DETECCIÓN DE INTENCIÓN
@@ -582,28 +727,52 @@ async function obtenerMunicipiosEnvio(): Promise<MunicipioEnvioData[]> {
   } catch (err) { console.error('[bot] Error obteniendo municipios:', err); return [] }
 }
 
-async function buscarPrecioEnvio(texto: string): Promise<{ zona: string; precio: number; fuente: string } | null> {
-  const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
+function normalizarTexto(texto: string): string {
+  return texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
+}
 
-  // 1. Buscar en municipios_envio (más preciso)
+function contieneFrase(texto: string, frase: string): boolean {
+  if (!frase) return false
+  const segura = frase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(^|\\s)${segura}(\\s|$)`).test(texto)
+}
+
+async function buscarPrecioEnvio(texto: string): Promise<{ zona: string; precio: number; fuente: string } | null> {
+  const n = normalizarTexto(texto)
+
+  // 1. Buscar por scoring: CP > municipio > colonia. Evita que "centro" gane sobre "San Andrés".
   const municipios = await obtenerMunicipiosEnvio()
   if (municipios.length > 0) {
-    const match = municipios.find(m => {
-      const nomMunicipio = m.municipio.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      const nomColonia = (m.colonia ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      const cp = m.codigo_postal.trim()
-      return nomMunicipio.includes(n) || n.includes(nomMunicipio) || (nomColonia && (nomColonia.includes(n) || n.includes(nomColonia))) || n.includes(cp)
-    })
+    const candidatos = municipios
+      .map(m => {
+        const nomMunicipio = normalizarTexto(m.municipio)
+        const nomColonia = normalizarTexto(m.colonia ?? '')
+        const cp = m.codigo_postal.trim()
+        let score = 0
+
+        if (cp && n.includes(cp)) score += 200
+        if (contieneFrase(n, nomMunicipio) || n.includes(nomMunicipio)) score += 120 + nomMunicipio.length
+        if (nomColonia && (contieneFrase(n, nomColonia) || n.includes(nomColonia))) {
+          score += nomColonia.length <= 7 ? 35 : 70 + nomColonia.length
+        }
+
+        return { municipio: m, score }
+      })
+      .filter(c => c.score > 0)
+      .sort((a, b) => b.score - a.score)
+
+    const match = candidatos[0]?.municipio
     if (match) return { zona: match.zona, precio: match.precio_envio, fuente: 'municipios' }
   }
 
-  // 2. Fallback: buscar en zonas_envio por palabras clave
+  // 2. Fallback: buscar en zonas_envio por palabras clave exactas por frase.
   const zonas = await obtenerZonasEnvio()
   if (zonas.length > 0) {
     const zonaMatch = zonas.find(z =>
-      z.palabras_clave.split(',').some(p =>
-        n.includes(p.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''))
-      )
+      z.palabras_clave.split(',').some(p => {
+        const palabra = normalizarTexto(p.trim())
+        return palabra && contieneFrase(n, palabra)
+      })
     )
     if (zonaMatch) return { zona: zonaMatch.zona, precio: zonaMatch.precio, fuente: 'zonas' }
   }
@@ -629,7 +798,7 @@ async function apartarArreglo(nombreProducto: string, numeroCliente: string): Pr
     console.log(`[bot] 🔍 Buscando en DB: "${prodSeguro}"`)
 
     const { data: arreglos, error } = await supabaseAdmin
-      .from('arreglos_diarios').select('id, nombre, precio').eq('estado', 'disponible')
+      .from('arreglos_diarios').select('id, nombre, precio, estado').in('estado', ['disponible', 'apartado'])
 
     if (error) { console.error('[bot] ❌ Error DB:', error.message); return }
     if (!arreglos?.length) { console.log('[bot] ⚠️ No hay arreglos disponibles.'); return }
@@ -639,7 +808,7 @@ async function apartarArreglo(nombreProducto: string, numeroCliente: string): Pr
     const normProd = norm(prodSeguro)
     const normPals = normProd.split(/\s+/).filter(Boolean)
 
-    let match: { id: string; nombre: string; precio: number } | undefined
+    let match: { id: string; nombre: string; precio: number; estado: string } | undefined
     for (const a of arreglos) {
       const n = norm(a.nombre)
       if (n === normProd) { match = a; break }
@@ -650,18 +819,21 @@ async function apartarArreglo(nombreProducto: string, numeroCliente: string): Pr
         if (n.includes(normProd) || normProd.includes(n)) { match = a; break }
       }
     }
-    if (!match && normPals.length >= 2) {
+    const palabrasClave = normPals.filter(p => !['ramo', 'ramos', 'arreglo', 'arreglos', 'bouquet', 'flor', 'flores'].includes(p))
+    if (!match && palabrasClave.length >= 2) {
       for (const a of arreglos) {
         const n = norm(a.nombre)
-        const aciertos = normPals.filter(p => n.includes(p))
-        if (aciertos.length >= normPals.length * 0.6) { match = a; break }
+        const aciertos = palabrasClave.filter(p => n.includes(p))
+        if (aciertos.length >= Math.ceil(palabrasClave.length * 0.75)) { match = a; break }
       }
     }
 
     if (match) {
-      const { error: updateError } = await supabaseAdmin
-        .from('arreglos_diarios').update({ estado: 'apartado' }).eq('id', match.id)
-      if (updateError) throw updateError
+      if (match.estado !== 'apartado') {
+        const { error: updateError } = await supabaseAdmin
+          .from('arreglos_diarios').update({ estado: 'apartado' }).eq('id', match.id)
+        if (updateError) throw updateError
+      }
       console.log(`[bot] 📦 "${match.nombre}" → apartado`)
       enviarAlertaArregloApartado(match.nombre, match.precio, numeroCliente)
         .catch(err => console.error('[bot] Telegram apartado:', err))
@@ -671,8 +843,8 @@ async function apartarArreglo(nombreProducto: string, numeroCliente: string): Pr
   } catch (err) { console.error('[bot] Error apartando:', err) }
 }
 
-async function enviarFotosArreglos(client: Client, chatId: string, arreglos: ArregloConFoto[]): Promise<void> {
-  if (!arreglos.length) return
+async function enviarFotosArreglos(client: Client, chatId: string, arreglos: ArregloConFoto[]): Promise<number> {
+  if (!arreglos.length) return 0
 
   const resultados = await Promise.all(
     arreglos.map(a =>
@@ -682,6 +854,7 @@ async function enviarFotosArreglos(client: Client, chatId: string, arreglos: Arr
     )
   )
 
+  let enviadas = 0
   for (const r of resultados) {
     if (!r.ok) continue
     try {
@@ -689,6 +862,7 @@ async function enviarFotosArreglos(client: Client, chatId: string, arreglos: Arr
         `💐 *${r.arreglo.nombre}*\n💰 $${r.arreglo.precio.toFixed(2)} MXN` +
         (r.arreglo.descripcion ? `\n📝 ${r.arreglo.descripcion}` : '')
       await client.sendMessage(chatId, r.media, { caption })
+      enviadas++
       await new Promise(res => setTimeout(res, 200))
     } catch (err) {
       const errStr = String(err)
@@ -699,6 +873,8 @@ async function enviarFotosArreglos(client: Client, chatId: string, arreglos: Arr
       console.error(`[bot] Error enviando "${r.arreglo.nombre}":`, err)
     }
   }
+
+  return enviadas
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -811,6 +987,7 @@ async function procesarMensaje(message: any): Promise<void> {
           )
           if (match) {
             arregloReferenciado = match
+            ARREGLO_ELEGIDO.set(clienteId, match)
             console.log(`[bot] 📸 Cliente respondió a foto de "${match.nombre}"`)
           }
         }
@@ -819,6 +996,16 @@ async function procesarMensaje(message: any): Promise<void> {
 
     // ── Saludo dinámico en primer mensaje ─────────────────────────
     const historialCompleto = await obtenerHistorial(telefono)
+    const historialTexto = historialCompleto.map(m => m.content).join('\n').toLowerCase()
+    const confirmaCorto = /^(ok|okay|okey|oki|okis|vale|va|dale|s[ií]|si|perfecto|de acuerdo|esta bien|está bien)$/i.test(textoCliente.trim())
+    if (confirmaCorto && /env[ií]o a esa zona cuesta|costo.*env[ií]o|cuesta \$/.test(historialTexto)) {
+      contextoExtra +=
+        `\n\n[CLIENTE ACEPTÓ EL COSTO DE ENVÍO] ` +
+        `INSTRUCCION: Para entrega a domicilio, pide el nombre para apartarlo y comparte la cuenta BBVA. ` +
+        `NO ofrezcas efectivo/tarjeta al recoger porque el cliente pidió envío. ` +
+        `Pregunta una sola cosa si falta: "¿A qué nombre lo aparto?".`
+    }
+
     if (historialCompleto.length === 0) {
       const saludos = [
         'PRESENTATE así: "¡Hola! Soy Flora 🌸, la asistente de Jardín RoCe. ¿En qué te puedo ayudar hoy?"',
@@ -837,17 +1024,31 @@ async function procesarMensaje(message: any): Promise<void> {
     if (intencion === 'inventario') {
       const arreglos = await obtenerArreglosConFotos()
       if (arreglos.length > 0) {
-        const resumen = arreglos.map((a, i) => `Foto ${i + 1}: "${a.nombre}" — $${a.precio} MXN`).join('\n')
-        contextoExtra +=
-          `\n\nINVENTARIO HOY:\n${resumen}\n\n` +
-          `INSTRUCCION CRITICA: Las fotos se envían automáticamente. ` +
-          `NUNCA digas que no puedes enviarlas. ` +
-          `Responde máximo 1 línea cálida.`
-        arreglosParaEnviar = arreglos
-        enviarFotos        = true
-      } else {
-        contextoExtra += `\n\nHoy NO hay arreglos listos. Ofrece pedido personalizado 24-48h. Máximo 2 líneas.`
+        const respuestaFotos = '¡Claro! Ahorita te mando las fotos de lo que tenemos disponible hoy 🌸'
+        await agregarAlHistorial(telefono, 'assistant', respuestaFotos)
+        await simularEscritura(chat, 900)
+        await message.reply(respuestaFotos)
+
+        const fotosEnviadas = await enviarFotosArreglos(whatsappClient, clienteId, arreglos)
+        if (fotosEnviadas > 0) {
+          marcarFotosEnviadas(clienteId)
+          ULTIMOS_ARREGLOS.set(clienteId, arreglos)
+        }
+        FOTOS_PENDIENTES.delete(clienteId)
+
+        const resumenFotos = arreglos.map((a, i) => `Foto ${i + 1}: ${a.nombre} ($${a.precio} MXN)`).join(', ')
+        if (fotosEnviadas > 0) {
+          await agregarAlHistorial(telefono, 'assistant', `[Sistema] Fotos enviadas: ${resumenFotos}`)
+        }
+        const cta = fotosEnviadas > 0
+          ? '¿Alguno te llamó la atención? 🌸\nSolo dime cuál y lo aparto para ti. 🌹'
+          : 'Perdón, se me atoraron las fotos ahorita 😅 Dime si quieres que intentemos de nuevo o te paso nombres y precios.'
+        await whatsappClient.sendMessage(clienteId, cta)
+        await agregarAlHistorial(telefono, 'assistant', cta)
+        return
       }
+
+      contextoExtra += `\n\nHoy NO hay arreglos listos. Ofrece pedido personalizado 24-48h. Máximo 2 líneas.`
     }
 
     else if (intencion === 'catalogo') {
@@ -927,12 +1128,56 @@ async function procesarMensaje(message: any): Promise<void> {
         `\nINSTRUCCION: El usuario respondió específicamente a ese mensaje. Úsalo para entender a qué se refiere.`
     }
 
+    // ── CANCELACIÓN ─────────────────────────────────────────────
+    if (detectarCancelacion(textoCliente)) {
+      contextoExtra +=
+        `\n\n[CLIENTE QUIERE CANCELAR UN PEDIDO]` +
+        `\nINSTRUCCION: Responde con empatía. Di que notificarás al equipo. ` +
+        `NO prometas reembolsos ni descuentos. El sistema notificará automáticamente al administrador.`
+    }
+
+    // ── QUEJA / RECLAMO ─────────────────────────────────────────
+    if (detectarQueja(textoCliente)) {
+      contextoExtra +=
+        `\n\n[CLIENTE REPORTA UN PROBLEMA]` +
+        `\nINSTRUCCION: Discúlpate sinceramente UNA vez. Di que reportarás al equipo inmediatamente. ` +
+        `NO ofrezcas compensaciones ni descuentos sin autorización. El sistema notificará al administrador.`
+    }
+
+    // ── EVENTOS ESPECIALES ─────────────────────────────────────
+    const eventoDetectado = detectarEvento(textoCliente)
+    if (eventoDetectado) {
+      const guias: Record<string, string> = {
+        'boda': 'Sugiere: arreglos elegantes, colores coordinados con la temática. Podemos trabajar con anticipación.',
+        'casamiento': 'Sugiere: arreglos elegantes, colores coordinados con la temática.',
+        'xv': 'Sugiere: arreglos llamativos y coloridos, ideales para celebración.',
+        'quinceañera': 'Sugiere: arreglos llamativos y coloridos, ideales para celebración.',
+        'funeral': 'Sugiere: arreglos sobrios y elegantes, tonos blancos y verdes.',
+        'velorio': 'Sugiere: arreglos sobrios y elegantes, tonos blancos y verdes.',
+        'aniversario': 'Sugiere: flores con significado especial, preguntar por flor favorita.',
+        'graduación': 'Sugiere: arreglos vibrantes y modernos para celebrar el logro.',
+        'baby shower': 'Sugiere: arreglos tiernos y pasteles, ideales para recibir al bebé.',
+        'san valentín': 'Sugiere: arreglos románticos con rosas rojas, colores pasión.',
+        'madres': 'Sugiere: arreglos coloridos y alegres, ideales para consentir a mamá.',
+      }
+      const guia = Object.entries(guias).find(([k]) => eventoDetectado.includes(k))?.[1] || 'Sugiere arreglos acordes al evento.'
+      contextoExtra +=
+        `\n\n[CLIENTE MENCIONÓ UN EVENTO ESPECIAL: "${eventoDetectado}"]` +
+        `\nINSTRUCCION: ${guia} Pregunta por colores o estilo que busca. Máximo 3 líneas.`
+    }
+
     // ── Cliente con venta ya cerrada ─────────────────────────────
     if (VENTAS_CERRADAS.has(clienteId)) {
+      const venta = VENTA_ACTUAL.get(clienteId)
+      const detalleVenta = venta
+        ? `Pedido actual: ${venta.producto}, total ${venta.total}, entrega ${venta.direccion}. `
+        : ''
       contextoExtra +=
-        `\n\n[VENTA YA CERRADA PARA ESTE CLIENTE] El usuario ya completó su compra. ` +
+        `\n\n[VENTA YA CERRADA PARA ESTE CLIENTE] ${detalleVenta}El usuario ya completó su compra. ` +
         `Atiende dudas post-venta (seguimiento, quejas, cambios) pero NO ofrezcas nuevos arreglos ni preguntes "cuál te gustó". ` +
-        `Si pide fotos, dile que su pedido ya está apartado y confirma los detalles.`
+        `Si pide foto de entrega o comprobante de entrega, responde: "Claro, se lo comento al equipo/repartidor para que puedan apoyarte con eso 🌸". ` +
+        `No digas que no puedes coordinarlo. No lo prometas como garantía. ` +
+        `Si quiere cancelar o reporta problema, NO le pidas nombre/precio si ya aparece en el pedido actual; di que notificarás al equipo.`
       enviarFotos = false // no enviar fotos nuevas
     }
 
@@ -945,8 +1190,10 @@ async function procesarMensaje(message: any): Promise<void> {
         const lista = ultimosArreglos.map((a, i) => `"${a.nombre}" — $${a.precio} MXN`).join(' | ')
         let instruccion = `\n\n[ARREGLOS MOSTRADOS: ${lista}]`
         if (match && match.score >= 2) {
+          ARREGLO_ELEGIDO.set(clienteId, match.arreglo)
           instruccion += `\n[CLIENTE ELIGIÓ: "${match.arreglo.nombre}" — $${match.arreglo.precio} MXN (coincidencia exacta)]`
         } else if (match) {
+          ARREGLO_ELEGIDO.set(clienteId, match.arreglo)
           instruccion += `\n[POSIBLE ELECCIÓN: "${match.arreglo.nombre}" — $${match.arreglo.precio} MXN]`
         }
         if (esEleccion) {
@@ -962,7 +1209,7 @@ async function procesarMensaje(message: any): Promise<void> {
 
     // Detectar continuacion de venta (pago/envio)
     const KW_PAGO = /pago|pagar|transferencia|deposito|depósito|bbva|banco|tarjeta|efectivo|oxxo|okei|okis|okas|ok|va|dale|acuerdo|confirmo|si[^a-zA-Z]|simon|sip|sipo|está bien|esta bien|le pago|voy a pagar|ya pague|ya pagué|ya me dijo|listo|comprobante/i.test(textoCliente)
-    const KW_CONFIRMA_PAGO = /ya pague|ya pagué|listo|transfer|comprobante|ya quedó|ya quedo|ya la hice|ya la hizo|ya llegó|ya llego|sipi|si ya|confirmo|confirmado|ya esta pagado/i.test(textoCliente)
+    const KW_CONFIRMA_PAGO = /ya pague|ya pagué|listo|comprobante|ya quedó|ya quedo|ya la hice|ya la hizo|ya transfer[ií]|transfer[ií]|ya llegó|ya llego|sipi|si ya|confirmo|confirmado|ya esta pagado/i.test(textoCliente)
 
     if (KW_PAGO && intencion === 'normal') {
       contextoExtra +=
@@ -973,10 +1220,26 @@ async function procesarMensaje(message: any): Promise<void> {
         `El token [VENTA_CERRADA:...] debe ir AL FINAL de tu mensaje.`
     }
 
+    if (/transferencia|tranferencia|transfer/i.test(textoCliente) && /a nombre de|nombre de/i.test(textoCliente) && !KW_CONFIRMA_PAGO) {
+      contextoExtra +=
+        `\n\n[CLIENTE DIO NOMBRE Y ELIGIÓ TRANSFERENCIA] ` +
+        `INSTRUCCION: NO vuelvas a preguntar el nombre. NO digas "gracias por el pago" todavía. ` +
+        `Comparte la cuenta BBVA y pide que mande el comprobante cuando quede listo.`
+    }
+
     await chat.sendStateTyping()
     const historialAI = await obtenerHistorial(telefono)
     const { mensaje, ventaCerrada } = await getAIResponse(historialAI, contextoExtra)
     await chat.clearState()
+
+    // ── Validación post-AI de precios ─────────────────────────────
+    const arreglosAI = await obtenerArreglosConFotos()
+    if (arreglosAI.length > 0) {
+      const validacion = validarPreciosEnRespuesta(mensaje, arreglosAI)
+      if (!validacion.valido) {
+        console.warn(`[bot] ⚠️ ${validacion.advertencia}`)
+      }
+    }
 
     await agregarAlHistorial(telefono, 'assistant', mensaje)
 
@@ -1007,6 +1270,20 @@ async function procesarMensaje(message: any): Promise<void> {
       }
     }
 
+    // ── CANCELACIÓN: Alerta al admin ────────────────────────────
+    if (detectarCancelacion(textoCliente)) {
+      console.log(`[bot] 🚫 Cancelación solicitada por ${numeroReal}`)
+      enviarAlertaCancelacion(numeroReal, textoCliente)
+        .catch(err => console.error('[bot] Telegram cancelación:', err))
+    }
+
+    // ── QUEJA: Alerta al admin ──────────────────────────────────
+    if (detectarQueja(textoCliente)) {
+      console.log(`[bot] ⚠️ Queja reportada por ${numeroReal}`)
+      enviarAlertaQueja(numeroReal, textoCliente)
+        .catch(err => console.error('[bot] Telegram queja:', err))
+    }
+
     // Venta cerrada
     if (ventaCerrada) {
       console.log(`[bot] 🎉 VENTA CERRADA: ${ventaCerrada.cliente} | ${numeroReal}`)
@@ -1018,14 +1295,19 @@ async function procesarMensaje(message: any): Promise<void> {
       apartarArreglo(ventaCerrada.producto, numeroReal)
         .catch(err => console.error('[bot] Error apartando:', err))
       VENTAS_CERRADAS.add(clienteId)
+      VENTA_ACTUAL.set(clienteId, ventaCerrada)
       FOTOS_PENDIENTES.delete(clienteId) // limpiar fotos pendientes
+      // Guardar en reporte_ventas
+      registrarVenta(ventaCerrada.cliente, numeroReal, ventaCerrada.producto, ventaCerrada.total, ventaCerrada.direccion)
+        .catch(err => console.error('[bot] Error registrando venta:', err))
     }
 
     // Fallback: si el cliente confirmó pago pero la IA no generó el token
     if (!ventaCerrada && KW_CONFIRMA_PAGO && mensajeFinal.length < 150 && !mensajeFinal.includes('?')) {
       const ultimos = ULTIMOS_ARREGLOS.get(clienteId)
-      const nombreArreglo = ultimos?.[0]?.nombre ?? 'Pedido'
-      const precioArreglo = ultimos?.[0]?.precio ?? 0
+      const elegido = ARREGLO_ELEGIDO.get(clienteId)
+      const nombreArreglo = elegido?.nombre ?? ultimos?.[0]?.nombre ?? 'Pedido'
+      const precioArreglo = elegido?.precio ?? ultimos?.[0]?.precio ?? 0
       console.log(`[bot] ⚠️ Cliente confirmó pago pero IA no generó token. Notificando igual.`)
       enviarAlertaVentaCerrada({
         cliente: 'Verificar en chat',
@@ -1034,14 +1316,25 @@ async function procesarMensaje(message: any): Promise<void> {
         direccion: 'Por confirmar',
         numeroCliente: numeroReal,
       }).catch(err => console.error('[bot] Telegram venta fallback:', err))
+      registrarVenta('Verificar en chat', numeroReal, nombreArreglo, `$${precioArreglo.toFixed(2)}`, 'Por confirmar')
+        .catch(err => console.error('[bot] Error registrando venta fallback:', err))
+      VENTAS_CERRADAS.add(clienteId)
+      VENTA_ACTUAL.set(clienteId, {
+        cliente: 'Verificar en chat',
+        producto: nombreArreglo,
+        total: `$${precioArreglo.toFixed(2)} MXN`,
+        direccion: 'Por confirmar',
+        rawToken: '',
+      })
     }
 
     // Detectar "venta cerrada" explícito del usuario/humano
     if (/venta\s*cerrada|venta.*cerrada|sale.*closed|closed.*sale/i.test(textoCliente)) {
       console.log(`[bot] 🚨 Usuario indicó venta cerrada manualmente: ${numeroReal}`)
       const ultimos = ULTIMOS_ARREGLOS.get(clienteId)
-      const nombreArreglo = ultimos?.[0]?.nombre ?? 'Pedido'
-      const precioArreglo = ultimos?.[0]?.precio ?? 0
+      const elegido = ARREGLO_ELEGIDO.get(clienteId)
+      const nombreArreglo = elegido?.nombre ?? ultimos?.[0]?.nombre ?? 'Pedido'
+      const precioArreglo = elegido?.precio ?? ultimos?.[0]?.precio ?? 0
       enviarAlertaVentaCerrada({
         cliente: 'Manual',
         producto: nombreArreglo,
@@ -1052,7 +1345,16 @@ async function procesarMensaje(message: any): Promise<void> {
       apartarArreglo(nombreArreglo, numeroReal)
         .catch(err => console.error('[bot] Error apartando manual:', err))
       VENTAS_CERRADAS.add(clienteId)
+      VENTA_ACTUAL.set(clienteId, {
+        cliente: 'Manual',
+        producto: nombreArreglo,
+        total: `$${precioArreglo.toFixed(2)} MXN`,
+        direccion: 'Verificar en chat',
+        rawToken: '',
+      })
       FOTOS_PENDIENTES.delete(clienteId)
+      registrarVenta('Manual', numeroReal, nombreArreglo, `$${precioArreglo.toFixed(2)}`, 'Verificar en chat')
+        .catch(err => console.error('[bot] Error registrando venta manual:', err))
     }
 
     // Fotos — desde intent detection o desde FOTOS_PENDIENTES
@@ -1064,17 +1366,22 @@ async function procesarMensaje(message: any): Promise<void> {
 
       if (arreglosFinales.length > 0) {
         await new Promise(r => setTimeout(r, 500))
-        await enviarFotosArreglos(whatsappClient, clienteId, arreglosFinales)
-        marcarFotosEnviadas(clienteId)
+        const fotosEnviadas = await enviarFotosArreglos(whatsappClient, clienteId, arreglosFinales)
+        if (fotosEnviadas > 0) marcarFotosEnviadas(clienteId)
 
         const resumenFotos = arreglosFinales.map((a, i) => `Foto ${i + 1}: ${a.nombre} ($${a.precio} MXN)`).join(', ')
         await agregarAlHistorial(telefono, 'assistant', `[Sistema] Fotos enviadas: ${resumenFotos}`)
         // Guardar lista para matching en próximos mensajes
-        ULTIMOS_ARREGLOS.set(clienteId, arreglosFinales)
+        if (fotosEnviadas > 0) ULTIMOS_ARREGLOS.set(clienteId, arreglosFinales)
 
         await new Promise(r => setTimeout(r, 600))
         await simularEscritura(chat, 800)
-        await whatsappClient.sendMessage(clienteId, '¿Alguno te llamó la atención? 🌸\nSolo dime cuál y lo aparto para ti. 🌹')
+        await whatsappClient.sendMessage(
+          clienteId,
+          fotosEnviadas > 0
+            ? '¿Alguno te llamó la atención? 🌸\nSolo dime cuál y lo aparto para ti. 🌹'
+            : 'Perdón, se me atoraron las fotos ahorita 😅 Dime si quieres que intentemos de nuevo o te paso nombres y precios.'
+        )
       }
     }
 
@@ -1483,11 +1790,27 @@ app.get('/qr', (_req, res) => {
   res.json({ qr: BOT_QR_ACTUAL })
 })
 
-app.get('/status', (_req, res) => {
-  res.json({
-    pausado: BOT_PAUSADO,
-    connected: whatsappClient?.info ? true : false,
-  })
+app.get('/status', async (_req, res) => {
+  try {
+    const ventas = await obtenerVentasHoy().catch(() => ({ total: 0, cantidad: 0 }))
+    const clientes = await obtenerClientesAtendidosHoy().catch(() => 0)
+    const minutosInactivo = Math.round((Date.now() - ultimaActividad) / 60_000)
+    res.json({
+      pausado: BOT_PAUSADO,
+      connected: whatsappClient?.info ? true : false,
+      ultimaActividad: `${minutosInactivo} min`,
+      ventasHoy: ventas.cantidad,
+      totalVentasHoy: ventas.total,
+      clientesAtendidosHoy: clientes,
+      version: '2.0.0',
+      uptime: Math.round(process.uptime() / 60) + ' min',
+    })
+  } catch {
+    res.json({
+      pausado: BOT_PAUSADO,
+      connected: whatsappClient?.info ? true : false,
+    })
+  }
 })
 
 app.listen(port, () => console.log(`🌐 Servidor web en puerto ${port}`))

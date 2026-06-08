@@ -46,3 +46,43 @@ export interface AIResponse {
   mensaje: string               // Texto limpio para enviar al cliente
   ventaCerrada: VentaCerrada | null  // Datos de venta si se detectó el token
 }
+
+export interface HistorialPrompt {
+  id: string
+  prompt_anterior: string
+  prompt_nuevo: string
+  editado_por: string
+  creado_en: string
+}
+
+export interface Reclamacion {
+  id: string
+  cliente_telefono: string
+  tipo: 'cancelacion' | 'queja' | 'devolucion' | 'otro'
+  descripcion: string
+  arreglo_referencia: string | null
+  estado: 'pendiente' | 'en_proceso' | 'resuelto'
+  creado_en: string
+  actualizado_en: string
+}
+
+export interface ReporteVenta {
+  id: string
+  cliente_telefono: string | null
+  cliente_nombre: string | null
+  producto: string
+  precio_total: number
+  direccion_entrega: string | null
+  metodo_pago: string | null
+  estado: 'pagado' | 'entregado' | 'cancelado'
+  creado_en: string
+}
+
+export interface BotStatusFull {
+  pausado: boolean
+  connected: boolean
+  ultimaActividad: string | null
+  ventasHoy: number
+  clientesAtendidosHoy: number
+  version: string
+}
