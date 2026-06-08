@@ -689,7 +689,7 @@ async function enviarFotosArreglos(client: Client, chatId: string, arreglos: Arr
         `💐 *${r.arreglo.nombre}*\n💰 $${r.arreglo.precio.toFixed(2)} MXN` +
         (r.arreglo.descripcion ? `\n📝 ${r.arreglo.descripcion}` : '')
       await client.sendMessage(chatId, r.media, { caption })
-      await new Promise(res => setTimeout(res, 600))
+      await new Promise(res => setTimeout(res, 200))
     } catch (err) {
       const errStr = String(err)
       if (errStr.includes('Execution context was destroyed') || errStr.includes('Target closed')) {
@@ -1184,7 +1184,7 @@ const puppeteerArgs = isProduction ? [
   '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows',
   '--disable-renderer-backgrounding', '--disable-ipc-flooding-protection',
   '--disable-notifications', '--disable-speech-api', '--disable-print-preview',
-  '--mute-audio', '--hide-scrollbars', '--disable-client-side-phishing-detection',
+  '--mute-audio', '--disable-alsa', '--hide-scrollbars', '--disable-client-side-phishing-detection',
   '--disable-hang-monitor', '--disable-prompt-on-repost', '--disable-breakpad',
   '--no-first-run', '--no-default-browser-check', '--no-pings',
   '--password-store=basic', '--use-mock-keychain', '--metrics-recording-only',

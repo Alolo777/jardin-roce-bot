@@ -125,9 +125,10 @@ export async function getAIResponse(
       ? `${systemPromptBase}\n\n--- INVENTARIO DISPONIBLE HOY ---\n${inventarioDiario}\n--- FIN DEL INVENTARIO ---`
       : systemPromptBase
 
+    console.time('[ai.ts] LLM call')
     const completion = await conRetry(async () => {
       const controller = new AbortController()
-      const timeoutId  = setTimeout(() => controller.abort(), 25_000)
+      const timeoutId  = setTimeout(() => controller.abort(), 15_000)
 
       try {
         return await client.chat.completions.create(
@@ -146,6 +147,7 @@ export async function getAIResponse(
         clearTimeout(timeoutId)
       }
     })
+    console.timeEnd('[ai.ts] LLM call')
 
     // Fallback robusto: cubre tanto null/undefined como string vacío o solo espacios.
     const contenido = completion.choices[0]?.message?.content?.trim()
