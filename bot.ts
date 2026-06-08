@@ -592,7 +592,7 @@ async function buscarPrecioEnvio(texto: string): Promise<{ zona: string; precio:
       const nomMunicipio = m.municipio.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       const nomColonia = (m.colonia ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       const cp = m.codigo_postal.trim()
-      return n.includes(nomMunicipio) || (nomColonia && n.includes(nomColonia)) || n.includes(cp)
+      return nomMunicipio.includes(n) || n.includes(nomMunicipio) || (nomColonia && (nomColonia.includes(n) || n.includes(nomColonia))) || n.includes(cp)
     })
     if (match) return { zona: match.zona, precio: match.precio_envio, fuente: 'municipios' }
   }

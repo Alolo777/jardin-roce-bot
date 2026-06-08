@@ -11,7 +11,7 @@ const client = new OpenAI({
   apiKey: process.env.GITHUB_TOKEN,
 })
 
-const MODEL = process.env.GITHUB_MODEL ?? 'gpt-4o'
+const MODEL = process.env.GITHUB_MODEL ?? 'gpt-4o-mini'
 
 // ─── Caché del System Prompt (TTL: 60 segundos) ─────────────────────────────
 interface CachePrompt {
