@@ -42,13 +42,21 @@ export async function GET() {
     // Intentar obtener status del bot Express
     let botConnected = false
     let ultimaActividad = 'Desconocido'
+    let botQr: string | null = null
+    let qrGeneradoEn: string | null = null
+    let qrAgeSeconds: number | null = null
+    let qrExpiresInSeconds: number | null = null
     try {
       const botPort = process.env.BOT_PORT || 10000
-      const res = await fetch(`http://localhost:${botPort}/status`, { signal: AbortSignal.timeout(3000) })
+      const res = await fetch(`http://localhost:${botPort}/status`, { signal: AbortSignal.timeout(3000), cache: 'no-store' })
       if (res.ok) {
         const botStatus = await res.json()
         botConnected = botStatus.connected
         ultimaActividad = botStatus.ultimaActividad || ultimaActividad
+        botQr = botStatus.qr || null
+        qrGeneradoEn = botStatus.qrGeneradoEn || null
+        qrAgeSeconds = botStatus.qrAgeSeconds ?? null
+        qrExpiresInSeconds = botStatus.qrExpiresInSeconds ?? null
       }
     } catch {
       // El bot Express puede no estar disponible
@@ -57,6 +65,10 @@ export async function GET() {
     return NextResponse.json({
       pausado: config?.bot_pausado ?? false,
       connected: botConnected,
+      qr: botQr,
+      qrGeneradoEn,
+      qrAgeSeconds,
+      qrExpiresInSeconds,
       ultimaActividad,
       ventasHoy: cantidadVentas,
       totalVentasHoy: totalVentas,

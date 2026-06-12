@@ -19,6 +19,7 @@ import {
   enviarAlertaDiariaDesconexion,
   enviarAlertaCancelacion,
   enviarAlertaQueja,
+  enviarAlertaAtencionHumana,
 } from './lib/telegram'
 import { supabaseAdmin } from './lib/supabase'
 import type { MensajeChat } from './lib/ai'
@@ -33,12 +34,29 @@ const CACHE_CLIENTE_UUID = new Map<string, string>()
 let IGNORADOS_CACHE: string[] = []
 let IGNORADOS_ULTIMA = 0
 
+function variantesTelefono(numero: string): string[] {
+  const limpio = String(numero ?? '').replace(/\D/g, '')
+  const variantes = new Set<string>()
+  if (!limpio) return []
+
+  variantes.add(limpio)
+  if (limpio.startsWith('521') && limpio.length === 13) variantes.add(`52${limpio.slice(3)}`)
+  if (limpio.startsWith('52') && limpio.length === 12) variantes.add(`521${limpio.slice(2)}`)
+  if (limpio.length === 10) {
+    variantes.add(`52${limpio}`)
+    variantes.add(`521${limpio}`)
+  }
+  if (limpio.length > 10) variantes.add(limpio.slice(-10))
+
+  return [...variantes]
+}
+
 async function cargarIgnorados(): Promise<string[]> {
   const ahora = Date.now()
-  if (ahora - IGNORADOS_ULTIMA < 60_000) return IGNORADOS_CACHE
+  if (ahora - IGNORADOS_ULTIMA < 5_000) return IGNORADOS_CACHE
   try {
     const { data } = await supabaseAdmin.from('numeros_ignorados').select('numero')
-    IGNORADOS_CACHE = (data || []).map(n => n.numero.replace(/\D/g, ''))
+    IGNORADOS_CACHE = [...new Set((data || []).flatMap(n => variantesTelefono(n.numero)))]
     IGNORADOS_ULTIMA = ahora
   } catch { /* mantener caché anterior */ }
   return IGNORADOS_CACHE
@@ -293,10 +311,32 @@ const KW_FRUSTRACION = [
 ]
 
 const FRUSTRACION_NOTIFICADA = new Map<string, number>()
+const ATENCION_HUMANA_NOTIFICADA = new Map<string, number>()
 
 function detectarFrustracion(texto: string): boolean {
   const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   return KW_FRUSTRACION.some(k => n.includes(k))
+}
+
+function detectarAtencionHumana(texto: string): string | null {
+  const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  const reglas: Array<[RegExp, string]> = [
+    [/\b(recoger|recojo|pasar por|paso por|recogi|recog[ií]|voy por|vengo por)\b.*\b(ramo|pedido|arreglo|flores?)\b|\b(ramo|pedido|arreglo|flores?)\b.*\b(recoger|recojo|pasar por|paso por|recogi|recog[ií]|voy por|vengo por)\b/i, 'Cliente quiere recoger un pedido'],
+    [/\b(sucursal|local|ubicacion|ubicación|direccion|dirección|atah)\b/i, 'Cliente pide información de sucursal/local'],
+    [/\b(foto|imagen)\b.*\b(local|sucursal|fachada|entrada|tienda)\b|\b(local|sucursal|fachada|entrada|tienda)\b.*\b(foto|imagen)\b/i, 'Cliente pide foto del local'],
+    [/\b(instagram|facebook|dm|inbox|mensaje por insta)\b/i, 'Cliente menciona conversación en redes sociales'],
+    [/\b(hable|hablar|comunicarme)\b.*\b(persona|humano|encargad[ao]|asesor)\b/i, 'Cliente solicita atención humana'],
+  ]
+
+  return reglas.find(([regex]) => regex.test(n))?.[1] ?? null
+}
+
+function debeNotificarAtencionHumana(clienteId: string): boolean {
+  const ahora = Date.now()
+  const ultima = ATENCION_HUMANA_NOTIFICADA.get(clienteId) ?? 0
+  if (ahora - ultima < 20 * 60_000) return false
+  ATENCION_HUMANA_NOTIFICADA.set(clienteId, ahora)
+  return true
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -997,6 +1037,13 @@ async function procesarMensaje(message: any): Promise<void> {
     // ── Saludo dinámico en primer mensaje ─────────────────────────
     const historialCompleto = await obtenerHistorial(telefono)
     const historialTexto = historialCompleto.map(m => m.content).join('\n').toLowerCase()
+    const motivoAtencionHumana = detectarAtencionHumana(textoCliente)
+    if (motivoAtencionHumana) {
+      contextoExtra +=
+        `\n\n[ATENCION HUMANA REQUERIDA: ${motivoAtencionHumana}] ` +
+        `INSTRUCCION: Responde breve y amable. No inventes datos de sucursal, fotos del local, estado de pedidos ni conversaciones de Instagram. ` +
+        `Di que lo reportas al equipo para que puedan apoyarle. El sistema notificará al administrador.`
+    }
     const confirmaCorto = /^(ok|okay|okey|oki|okis|vale|va|dale|s[ií]|si|perfecto|de acuerdo|esta bien|está bien)$/i.test(textoCliente.trim())
     if (confirmaCorto && /env[ií]o a esa zona cuesta|costo.*env[ií]o|cuesta \$/.test(historialTexto)) {
       contextoExtra +=
@@ -1248,6 +1295,16 @@ async function procesarMensaje(message: any): Promise<void> {
     await message.reply(mensajeFinal)
 
     const numeroReal = await numeroRealPromise
+
+    if (motivoAtencionHumana && debeNotificarAtencionHumana(clienteId)) {
+      const contexto = historialCompleto
+        .slice(-5)
+        .map(m => `${m.role === 'user' ? 'Cliente' : 'Flora'}: ${m.content}`)
+        .concat(`Cliente: ${textoCliente}`)
+        .join('\n')
+      enviarAlertaAtencionHumana(numeroReal, motivoAtencionHumana, contexto)
+        .catch(err => console.error('[bot] Telegram atención humana:', err))
+    }
 
     // Alerta cotización de envío
     if (mensajeFinal.toLowerCase().includes('verificar el costo')) {
@@ -1530,10 +1587,13 @@ const whatsappClient = new Client({
 
 let BOT_QR_EMITIDO = false
 let BOT_QR_ACTUAL: string | null = null
+let BOT_QR_GENERADO_EN: number | null = null
+const BOT_QR_TTL_MS = 60_000
 
 whatsappClient.on('qr', async (qr) => {
   BOT_QR_EMITIDO = true
   BOT_QR_ACTUAL = qr
+  BOT_QR_GENERADO_EN = Date.now()
   console.log('\n⚡ ¡NUEVO QR! Escanéalo ahora:')
   qrcode.generate(qr, { small: true })
   console.log('\n📱 Subiendo a Supabase como respaldo...')
@@ -1604,6 +1664,7 @@ whatsappClient.on('ready', async () => {
   }, 5 * 60_000)
 
   BOT_QR_ACTUAL = null
+  BOT_QR_GENERADO_EN = null
   try {
     await supabaseAdmin.from('configuracion_agente').update({ qr_code: null }).eq('id', 1)
   } catch (err) { console.error('[bot] Error limpiando QR:', err) }
@@ -1646,7 +1707,7 @@ whatsappClient.on('disconnected', (reason) => {
   setTimeout(() => { console.log('🔄 Reconectando...'); whatsappClient.initialize().catch(console.error) }, 5000)
 })
 
-function manejarMensajeEntrante(message: any): void {
+async function manejarMensajeEntrante(message: any): Promise<void> {
   registrarActividad()
   console.log(`[DIAG] from: ${message.from} | type: ${message.type} | fromMe: ${message.fromMe}`)
 
@@ -1655,9 +1716,13 @@ function manejarMensajeEntrante(message: any): void {
   if (message.from.includes('@lid') && !message.body?.trim()) return
 
   // Ignorar números silenciados (repartidor, admin, etc.)
-  const numMsg = message.from.replace(/@[^\s]*/g, '').replace(/\D/g, '')
-  if (!message.fromMe && IGNORADOS_CACHE.includes(numMsg)) {
-    console.log(`[bot] 🔇 Número ignorado: ${numMsg}`)
+  const ignorados = await cargarIgnorados()
+  const numeroParaIgnorar = message.from.includes('@lid')
+    ? await obtenerNumeroReal(message)
+    : message.from.replace(/@[^\s]*/g, '')
+  const variantesMensaje = variantesTelefono(numeroParaIgnorar)
+  if (!message.fromMe && variantesMensaje.some(n => ignorados.includes(n))) {
+    console.log(`[bot] 🔇 Número ignorado: ${numeroParaIgnorar}`)
     return
   }
 
@@ -1787,7 +1852,13 @@ app.post('/resume', (_req, res) => {
 })
 
 app.get('/qr', (_req, res) => {
-  res.json({ qr: BOT_QR_ACTUAL })
+  const ageMs = BOT_QR_GENERADO_EN ? Date.now() - BOT_QR_GENERADO_EN : null
+  res.json({
+    qr: BOT_QR_ACTUAL,
+    qrGeneradoEn: BOT_QR_GENERADO_EN ? new Date(BOT_QR_GENERADO_EN).toISOString() : null,
+    qrAgeSeconds: ageMs === null ? null : Math.round(ageMs / 1000),
+    qrExpiresInSeconds: ageMs === null ? null : Math.max(0, Math.ceil((BOT_QR_TTL_MS - ageMs) / 1000)),
+  })
 })
 
 app.get('/status', async (_req, res) => {
@@ -1798,6 +1869,10 @@ app.get('/status', async (_req, res) => {
     res.json({
       pausado: BOT_PAUSADO,
       connected: whatsappClient?.info ? true : false,
+      qr: BOT_QR_ACTUAL,
+      qrGeneradoEn: BOT_QR_GENERADO_EN ? new Date(BOT_QR_GENERADO_EN).toISOString() : null,
+      qrAgeSeconds: BOT_QR_GENERADO_EN ? Math.round((Date.now() - BOT_QR_GENERADO_EN) / 1000) : null,
+      qrExpiresInSeconds: BOT_QR_GENERADO_EN ? Math.max(0, Math.ceil((BOT_QR_TTL_MS - (Date.now() - BOT_QR_GENERADO_EN)) / 1000)) : null,
       ultimaActividad: `${minutosInactivo} min`,
       ventasHoy: ventas.cantidad,
       totalVentasHoy: ventas.total,

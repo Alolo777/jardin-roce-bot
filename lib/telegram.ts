@@ -174,6 +174,24 @@ export async function enviarAlertaClienteFrustrado(
   await enviar(msg)
 }
 
+export async function enviarAlertaAtencionHumana(
+  numeroCliente: string,
+  motivo: string,
+  contexto: string
+): Promise<void> {
+  const msg = [
+    '🙋 *ATENCIÓN HUMANA REQUERIDA*',
+    '',
+    `📱 *Teléfono:* ${ultimos4(numeroCliente)}`,
+    `🧭 *Motivo:* ${esc(motivo.slice(0, 180))}`,
+    `💬 *Contexto:* ${esc(contexto.slice(0, 700))}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '_Revisar WhatsApp y responder directamente si hace falta_',
+  ].join('\n')
+  await enviar(msg)
+}
+
 // ════════════════════════════════════════════════════════════════
 // 6. QR / DESCONEXIÓN — Alertas inteligentes
 // ════════════════════════════════════════════════════════════════
