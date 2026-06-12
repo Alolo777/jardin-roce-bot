@@ -1663,8 +1663,7 @@ whatsappClient.on('ready', async () => {
       const state = await whatsappClient.getState()
 
       if (state !== 'CONNECTED') {
-        console.warn(`[Watchdog] ⚠️ Estado: ${state}. Reconectando sin matar proceso...`)
-        await reconectarWhatsapp(`watchdog estado ${state}`)
+        console.warn(`[Watchdog] ⚠️ Estado: ${state}. Esperando próximo ciclo antes de reconectar.`)
         ultimaActividad = Date.now()
         return
       }
@@ -1710,31 +1709,10 @@ whatsappClient.on('ready', async () => {
     const page = whatsappClient.pupPage
     if (page) {
       page.removeAllListeners('framenavigated')
-      page.on('framenavigated', async (frame: any) => {
+      page.on('framenavigated', (frame: any) => {
         if (frame !== page.mainFrame() || BOT_RECONNECTING) return
         ULTIMA_RECARGA_WEB = Date.now()
-
-        console.warn('[bot] 🔄 WhatsApp Web recargado. Esperando estabilización antes de reconectar...')
-        setTimeout(async () => {
-          if (BOT_RECONNECTING) return
-          try {
-            const state = await whatsappClient.getState()
-            if (state === 'CONNECTED') {
-              console.log('[bot] ✅ WhatsApp Web se estabilizó tras la recarga.')
-              return
-            }
-            BOT_QR_EMITIDO = false
-            await reconectarWhatsapp(`WhatsApp Web recargado y quedó en estado ${state}`)
-          } catch (err) {
-            if (Date.now() - ULTIMA_RECARGA_WEB < 2 * 60_000) {
-              console.warn('[bot] Recarga reciente: getState falló, esperando al watchdog.')
-              return
-            }
-            console.warn('[bot] getState falló tras recarga; reconectando:', err)
-            BOT_QR_EMITIDO = false
-            await reconectarWhatsapp('WhatsApp Web recargado sin estado')
-          }
-        }, 30_000).unref()
+        console.warn('[bot] 🔄 WhatsApp Web navegó/recargó. No se fuerza reconexión; el watchdog revisará después.')
       })
     }
   } catch (err) { console.warn('[bot] No se pudo registrar framenavigated:', err) }
