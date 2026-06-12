@@ -1589,6 +1589,31 @@ let BOT_QR_EMITIDO = false
 let BOT_QR_ACTUAL: string | null = null
 let BOT_QR_GENERADO_EN: number | null = null
 const BOT_QR_TTL_MS = 60_000
+let BOT_RECONNECTING = false
+let WATCHDOG_INICIADO = false
+let ULTIMA_RECARGA_WEB = 0
+
+async function reconectarWhatsapp(motivo: string): Promise<void> {
+  if (BOT_RECONNECTING) {
+    console.log(`[bot] Reconexión ya en curso (${motivo})`)
+    return
+  }
+
+  BOT_RECONNECTING = true
+  BOT_READY = false
+  console.warn(`[bot] 🔄 Reconectando WhatsApp: ${motivo}`)
+
+  try {
+    await whatsappClient.destroy().catch(() => {})
+    await new Promise(r => setTimeout(r, 5000))
+    await whatsappClient.initialize()
+  } catch (err) {
+    BOT_RECONNECTING = false
+    console.error('[bot] ❌ No se pudo reconectar — forzando reinicio:', err)
+    registrarCrash()
+    process.exit(1)
+  }
+}
 
 whatsappClient.on('qr', async (qr) => {
   BOT_QR_EMITIDO = true
@@ -1620,22 +1645,26 @@ whatsappClient.on('qr', async (qr) => {
 
 whatsappClient.on('ready', async () => {
   BOT_READY = true
+  BOT_RECONNECTING = false
   console.log('\n✅ Bot de Jardín RoCe conectado!')
   console.log('🌸 Flora está escuchando...\n')
   ultimaActividad = Date.now()
   if (BOT_QR_EMITIDO) enviarAlertaReconectado()
 
-  setInterval(async () => {
+  if (!WATCHDOG_INICIADO) setInterval(async () => {
     const minSinMensajes = Math.round((Date.now() - ultimaActividad) / 60_000)
+
+    if (BOT_RECONNECTING || Date.now() - ULTIMA_RECARGA_WEB < 2 * 60_000) {
+      console.log('[Watchdog] ⏳ Reconexión/recarga en curso — esperando...')
+      return
+    }
 
     try {
       const state = await whatsappClient.getState()
 
       if (state !== 'CONNECTED') {
-        console.warn(`[Watchdog] ⚠️ Estado: ${state}. Reconectando...`)
-        await whatsappClient.destroy().catch(console.error)
-        await new Promise(r => setTimeout(r, 3000))
-        await whatsappClient.initialize().catch(console.error)
+        console.warn(`[Watchdog] ⚠️ Estado: ${state}. Reconectando sin matar proceso...`)
+        await reconectarWhatsapp(`watchdog estado ${state}`)
         ultimaActividad = Date.now()
         return
       }
@@ -1655,6 +1684,10 @@ whatsappClient.on('ready', async () => {
 
     } catch (err) {
       // getState() falló — el cliente está desconectado
+      if (BOT_RECONNECTING || Date.now() - ULTIMA_RECARGA_WEB < 2 * 60_000) {
+        console.warn('[Watchdog] getState falló durante recarga; no se reinicia proceso.')
+        return
+      }
       if (minSinMensajes >= 5) {
         console.error('[Watchdog] Error crítico en getState — forzando reinicio:', err)
         registrarCrash()
@@ -1662,6 +1695,7 @@ whatsappClient.on('ready', async () => {
       }
     }
   }, 5 * 60_000)
+  WATCHDOG_INICIADO = true
 
   BOT_QR_ACTUAL = null
   BOT_QR_GENERADO_EN = null
@@ -1676,25 +1710,31 @@ whatsappClient.on('ready', async () => {
     const page = whatsappClient.pupPage
     if (page) {
       page.removeAllListeners('framenavigated')
-      let reconectando = false
       page.on('framenavigated', async (frame: any) => {
-        if (frame !== page.mainFrame() || reconectando) return
-        reconectando = true
+        if (frame !== page.mainFrame() || BOT_RECONNECTING) return
+        ULTIMA_RECARGA_WEB = Date.now()
 
-        console.warn('[bot] 🔄 WhatsApp Web recargado. Intentando reconectar sin reiniciar proceso...')
-
-        try {
-          await whatsappClient.destroy().catch(() => {})
-          await new Promise(r => setTimeout(r, 5000))
-          BOT_READY = false
-          BOT_QR_EMITIDO = false
-          await whatsappClient.initialize()
-          console.log('[bot] ✅ Reconexión tras recarga exitosa.')
-        } catch (err) {
-          console.error('[bot] ❌ No se pudo reconectar tras recarga — forzando reinicio:', err)
-          registrarCrash()
-          process.exit(1)
-        }
+        console.warn('[bot] 🔄 WhatsApp Web recargado. Esperando estabilización antes de reconectar...')
+        setTimeout(async () => {
+          if (BOT_RECONNECTING) return
+          try {
+            const state = await whatsappClient.getState()
+            if (state === 'CONNECTED') {
+              console.log('[bot] ✅ WhatsApp Web se estabilizó tras la recarga.')
+              return
+            }
+            BOT_QR_EMITIDO = false
+            await reconectarWhatsapp(`WhatsApp Web recargado y quedó en estado ${state}`)
+          } catch (err) {
+            if (Date.now() - ULTIMA_RECARGA_WEB < 2 * 60_000) {
+              console.warn('[bot] Recarga reciente: getState falló, esperando al watchdog.')
+              return
+            }
+            console.warn('[bot] getState falló tras recarga; reconectando:', err)
+            BOT_QR_EMITIDO = false
+            await reconectarWhatsapp('WhatsApp Web recargado sin estado')
+          }
+        }, 30_000).unref()
       })
     }
   } catch (err) { console.warn('[bot] No se pudo registrar framenavigated:', err) }
@@ -1704,7 +1744,8 @@ whatsappClient.on('auth_failure', (msg) => { console.error('❌ Auth:', msg); re
 
 whatsappClient.on('disconnected', (reason) => {
   console.warn('⚠️ Desconectado:', reason)
-  setTimeout(() => { console.log('🔄 Reconectando...'); whatsappClient.initialize().catch(console.error) }, 5000)
+  BOT_READY = false
+  setTimeout(() => { reconectarWhatsapp(`evento disconnected: ${reason}`).catch(console.error) }, 5000)
 })
 
 async function manejarMensajeEntrante(message: any): Promise<void> {
