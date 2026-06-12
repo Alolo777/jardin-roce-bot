@@ -1668,9 +1668,9 @@ whatsappClient.on('ready', async () => {
         return
       }
 
-      // ZOMBIE DETECTION: conectado pero sin mensajes en horario laboral
-      // Si llevamos 15+ min en horario de atención sin recibir NADA → estado zombie
-      if (minSinMensajes >= 15 && estaEnHorario()) {
+      // ZOMBIE DETECTION: conectado pero sin mensajes por mucho tiempo en horario laboral.
+      // En VM chica WhatsApp Web puede tardar en estabilizarse; 15 min era demasiado agresivo.
+      if (minSinMensajes >= 45 && estaEnHorario()) {
         console.error(`[Watchdog] 🧟 ESTADO ZOMBIE detectado: ${minSinMensajes} min sin mensajes en horario laboral. getState()=CONNECTED pero hooks muertos.`)
         process.exit(1) // systemd Restart=always lo levanta limpio
         return
@@ -1787,9 +1787,11 @@ whatsappClient.on('message_create', manejarMensajeEntrante)
 
 console.log('🌸 Iniciando bot de Jardín RoCe...')
 
-// ── Startup Watchdog: si no hay "ready" en 3 minutos, reinicia ──
+// ── Startup Watchdog: en VM chica Chrome/WhatsApp puede tardar varios minutos ──
 // (NO reinicia si ya se emitió un QR — el usuario necesita tiempo para escanear)
 const BOT_START_TIME = Date.now()
+const STARTUP_WARN_SECONDS = 180
+const STARTUP_RESTART_SECONDS = 600
 let BOT_READY = false
 
 const startupWatchdog = setInterval(() => {
@@ -1802,14 +1804,16 @@ const startupWatchdog = setInterval(() => {
     return
   }
 
-  if (elapsed > 180) {
+  if (elapsed > STARTUP_WARN_SECONDS && elapsed % 60 < 31) {
     console.warn(`[Startup] ⏰ ${elapsed}s sin "ready". Verificando estado...`)
     whatsappClient.getState()
       .then(state => console.warn(`[Startup] Estado: ${state}`))
       .catch(err => console.warn(`[Startup] Error getState:`, err))
+  }
 
+  if (elapsed > STARTUP_RESTART_SECONDS) {
     // Forzar reconexión completa
-    console.warn('[Startup] 🔄 Forzando reinicio por timeout de inicialización...')
+    console.warn(`[Startup] 🔄 ${elapsed}s sin "ready" ni QR. Forzando reinicio por timeout de inicialización...`)
     clearInterval(startupWatchdog)
     registrarCrash()
     process.exit(1)
