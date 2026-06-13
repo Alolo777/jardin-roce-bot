@@ -29,6 +29,8 @@ export async function GET() {
       qrGeneradoEn: null,
       qrAgeSeconds: null,
       qrExpiresInSeconds: null,
+      qrScanGraceSeconds: null,
+      qrVencido: false,
       source: data?.qr_code ? 'supabase' : null,
     })
   } catch (error) {

@@ -81,8 +81,18 @@ export interface ReporteVenta {
 export interface BotStatusFull {
   pausado: boolean
   connected: boolean
+  estado?: string
+  estadoDetalle?: string
+  reconnecting?: boolean
+  qr?: string | null
+  qrGeneradoEn?: string | null
+  qrAgeSeconds?: number | null
+  qrExpiresInSeconds?: number | null
+  qrScanGraceSeconds?: number | null
+  qrVencido?: boolean
   ultimaActividad: string | null
   ventasHoy: number
+  totalVentasHoy?: number
   clientesAtendidosHoy: number
-  version: string
+  version?: string
 }

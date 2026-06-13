@@ -46,17 +46,27 @@ export async function GET() {
     let qrGeneradoEn: string | null = null
     let qrAgeSeconds: number | null = null
     let qrExpiresInSeconds: number | null = null
+    let qrScanGraceSeconds: number | null = null
+    let qrVencido = false
+    let estado = 'desconectado'
+    let estadoDetalle = 'Bot Express no disponible'
+    let reconnecting = false
     try {
       const botPort = process.env.BOT_PORT || 10000
       const res = await fetch(`http://localhost:${botPort}/status`, { signal: AbortSignal.timeout(3000), cache: 'no-store' })
       if (res.ok) {
         const botStatus = await res.json()
         botConnected = botStatus.connected
+        estado = botStatus.estado || (botConnected ? 'conectado' : 'desconectado')
+        estadoDetalle = botStatus.estadoDetalle || estadoDetalle
+        reconnecting = botStatus.reconnecting ?? false
         ultimaActividad = botStatus.ultimaActividad || ultimaActividad
         botQr = botStatus.qr || null
         qrGeneradoEn = botStatus.qrGeneradoEn || null
         qrAgeSeconds = botStatus.qrAgeSeconds ?? null
         qrExpiresInSeconds = botStatus.qrExpiresInSeconds ?? null
+        qrScanGraceSeconds = botStatus.qrScanGraceSeconds ?? null
+        qrVencido = botStatus.qrVencido ?? false
       }
     } catch {
       // El bot Express puede no estar disponible
@@ -65,10 +75,15 @@ export async function GET() {
     return NextResponse.json({
       pausado: config?.bot_pausado ?? false,
       connected: botConnected,
+      estado,
+      estadoDetalle,
+      reconnecting,
       qr: botQr,
       qrGeneradoEn,
       qrAgeSeconds,
       qrExpiresInSeconds,
+      qrScanGraceSeconds,
+      qrVencido,
       ultimaActividad,
       ventasHoy: cantidadVentas,
       totalVentasHoy: totalVentas,

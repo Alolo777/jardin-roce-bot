@@ -135,6 +135,8 @@ async function agregarAlHistorial(telefono: string, role: 'user' | 'assistant', 
 // ════════════════════════════════════════════════════════════════
 
 const FOTOS_YA_ENVIADAS = new Set<string>()
+const MENSAJES_PROCESADOS = new Map<string, number>()
+const MENSAJE_PROCESADO_TTL_MS = 2 * 60 * 60_000
 
 function yaSeEnviaronFotos(id: string): boolean { return FOTOS_YA_ENVIADAS.has(id) }
 
@@ -147,6 +149,27 @@ function marcarFotosEnviadas(id: string): void {
 }
 
 const MENSAJES_RESCATADOS = new Set<string>()
+
+function obtenerMensajeId(message: any): string | null {
+  return message?.id?._serialized || null
+}
+
+function yaProcesadoRecientemente(message: any): boolean {
+  const id = obtenerMensajeId(message)
+  if (!id) return false
+
+  const ahora = Date.now()
+  const procesadoEn = MENSAJES_PROCESADOS.get(id)
+  if (procesadoEn && ahora - procesadoEn < MENSAJE_PROCESADO_TTL_MS) return true
+
+  MENSAJES_PROCESADOS.set(id, ahora)
+  if (MENSAJES_PROCESADOS.size > 1000) {
+    for (const [msgId, ts] of MENSAJES_PROCESADOS) {
+      if (ahora - ts > MENSAJE_PROCESADO_TTL_MS) MENSAJES_PROCESADOS.delete(msgId)
+    }
+  }
+  return false
+}
 
 // ════════════════════════════════════════════════════════════════
 // HORARIO DE ATENCIÓN
@@ -421,7 +444,7 @@ function registrarCrash(): void {
   console.warn(`[Crash] ${crashCount}/${MAX_CRASHES} reinicios en ventana de 10 min`)
 
   if (crashCount >= MAX_CRASHES) {
-    const sessionPath = process.env.WWEBJS_AUTH_PATH || '.wwebjs_auth'
+    const sessionPath = process.env.WWEBJS_DATA_PATH || './.wwebjs_auth'
     console.warn(`[Crash] 🧹 Demasiados reinicios — limpiando sesión WhatsApp en ${sessionPath}...`)
     import('fs').then(fs => {
       fs.rmSync(sessionPath, { recursive: true, force: true })
@@ -447,6 +470,7 @@ setInterval(() => {
     FRUSTRACION_NOTIFICADA.clear()
     RATE_TIMESTAMPS.clear()
     MENSAJES_RESCATADOS.clear()
+    MENSAJES_PROCESADOS.clear()
     console.log('[RAM] 🧹 Cachés limpiadas')
   }
 }, 5 * 60_000)
@@ -1574,7 +1598,7 @@ const whatsappClient = new Client({
     dataPath: process.env.WWEBJS_DATA_PATH || './.wwebjs_auth',
   }),
   authTimeoutMs: 0,   // Paciencia infinita
-  qrMaxRetries:  100,
+  qrMaxRetries:  20,
   puppeteer: {
     headless:        true,
     dumpio:          true, //Activar para ver logs detallados de Puppeteer
@@ -1589,9 +1613,23 @@ let BOT_QR_EMITIDO = false
 let BOT_QR_ACTUAL: string | null = null
 let BOT_QR_GENERADO_EN: number | null = null
 const BOT_QR_TTL_MS = 60_000
+const QR_SCAN_GRACE_MS = 15 * 60_000
 let BOT_RECONNECTING = false
 let WATCHDOG_INICIADO = false
 let ULTIMA_RECARGA_WEB = 0
+let BOT_ESTADO: 'iniciando' | 'esperando_qr' | 'conectado' | 'reconectando' | 'desconectado' | 'error' = 'iniciando'
+let BOT_ESTADO_DETALLE = 'Arrancando bot'
+
+function actualizarEstadoBot(estado: typeof BOT_ESTADO, detalle: string): void {
+  BOT_ESTADO = estado
+  BOT_ESTADO_DETALLE = detalle
+}
+
+function reiniciarProceso(motivo: string, contarCrash = true): never {
+  console.error(`[bot] 🔄 Reinicio forzado: ${motivo}`)
+  if (contarCrash) registrarCrash()
+  process.exit(1)
+}
 
 async function reconectarWhatsapp(motivo: string): Promise<void> {
   if (BOT_RECONNECTING) {
@@ -1601,6 +1639,7 @@ async function reconectarWhatsapp(motivo: string): Promise<void> {
 
   BOT_RECONNECTING = true
   BOT_READY = false
+  actualizarEstadoBot('reconectando', motivo)
   console.warn(`[bot] 🔄 Reconectando WhatsApp: ${motivo}`)
 
   try {
@@ -1609,6 +1648,7 @@ async function reconectarWhatsapp(motivo: string): Promise<void> {
     await whatsappClient.initialize()
   } catch (err) {
     BOT_RECONNECTING = false
+    actualizarEstadoBot('error', 'Fallo reconectando WhatsApp')
     console.error('[bot] ❌ No se pudo reconectar — forzando reinicio:', err)
     registrarCrash()
     process.exit(1)
@@ -1619,33 +1659,42 @@ whatsappClient.on('qr', async (qr) => {
   BOT_QR_EMITIDO = true
   BOT_QR_ACTUAL = qr
   BOT_QR_GENERADO_EN = Date.now()
-  console.log('\n⚡ ¡NUEVO QR! Escanéalo ahora:')
-  qrcode.generate(qr, { small: true })
-  console.log('\n📱 Subiendo a Supabase como respaldo...')
+  actualizarEstadoBot('esperando_qr', 'QR generado, esperando escaneo')
+  console.log('\n📱 Subiendo nuevo QR a Supabase...')
+  let qrGuardado = false
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const { error } = await supabaseAdmin.from('configuracion_agente').update({ qr_code: qr }).eq('id', 1)
-      if (error?.message?.includes('0 rows')) {
-        // La fila no existe — crearla
-        const { error: insErr } = await supabaseAdmin.from('configuracion_agente').insert({ id: 1, qr_code: qr, bot_pausado: false })
-        if (insErr) throw insErr
-        console.log('✅ QR guardado (INSERT).')
-        break
-      }
+      const { data, error } = await supabaseAdmin
+        .from('configuracion_agente')
+        .update({ qr_code: qr })
+        .eq('id', 1)
+        .select('id')
+        .maybeSingle()
       if (error) throw error
-      console.log('✅ QR guardado.')
+      if (!data) {
+        const { error: insErr } = await supabaseAdmin
+          .from('configuracion_agente')
+          .insert({ id: 1, qr_code: qr, bot_pausado: false })
+        if (insErr) throw insErr
+      }
+      console.log(data ? '✅ QR guardado.' : '✅ QR guardado (INSERT).')
+      qrGuardado = true
       break
     } catch (err) {
       console.error(`❌ Error QR Supabase (intento ${attempt + 1}/3):`, err)
       if (attempt < 2) await new Promise(r => setTimeout(r, 3000))
     }
   }
+  if (!qrGuardado) console.warn('⚠️ No se pudo guardar el QR en Supabase; se muestra solo en consola.')
+  console.log('\n⚡ ¡NUEVO QR! Escanéalo ahora:')
+  qrcode.generate(qr, { small: true })
   enviarAlertaQr()
 })
 
 whatsappClient.on('ready', async () => {
   BOT_READY = true
   BOT_RECONNECTING = false
+  actualizarEstadoBot('conectado', 'WhatsApp conectado')
   console.log('\n✅ Bot de Jardín RoCe conectado!')
   console.log('🌸 Flora está escuchando...\n')
   ultimaActividad = Date.now()
@@ -1723,6 +1772,10 @@ whatsappClient.on('auth_failure', (msg) => { console.error('❌ Auth:', msg); re
 whatsappClient.on('disconnected', (reason) => {
   console.warn('⚠️ Desconectado:', reason)
   BOT_READY = false
+  actualizarEstadoBot('desconectado', String(reason || 'WhatsApp desconectado'))
+  if (String(reason).toLowerCase().includes('max qrcode retries reached')) {
+    reiniciarProceso('WhatsApp agotó los intentos de QR sin escaneo')
+  }
   setTimeout(() => { reconectarWhatsapp(`evento disconnected: ${reason}`).catch(console.error) }, 5000)
 })
 
@@ -1733,6 +1786,10 @@ async function manejarMensajeEntrante(message: any): Promise<void> {
   if (message.isGroupMsg) return
   if (!message.from || message.from === 'status@broadcast') return
   if (message.from.includes('@lid') && !message.body?.trim()) return
+  if (!message.fromMe && yaProcesadoRecientemente(message)) {
+    console.log(`[bot] ↩️ Mensaje duplicado ignorado: ${obtenerMensajeId(message)}`)
+    return
+  }
 
   // Ignorar números silenciados (repartidor, admin, etc.)
   const ignorados = await cargarIgnorados()
@@ -1788,7 +1845,7 @@ whatsappClient.on('message_create', manejarMensajeEntrante)
 console.log('🌸 Iniciando bot de Jardín RoCe...')
 
 // ── Startup Watchdog: en VM chica Chrome/WhatsApp puede tardar varios minutos ──
-// (NO reinicia si ya se emitió un QR — el usuario necesita tiempo para escanear)
+// Si hay QR, damos margen para escanear; si expira, reiniciamos para generar uno fresco.
 const BOT_START_TIME = Date.now()
 const STARTUP_WARN_SECONDS = 180
 const STARTUP_RESTART_SECONDS = 600
@@ -1798,9 +1855,13 @@ const startupWatchdog = setInterval(() => {
   const elapsed = Math.round((Date.now() - BOT_START_TIME) / 1000)
   if (BOT_READY) { clearInterval(startupWatchdog); return }
 
-  // Si ya salió QR, esperamos pacientemente a que el usuario escanee
+  // Si ya salió QR, esperamos un tiempo razonable a que el usuario escanee.
   if (BOT_QR_EMITIDO) {
+    const qrAgeMs = BOT_QR_GENERADO_EN ? Date.now() - BOT_QR_GENERADO_EN : Date.now() - BOT_START_TIME
     if (elapsed % 120 < 31) console.log(`[Startup] ⏳ Esperando escaneo QR... (${Math.round(elapsed / 60)} min)`)
+    if (qrAgeMs > QR_SCAN_GRACE_MS) {
+      reiniciarProceso(`QR sin escanear por ${Math.round(qrAgeMs / 60_000)} min`)
+    }
     return
   }
 
@@ -1813,10 +1874,8 @@ const startupWatchdog = setInterval(() => {
 
   if (elapsed > STARTUP_RESTART_SECONDS) {
     // Forzar reconexión completa
-    console.warn(`[Startup] 🔄 ${elapsed}s sin "ready" ni QR. Forzando reinicio por timeout de inicialización...`)
     clearInterval(startupWatchdog)
-    registrarCrash()
-    process.exit(1)
+    reiniciarProceso(`${elapsed}s sin "ready" ni QR`)
   }
 }, 30_000)
 startupWatchdog.unref()
@@ -1874,6 +1933,20 @@ app.post('/resume', (_req, res) => {
   res.json({ ok: true, pausado: false })
 })
 
+app.post('/reconnect', (_req, res) => {
+  console.warn('[bot] 🔄 Reinicio manual solicitado vía API')
+  res.json({ ok: true, mensaje: 'Reinicio solicitado. El proceso volverá a levantar con systemd.' })
+  setTimeout(() => reiniciarProceso('Reinicio manual desde dashboard', false), 500)
+})
+
+app.post('/recover', (_req, res) => {
+  console.log('[bot] ♻️ Rescate manual solicitado vía API')
+  recuperarMensajesPerdidos()
+    .then(() => console.log('[bot] ✅ Rescate manual terminado'))
+    .catch(err => console.error('[bot] Error en rescate manual:', err))
+  res.json({ ok: true, mensaje: 'Rescate de mensajes iniciado' })
+})
+
 app.get('/qr', (_req, res) => {
   const ageMs = BOT_QR_GENERADO_EN ? Date.now() - BOT_QR_GENERADO_EN : null
   res.json({
@@ -1881,6 +1954,8 @@ app.get('/qr', (_req, res) => {
     qrGeneradoEn: BOT_QR_GENERADO_EN ? new Date(BOT_QR_GENERADO_EN).toISOString() : null,
     qrAgeSeconds: ageMs === null ? null : Math.round(ageMs / 1000),
     qrExpiresInSeconds: ageMs === null ? null : Math.max(0, Math.ceil((BOT_QR_TTL_MS - ageMs) / 1000)),
+    qrScanGraceSeconds: ageMs === null ? null : Math.max(0, Math.ceil((QR_SCAN_GRACE_MS - ageMs) / 1000)),
+    qrVencido: ageMs === null ? false : ageMs > BOT_QR_TTL_MS,
   })
 })
 
@@ -1889,13 +1964,19 @@ app.get('/status', async (_req, res) => {
     const ventas = await obtenerVentasHoy().catch(() => ({ total: 0, cantidad: 0 }))
     const clientes = await obtenerClientesAtendidosHoy().catch(() => 0)
     const minutosInactivo = Math.round((Date.now() - ultimaActividad) / 60_000)
+    const qrAgeMs = BOT_QR_GENERADO_EN ? Date.now() - BOT_QR_GENERADO_EN : null
     res.json({
       pausado: BOT_PAUSADO,
-      connected: whatsappClient?.info ? true : false,
+      connected: BOT_READY && whatsappClient?.info ? true : false,
+      estado: BOT_ESTADO,
+      estadoDetalle: BOT_ESTADO_DETALLE,
+      reconnecting: BOT_RECONNECTING,
       qr: BOT_QR_ACTUAL,
       qrGeneradoEn: BOT_QR_GENERADO_EN ? new Date(BOT_QR_GENERADO_EN).toISOString() : null,
-      qrAgeSeconds: BOT_QR_GENERADO_EN ? Math.round((Date.now() - BOT_QR_GENERADO_EN) / 1000) : null,
-      qrExpiresInSeconds: BOT_QR_GENERADO_EN ? Math.max(0, Math.ceil((BOT_QR_TTL_MS - (Date.now() - BOT_QR_GENERADO_EN)) / 1000)) : null,
+      qrAgeSeconds: qrAgeMs === null ? null : Math.round(qrAgeMs / 1000),
+      qrExpiresInSeconds: qrAgeMs === null ? null : Math.max(0, Math.ceil((BOT_QR_TTL_MS - qrAgeMs) / 1000)),
+      qrScanGraceSeconds: qrAgeMs === null ? null : Math.max(0, Math.ceil((QR_SCAN_GRACE_MS - qrAgeMs) / 1000)),
+      qrVencido: qrAgeMs === null ? false : qrAgeMs > BOT_QR_TTL_MS,
       ultimaActividad: `${minutosInactivo} min`,
       ventasHoy: ventas.cantidad,
       totalVentasHoy: ventas.total,
@@ -1906,7 +1987,9 @@ app.get('/status', async (_req, res) => {
   } catch {
     res.json({
       pausado: BOT_PAUSADO,
-      connected: whatsappClient?.info ? true : false,
+      connected: BOT_READY && whatsappClient?.info ? true : false,
+      estado: BOT_ESTADO,
+      estadoDetalle: BOT_ESTADO_DETALLE,
     })
   }
 })

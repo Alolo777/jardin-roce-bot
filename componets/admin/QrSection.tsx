@@ -7,11 +7,12 @@ import QRCode from 'qrcode'
 type QrState = {
   image: string | null
   expiresIn: number | null
+  scanGraceIn: number | null
   source: 'bot' | 'supabase' | null
 }
 
 export default function QrSection() {
-  const [qrState, setQrState] = useState<QrState>({ image: null, expiresIn: null, source: null })
+  const [qrState, setQrState] = useState<QrState>({ image: null, expiresIn: null, scanGraceIn: null, source: null })
   const supabase = createSupabaseBrowserClient()
 
   useEffect(() => {
@@ -28,7 +29,14 @@ export default function QrSection() {
             margin: 2,
             color: { dark: '#1a1a2e', light: '#ffffff' },
           })
-          if (!cancelled) setQrState({ image: url, expiresIn: status.qrExpiresInSeconds ?? null, source: 'bot' })
+          if (!cancelled) {
+            setQrState({
+              image: url,
+              expiresIn: status.qrExpiresInSeconds ?? null,
+              scanGraceIn: status.qrScanGraceSeconds ?? null,
+              source: status.source ?? 'bot',
+            })
+          }
           return
         }
 
@@ -44,9 +52,9 @@ export default function QrSection() {
             margin: 2,
             color: { dark: '#1a1a2e', light: '#ffffff' },
           })
-          if (!cancelled) setQrState({ image: url, expiresIn: null, source: 'supabase' })
+          if (!cancelled) setQrState({ image: url, expiresIn: null, scanGraceIn: null, source: 'supabase' })
         } else {
-          if (!cancelled) setQrState({ image: null, expiresIn: null, source: null })
+          if (!cancelled) setQrState({ image: null, expiresIn: null, scanGraceIn: null, source: null })
         }
       } catch { /* silently retry */ }
     }
@@ -81,6 +89,11 @@ export default function QrSection() {
         <div className={`mt-3 rounded-full px-3 py-1 text-xs font-semibold ${expiraPronto ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
           {qrState.expiresIn === null ? 'QR listo para escanear' : qrState.expiresIn > 0 ? `Escanéalo ahora: expira en ${qrState.expiresIn}s` : 'Esperando nuevo QR...'}
         </div>
+        {qrState.scanGraceIn !== null && (
+          <p className="mt-2 text-xs text-gray-500">
+            Si no se escanea, Flora generara otro QR en {Math.ceil(qrState.scanGraceIn / 60)} min.
+          </p>
+        )}
       </div>
       <p className="text-amber-700 text-sm mt-4 leading-relaxed">
         Abre WhatsApp en tu celular →<br />
