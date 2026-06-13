@@ -613,12 +613,43 @@ async function obtenerClientesAtendidosHoy(): Promise<number> {
 }
 
 const COLA_POR_CLIENTE = new Map<string, Promise<void>>()
+const MENSAJES_POR_AGRUPAR = new Map<string, { mensajes: any[]; timer: NodeJS.Timeout }>()
+const AGRUPAR_MENSAJES_MS = 2500
 
 function encolarPorCliente(id: string, tarea: () => Promise<void>): void {
   const previa    = COLA_POR_CLIENTE.get(id) ?? Promise.resolve()
   const siguiente = previa.catch(() => {}).then(tarea).catch(e => console.error(`[bot] Cola ${id}:`, e))
   COLA_POR_CLIENTE.set(id, siguiente)
   siguiente.finally(() => { if (COLA_POR_CLIENTE.get(id) === siguiente) COLA_POR_CLIENTE.delete(id) })
+}
+
+function encolarMensajeAgrupado(clienteId: string, message: any): void {
+  const actual = MENSAJES_POR_AGRUPAR.get(clienteId)
+  if (actual) clearTimeout(actual.timer)
+
+  const mensajes = [...(actual?.mensajes ?? []), message]
+  const timer = setTimeout(() => {
+    MENSAJES_POR_AGRUPAR.delete(clienteId)
+    const textos = mensajes.map(m => String(m.body || '').trim()).filter(Boolean)
+    if (textos.length === 0) return
+
+    const base = mensajes.find(m => m.hasQuotedMsg) ?? mensajes[mensajes.length - 1]
+    base.body = textos.join('\n')
+    for (const msg of mensajes) {
+      const id = obtenerMensajeId(msg)
+      if (id && msg !== base) marcarMensajeProcesado(id)
+    }
+
+    console.log(`[bot] 🧵 Agrupando ${mensajes.length} mensajes de ${clienteId}`)
+    if (esPedidoCotizador(base.body)) {
+      encolarPorCliente(clienteId, () => procesarPedidoWeb(base))
+    } else {
+      encolarPorCliente(clienteId, () => procesarMensaje(base))
+    }
+  }, AGRUPAR_MENSAJES_MS)
+  timer.unref()
+
+  MENSAJES_POR_AGRUPAR.set(clienteId, { mensajes, timer })
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -680,6 +711,35 @@ const ULTIMOS_ARREGLOS = new Map<string, ArregloConFoto[]>()
 const VENTAS_CERRADAS  = new Set<string>()
 const VENTA_ACTUAL     = new Map<string, VentaCerrada>()
 const ARREGLO_ELEGIDO  = new Map<string, ArregloConFoto>()
+const PEDIDO_EN_CURSO  = new Map<string, { arreglo?: ArregloConFoto; envio?: { zona: string; precio: number }; nombre?: string; direccion?: string }>()
+
+function pedidoActual(clienteId: string) {
+  const pedido = PEDIDO_EN_CURSO.get(clienteId) ?? {}
+  PEDIDO_EN_CURSO.set(clienteId, pedido)
+  return pedido
+}
+
+function ventaDesdeEstado(clienteId: string, fallback?: VentaCerrada): VentaCerrada | null {
+  const pedido = PEDIDO_EN_CURSO.get(clienteId)
+  const elegido = pedido?.arreglo ?? ARREGLO_ELEGIDO.get(clienteId)
+  if (!elegido && !fallback) return null
+
+  const producto = elegido?.nombre ?? fallback?.producto ?? 'Pedido'
+  const subtotal = elegido?.precio ?? (parseFloat(String(fallback?.total ?? '').replace(/[^0-9.]/g, '')) || 0)
+  const envio = pedido?.envio?.precio ?? 0
+  const total = subtotal + envio
+  const direccion = pedido?.envio?.zona
+    ? `${pedido.envio.zona}${pedido.direccion ? ` — ${pedido.direccion}` : ''}`
+    : (pedido?.direccion ?? fallback?.direccion ?? 'Por confirmar')
+
+  return {
+    cliente: pedido?.nombre ?? fallback?.cliente ?? 'Verificar en chat',
+    producto,
+    total: `$${total.toFixed(2)} MXN`,
+    direccion,
+    rawToken: fallback?.rawToken ?? '',
+  }
+}
 
 // ════════════════════════════════════════════════════════════════
 // DETECCIÓN DE INTENCIÓN
@@ -711,6 +771,10 @@ const KW_COTIZADOR = [
 
 function detectarIntencion(texto: string, clienteId: string): 'inventario' | 'catalogo' | 'cotizador' | 'normal' {
   const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
+  if (/foto.*(entrega|entreguen|entregado|repartidor)|comprobante.*entrega|cuando.*entreguen/.test(n)) {
+    return 'normal'
+  }
 
   if (VENTAS_CERRADAS.has(clienteId)) {
     // Cliente ya compró — no ofrecer inventario ni fotos
@@ -1056,6 +1120,7 @@ async function procesarMensaje(message: any): Promise<void> {
           if (match) {
             arregloReferenciado = match
             ARREGLO_ELEGIDO.set(clienteId, match)
+            pedidoActual(clienteId).arreglo = match
             console.log(`[bot] 📸 Cliente respondió a foto de "${match.nombre}"`)
           }
         }
@@ -1179,6 +1244,7 @@ async function procesarMensaje(message: any): Promise<void> {
     } else {
       const envioMatch = await buscarPrecioEnvio(textoCliente)
       if (envioMatch) {
+        pedidoActual(clienteId).envio = { zona: envioMatch.zona, precio: envioMatch.precio }
         contextoExtra +=
           `\n\n[CLIENTE MENCIONÓ UNA ZONA: "${envioMatch.zona}" — $${envioMatch.precio.toFixed(2)} MXN (${envioMatch.fuente})]\n` +
           `INSTRUCCION: Usa este precio de envío exacto. Confirma: "El envío a esa zona cuesta $${envioMatch.precio.toFixed(2)} MXN, ¿te parece bien?" NUNCA inventes precios.`
@@ -1266,9 +1332,11 @@ async function procesarMensaje(message: any): Promise<void> {
         let instruccion = `\n\n[ARREGLOS MOSTRADOS: ${lista}]`
         if (match && match.score >= 2) {
           ARREGLO_ELEGIDO.set(clienteId, match.arreglo)
+          pedidoActual(clienteId).arreglo = match.arreglo
           instruccion += `\n[CLIENTE ELIGIÓ: "${match.arreglo.nombre}" — $${match.arreglo.precio} MXN (coincidencia exacta)]`
         } else if (match) {
           ARREGLO_ELEGIDO.set(clienteId, match.arreglo)
+          pedidoActual(clienteId).arreglo = match.arreglo
           instruccion += `\n[POSIBLE ELECCIÓN: "${match.arreglo.nombre}" — $${match.arreglo.precio} MXN]`
         }
         if (esEleccion) {
@@ -1284,7 +1352,13 @@ async function procesarMensaje(message: any): Promise<void> {
 
     // Detectar continuacion de venta (pago/envio)
     const KW_PAGO = /pago|pagar|transferencia|deposito|depósito|bbva|banco|tarjeta|efectivo|oxxo|okei|okis|okas|ok|va|dale|acuerdo|confirmo|si[^a-zA-Z]|simon|sip|sipo|está bien|esta bien|le pago|voy a pagar|ya pague|ya pagué|ya me dijo|listo|comprobante/i.test(textoCliente)
-    const KW_CONFIRMA_PAGO = /ya pague|ya pagué|listo|comprobante|ya quedó|ya quedo|ya la hice|ya la hizo|ya transfer[ií]|transfer[ií]|ya llegó|ya llego|sipi|si ya|confirmo|confirmado|ya esta pagado/i.test(textoCliente)
+    const KW_CONFIRMA_PAGO = /ya pague|ya pagué|listo|comprobante|ya quedó|ya quedo|ya la hice|ya la hizo|ya.*dep[oó]sito|hice.*dep[oó]sito|dep[oó]sito.*hecho|ya transfer[ií]|transfer[ií]|ya llegó|ya llego|sipi|si ya|confirmo|confirmado|ya esta pagado/i.test(textoCliente)
+    const consultaPagoEnviado = /le lleg[oó]|si lleg[oó]|sí lleg[oó]|recibieron|recibiste|dep[oó]sito|transfer/i.test(textoCliente)
+
+    const nombreMatch = textoCliente.match(/\b([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,5})\b(?=.*\b(entregar|entrega|apart|nombre|4\s*pm|[0-9]{1,2}\s*(?:am|pm)))/)
+    if (nombreMatch && ARREGLO_ELEGIDO.has(clienteId)) {
+      pedidoActual(clienteId).nombre = nombreMatch[1].trim()
+    }
 
     if (KW_PAGO && intencion === 'normal') {
       contextoExtra +=
@@ -1295,11 +1369,31 @@ async function procesarMensaje(message: any): Promise<void> {
         `El token [VENTA_CERRADA:...] debe ir AL FINAL de tu mensaje.`
     }
 
+    if (consultaPagoEnviado && ARREGLO_ELEGIDO.has(clienteId)) {
+      contextoExtra +=
+        `\n\n[CLIENTE HABLA DE PAGO YA ENVIADO/RECIBIDO] ` +
+        `No reinicies la venta, no preguntes de nuevo cuál arreglo quiere y no digas que no compartió datos. ` +
+        `Si pregunta si llegó el depósito, responde que lo reportas al equipo para verificarlo. ` +
+        `Si afirma que ya pagó o ya hizo depósito, agradece y cierra la venta con el token usando el pedido en curso.`
+    }
+
     if (/transferencia|tranferencia|transfer/i.test(textoCliente) && /a nombre de|nombre de/i.test(textoCliente) && !KW_CONFIRMA_PAGO) {
       contextoExtra +=
         `\n\n[CLIENTE DIO NOMBRE Y ELIGIÓ TRANSFERENCIA] ` +
         `INSTRUCCION: NO vuelvas a preguntar el nombre. NO digas "gracias por el pago" todavía. ` +
         `Comparte la cuenta BBVA y pide que mande el comprobante cuando quede listo.`
+    }
+
+    const pedido = PEDIDO_EN_CURSO.get(clienteId)
+    if (pedido?.arreglo) {
+      const totalPedido = pedido.arreglo.precio + (pedido.envio?.precio ?? 0)
+      contextoExtra +=
+        `\n\n[PEDIDO EN CURSO VERIFICADO POR SISTEMA] ` +
+        `Producto elegido: "${pedido.arreglo.nombre}" — $${pedido.arreglo.precio.toFixed(2)} MXN. ` +
+        `${pedido.envio ? `Envío: ${pedido.envio.zona} — $${pedido.envio.precio.toFixed(2)} MXN. ` : ''}` +
+        `Total actual: $${totalPedido.toFixed(2)} MXN. ` +
+        `${pedido.nombre ? `Nombre: ${pedido.nombre}. ` : ''}` +
+        `NO cambies el producto por otro del historial. Si cierras venta, usa exactamente estos datos.`
     }
 
     await chat.sendStateTyping()
@@ -1371,44 +1465,48 @@ async function procesarMensaje(message: any): Promise<void> {
 
     // Venta cerrada
     if (ventaCerrada) {
-      console.log(`[bot] 🎉 VENTA CERRADA: ${ventaCerrada.cliente} | ${numeroReal}`)
+      const ventaVerificada = ventaDesdeEstado(clienteId, ventaCerrada) ?? ventaCerrada
+      console.log(`[bot] 🎉 VENTA CERRADA: ${ventaVerificada.cliente} | ${numeroReal}`)
       enviarAlertaVentaCerrada({
-        cliente: ventaCerrada.cliente, producto: ventaCerrada.producto,
-        total: ventaCerrada.total, direccion: ventaCerrada.direccion,
+        cliente: ventaVerificada.cliente, producto: ventaVerificada.producto,
+        total: ventaVerificada.total, direccion: ventaVerificada.direccion,
         numeroCliente: numeroReal,
       }).catch(err => console.error('[bot] Telegram venta:', err))
-      apartarArreglo(ventaCerrada.producto, numeroReal)
+      apartarArreglo(ventaVerificada.producto, numeroReal)
         .catch(err => console.error('[bot] Error apartando:', err))
       VENTAS_CERRADAS.add(clienteId)
-      VENTA_ACTUAL.set(clienteId, ventaCerrada)
+      VENTA_ACTUAL.set(clienteId, ventaVerificada)
       FOTOS_PENDIENTES.delete(clienteId) // limpiar fotos pendientes
       // Guardar en reporte_ventas
-      registrarVenta(ventaCerrada.cliente, numeroReal, ventaCerrada.producto, ventaCerrada.total, ventaCerrada.direccion)
+      registrarVenta(ventaVerificada.cliente, numeroReal, ventaVerificada.producto, ventaVerificada.total, ventaVerificada.direccion)
         .catch(err => console.error('[bot] Error registrando venta:', err))
     }
 
     // Fallback: si el cliente confirmó pago pero la IA no generó el token
-    if (!ventaCerrada && KW_CONFIRMA_PAGO && mensajeFinal.length < 150 && !mensajeFinal.includes('?')) {
+    if (!ventaCerrada && KW_CONFIRMA_PAGO && (ARREGLO_ELEGIDO.has(clienteId) || (mensajeFinal.length < 150 && !mensajeFinal.includes('?')))) {
+      const ventaVerificada = ventaDesdeEstado(clienteId)
       const ultimos = ULTIMOS_ARREGLOS.get(clienteId)
       const elegido = ARREGLO_ELEGIDO.get(clienteId)
-      const nombreArreglo = elegido?.nombre ?? ultimos?.[0]?.nombre ?? 'Pedido'
-      const precioArreglo = elegido?.precio ?? ultimos?.[0]?.precio ?? 0
+      const nombreArreglo = ventaVerificada?.producto ?? elegido?.nombre ?? ultimos?.[0]?.nombre ?? 'Pedido'
+      const totalArreglo = ventaVerificada?.total ?? `$${(elegido?.precio ?? ultimos?.[0]?.precio ?? 0).toFixed(2)} MXN`
+      const clienteVenta = ventaVerificada?.cliente ?? 'Verificar en chat'
+      const direccionVenta = ventaVerificada?.direccion ?? 'Por confirmar'
       console.log(`[bot] ⚠️ Cliente confirmó pago pero IA no generó token. Notificando igual.`)
       enviarAlertaVentaCerrada({
-        cliente: 'Verificar en chat',
+        cliente: clienteVenta,
         producto: nombreArreglo,
-        total: `$${precioArreglo.toFixed(2)} MXN`,
-        direccion: 'Por confirmar',
+        total: totalArreglo,
+        direccion: direccionVenta,
         numeroCliente: numeroReal,
       }).catch(err => console.error('[bot] Telegram venta fallback:', err))
-      registrarVenta('Verificar en chat', numeroReal, nombreArreglo, `$${precioArreglo.toFixed(2)}`, 'Por confirmar')
+      registrarVenta(clienteVenta, numeroReal, nombreArreglo, totalArreglo, direccionVenta)
         .catch(err => console.error('[bot] Error registrando venta fallback:', err))
       VENTAS_CERRADAS.add(clienteId)
       VENTA_ACTUAL.set(clienteId, {
-        cliente: 'Verificar en chat',
+        cliente: clienteVenta,
         producto: nombreArreglo,
-        total: `$${precioArreglo.toFixed(2)} MXN`,
-        direccion: 'Por confirmar',
+        total: totalArreglo,
+        direccion: direccionVenta,
         rawToken: '',
       })
     }
@@ -1416,29 +1514,32 @@ async function procesarMensaje(message: any): Promise<void> {
     // Detectar "venta cerrada" explícito del usuario/humano
     if (/venta\s*cerrada|venta.*cerrada|sale.*closed|closed.*sale/i.test(textoCliente)) {
       console.log(`[bot] 🚨 Usuario indicó venta cerrada manualmente: ${numeroReal}`)
+      const ventaVerificada = ventaDesdeEstado(clienteId)
       const ultimos = ULTIMOS_ARREGLOS.get(clienteId)
       const elegido = ARREGLO_ELEGIDO.get(clienteId)
-      const nombreArreglo = elegido?.nombre ?? ultimos?.[0]?.nombre ?? 'Pedido'
-      const precioArreglo = elegido?.precio ?? ultimos?.[0]?.precio ?? 0
+      const nombreArreglo = ventaVerificada?.producto ?? elegido?.nombre ?? ultimos?.[0]?.nombre ?? 'Pedido'
+      const totalVenta = ventaVerificada?.total ?? `$${(elegido?.precio ?? ultimos?.[0]?.precio ?? 0).toFixed(2)} MXN`
+      const direccionVenta = ventaVerificada?.direccion ?? 'Verificar en chat'
+      const clienteVenta = ventaVerificada?.cliente ?? 'Manual'
       enviarAlertaVentaCerrada({
-        cliente: 'Manual',
+        cliente: clienteVenta,
         producto: nombreArreglo,
-        total: `$${precioArreglo.toFixed(2)} MXN`,
-        direccion: 'Verificar en chat',
+        total: totalVenta,
+        direccion: direccionVenta,
         numeroCliente: numeroReal,
       }).catch(err => console.error('[bot] Telegram venta manual:', err))
       apartarArreglo(nombreArreglo, numeroReal)
         .catch(err => console.error('[bot] Error apartando manual:', err))
       VENTAS_CERRADAS.add(clienteId)
       VENTA_ACTUAL.set(clienteId, {
-        cliente: 'Manual',
+        cliente: clienteVenta,
         producto: nombreArreglo,
-        total: `$${precioArreglo.toFixed(2)} MXN`,
-        direccion: 'Verificar en chat',
+        total: totalVenta,
+        direccion: direccionVenta,
         rawToken: '',
       })
       FOTOS_PENDIENTES.delete(clienteId)
-      registrarVenta('Manual', numeroReal, nombreArreglo, `$${precioArreglo.toFixed(2)}`, 'Verificar en chat')
+      registrarVenta(clienteVenta, numeroReal, nombreArreglo, totalVenta, direccionVenta)
         .catch(err => console.error('[bot] Error registrando venta manual:', err))
     }
 
@@ -1446,7 +1547,7 @@ async function procesarMensaje(message: any): Promise<void> {
     const fotosPendientes = VENTAS_CERRADAS.has(clienteId) ? undefined : FOTOS_PENDIENTES.get(clienteId)
     const arreglosFinales = arreglosParaEnviar.length > 0 ? arreglosParaEnviar : (fotosPendientes?.arreglos ?? [])
 
-    if (enviarFotos || fotosPendientes) {
+    if (enviarFotos || (intencion === 'inventario' && fotosPendientes)) {
       FOTOS_PENDIENTES.delete(clienteId)
 
       if (arreglosFinales.length > 0) {
@@ -1903,12 +2004,8 @@ async function manejarMensajeEntrante(message: any): Promise<void> {
 
   verificarSiBotPausado().then(pausado => {
     if (pausado) { console.log(`[bot] ⏸️ Pausado — ${clienteId} ignorado`); return }
-    if (esPedidoCotizador(message.body)) {
-      encolarPorCliente(clienteId, () => procesarPedidoWeb(message))
-    } else {
-      encolarPorCliente(clienteId, () => procesarMensaje(message))
-    }
-  }).catch(() => encolarPorCliente(clienteId, () => procesarMensaje(message)))
+    encolarMensajeAgrupado(clienteId, message)
+  }).catch(() => encolarMensajeAgrupado(clienteId, message))
 }
 
 whatsappClient.on('message_create', manejarMensajeEntrante)
