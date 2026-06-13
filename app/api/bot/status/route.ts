@@ -21,14 +21,16 @@ export async function GET() {
 
     const { data: ventas, error: ventasError } = await supabaseAdmin
       .from('reporte_ventas')
-      .select('precio_total')
+      .select('cliente_nombre, cliente_telefono, producto, precio_total, direccion_entrega, metodo_pago, estado, creado_en')
       .gte('creado_en', inicio.toISOString())
       .lte('creado_en', fin.toISOString())
+      .order('creado_en', { ascending: false })
 
     if (ventasError) throw ventasError
 
     const cantidadVentas = ventas?.length ?? 0
     const totalVentas = ventas?.reduce((sum, v) => sum + (v.precio_total || 0), 0) ?? 0
+    const ventasRecientes = (ventas ?? []).slice(0, 6)
 
     // Obtener mensajes de hoy
     const { count: mensajesHoy, error: msgsError } = await supabaseAdmin
@@ -79,7 +81,7 @@ export async function GET() {
         if (data?.valor) {
           const remoto = JSON.parse(data.valor)
           const updatedAt = remoto.updatedAt ? new Date(remoto.updatedAt).getTime() : 0
-          const fresco = Date.now() - updatedAt < 90_000
+          const fresco = Date.now() - updatedAt < 5 * 60_000
           botConnected = fresco ? remoto.connected ?? false : false
           estado = fresco ? remoto.estado || estado : 'desconectado'
           estadoDetalle = fresco ? remoto.estadoDetalle || estadoDetalle : 'Sin pulso reciente de la VM'
@@ -111,6 +113,7 @@ export async function GET() {
       ultimaActividad,
       ventasHoy: cantidadVentas,
       totalVentasHoy: totalVentas,
+      ventasRecientes,
       clientesAtendidosHoy: mensajesHoy ?? 0,
     })
   } catch (error) {

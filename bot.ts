@@ -134,18 +134,23 @@ async function agregarAlHistorial(telefono: string, role: 'user' | 'assistant', 
 // CONTROL DE FOTOS ENVIADAS
 // ════════════════════════════════════════════════════════════════
 
-const FOTOS_YA_ENVIADAS = new Set<string>()
+const FOTOS_ENVIADAS_HOY = new Map<string, number>()
+const MAX_ENVIOS_FOTOS_DIA = 3
 const MENSAJES_PROCESADOS = new Map<string, number>()
 const MENSAJE_PROCESADO_TTL_MS = 2 * 60 * 60_000
 
-function yaSeEnviaronFotos(id: string): boolean { return FOTOS_YA_ENVIADAS.has(id) }
+function enviosFotosRestantes(id: string): number {
+  return Math.max(0, MAX_ENVIOS_FOTOS_DIA - (FOTOS_ENVIADAS_HOY.get(id) ?? 0))
+}
+
+function puedeEnviarFotos(id: string): boolean { return enviosFotosRestantes(id) > 0 }
 
 function marcarFotosEnviadas(id: string): void {
-  FOTOS_YA_ENVIADAS.add(id)
+  FOTOS_ENVIADAS_HOY.set(id, (FOTOS_ENVIADAS_HOY.get(id) ?? 0) + 1)
   const manana = new Date()
   manana.setDate(manana.getDate() + 1)
   manana.setHours(0, 0, 0, 0)
-  setTimeout(() => FOTOS_YA_ENVIADAS.delete(id), manana.getTime() - Date.now())
+  setTimeout(() => FOTOS_ENVIADAS_HOY.delete(id), manana.getTime() - Date.now())
 }
 
 const MENSAJES_RESCATADOS = new Set<string>()
@@ -469,7 +474,7 @@ setInterval(() => {
   if (rss > 440) {
     console.warn('[RAM] ⚠️ Memoria alta — limpiando...')
     CACHE_CLIENTE_UUID.clear()
-    FOTOS_YA_ENVIADAS.clear()
+    FOTOS_ENVIADAS_HOY.clear()
     CACHE_NUMEROS.clear()
     FRUSTRACION_NOTIFICADA.clear()
     RATE_TIMESTAMPS.clear()
@@ -711,12 +716,20 @@ const ULTIMOS_ARREGLOS = new Map<string, ArregloConFoto[]>()
 const VENTAS_CERRADAS  = new Set<string>()
 const VENTA_ACTUAL     = new Map<string, VentaCerrada>()
 const ARREGLO_ELEGIDO  = new Map<string, ArregloConFoto>()
-const PEDIDO_EN_CURSO  = new Map<string, { arreglo?: ArregloConFoto; envio?: { zona: string; precio: number }; nombre?: string; direccion?: string }>()
+const PEDIDO_EN_CURSO  = new Map<string, { arreglo?: ArregloConFoto; envio?: { zona: string; precio: number }; nombre?: string; direccion?: string; sucursal?: string; metodoPago?: 'transferencia' | 'efectivo_recoger' }>()
 
 function pedidoActual(clienteId: string) {
   const pedido = PEDIDO_EN_CURSO.get(clienteId) ?? {}
   PEDIDO_EN_CURSO.set(clienteId, pedido)
   return pedido
+}
+
+function resetearPedidoCliente(clienteId: string): void {
+  PEDIDO_EN_CURSO.delete(clienteId)
+  ARREGLO_ELEGIDO.delete(clienteId)
+  FOTOS_PENDIENTES.delete(clienteId)
+  VENTAS_CERRADAS.delete(clienteId)
+  VENTA_ACTUAL.delete(clienteId)
 }
 
 function ventaDesdeEstado(clienteId: string, fallback?: VentaCerrada): VentaCerrada | null {
@@ -730,7 +743,7 @@ function ventaDesdeEstado(clienteId: string, fallback?: VentaCerrada): VentaCerr
   const total = subtotal + envio
   const direccion = pedido?.envio?.zona
     ? `${pedido.envio.zona}${pedido.direccion ? ` — ${pedido.direccion}` : ''}`
-    : (pedido?.direccion ?? fallback?.direccion ?? 'Por confirmar')
+    : (pedido?.sucursal ? `Sucursal ${pedido.sucursal}` : (pedido?.direccion ?? fallback?.direccion ?? 'Por confirmar'))
 
   return {
     cliente: pedido?.nombre ?? fallback?.cliente ?? 'Verificar en chat',
@@ -752,6 +765,8 @@ const KW_INVENTARIO = [
   'ramitos', 'que ramitos', 'que ramos', 'ramos de hoy',
   'tienen hoy', 'hoy tienen', 'muestrame', 'muéstrame',
   'fotos', 'foto', 'ver ramos', 'ver arreglos',
+  'verlos', 'verlas', 'averlos', 'averlas', 'a verlos', 'a verlas',
+  'mandar de nuevo', 'manda de nuevo', 'mandamelas de nuevo', 'mándamelas de nuevo',
   'enviame fotos', 'envíame fotos', 'manda fotos', 'mandame fotos',
 ]
 
@@ -1099,9 +1114,18 @@ async function procesarMensaje(message: any): Promise<void> {
 
     await agregarAlHistorial(telefono, 'user', textoCliente)
 
+    const pideEmpezarDesdeCero = /empecemos\s+desde\s+cero|desde\s+cero|borr[oó]n\s+y\s+cuenta\s+nueva|nuevo\s+pedido/i.test(textoCliente)
+    if (pideEmpezarDesdeCero) resetearPedidoCliente(clienteId)
+
     const intencion     = detectarIntencion(textoCliente, clienteId)
     const horario       = getContextoHorario()
     let contextoExtra   = `[Fecha actual: ${getFechaActual()}]${horario}`
+
+    if (pideEmpezarDesdeCero) {
+      contextoExtra +=
+        `\n\n[CLIENTE QUIERE EMPEZAR DESDE CERO] ` +
+        `Ignora el pedido anterior de esta conversación. No cierres venta ni uses datos previos.`
+    }
 
     // ── Detección de reply (quote) ────────────────────────────────
     let arregloReferenciado: ArregloConFoto | null = null
@@ -1164,6 +1188,13 @@ async function procesarMensaje(message: any): Promise<void> {
     if (intencion === 'inventario') {
       const arreglos = await obtenerArreglosConFotos()
       if (arreglos.length > 0) {
+        if (!puedeEnviarFotos(clienteId)) {
+          const avisoLimite = 'Ya te reenvié las fotos varias veces hoy 🌸. Dime cuál arreglo quieres ver o cuál te gustó y te confirmo precio.'
+          await agregarAlHistorial(telefono, 'assistant', avisoLimite)
+          await message.reply(avisoLimite)
+          return
+        }
+
         const respuestaFotos = '¡Claro! Ahorita te mando las fotos de lo que tenemos disponible hoy 🌸'
         await agregarAlHistorial(telefono, 'assistant', respuestaFotos)
         await simularEscritura(chat, 900)
@@ -1354,6 +1385,11 @@ async function procesarMensaje(message: any): Promise<void> {
     const KW_PAGO = /pago|pagar|transferencia|deposito|depósito|bbva|banco|tarjeta|efectivo|oxxo|okei|okis|okas|ok|va|dale|acuerdo|confirmo|si[^a-zA-Z]|simon|sip|sipo|está bien|esta bien|le pago|voy a pagar|ya pague|ya pagué|ya me dijo|listo|comprobante/i.test(textoCliente)
     const KW_CONFIRMA_PAGO = /ya pague|ya pagué|listo|comprobante|ya quedó|ya quedo|ya la hice|ya la hizo|ya.*dep[oó]sito|hice.*dep[oó]sito|dep[oó]sito.*hecho|ya transfer[ií]|transfer[ií]|ya llegó|ya llego|sipi|si ya|confirmo|confirmado|ya esta pagado/i.test(textoCliente)
     const consultaPagoEnviado = /le lleg[oó]|si lleg[oó]|sí lleg[oó]|recibieron|recibiste|dep[oó]sito|transfer/i.test(textoCliente)
+    const pagoAlRecoger = /pago\s+al\s+recog?er|pagar[eé]?\s+al\s+recog?er|efectivo\s+al\s+recog?er|al\s+recog?er\s+gracias/i.test(textoCliente)
+
+    if (/\bcentro\b/i.test(textoCliente) && /sucursal|ubicaci[oó]n|recog|ursal/i.test(textoCliente)) pedidoActual(clienteId).sucursal = 'Centro'
+    if (/\bnorte\b/i.test(textoCliente) && /sucursal|ubicaci[oó]n|recog|ursal/i.test(textoCliente)) pedidoActual(clienteId).sucursal = 'Norte'
+    if (pagoAlRecoger) pedidoActual(clienteId).metodoPago = 'efectivo_recoger'
 
     const nombreMatch = textoCliente.match(/\b([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,5})\b(?=.*\b(entregar|entrega|apart|nombre|4\s*pm|[0-9]{1,2}\s*(?:am|pm)))/)
     if (nombreMatch && ARREGLO_ELEGIDO.has(clienteId)) {
@@ -1367,6 +1403,13 @@ async function procesarMensaje(message: any): Promise<void> {
         `AGRADECE el pago, confirma que el pedido queda apartado y CIERRA con el token. ` +
         `NO le pidas más confirmación ni le digas "déjame revisar". ` +
         `El token [VENTA_CERRADA:...] debe ir AL FINAL de tu mensaje.`
+    }
+
+    if (pagoAlRecoger) {
+      contextoExtra +=
+        `\n\n[PAGO AL RECOGER] El cliente pagará en efectivo al recoger. ` +
+        `NO generes token [VENTA_CERRADA]. Solo confirma apartado, sucursal, nombre y resumen. ` +
+        `No lo reportes como venta pagada todavía.`
     }
 
     if (consultaPagoEnviado && ARREGLO_ELEGIDO.has(clienteId)) {
@@ -1467,19 +1510,23 @@ async function procesarMensaje(message: any): Promise<void> {
     if (ventaCerrada) {
       const ventaVerificada = ventaDesdeEstado(clienteId, ventaCerrada) ?? ventaCerrada
       console.log(`[bot] 🎉 VENTA CERRADA: ${ventaVerificada.cliente} | ${numeroReal}`)
-      enviarAlertaVentaCerrada({
-        cliente: ventaVerificada.cliente, producto: ventaVerificada.producto,
-        total: ventaVerificada.total, direccion: ventaVerificada.direccion,
-        numeroCliente: numeroReal,
-      }).catch(err => console.error('[bot] Telegram venta:', err))
+      const esPagoAlRecoger = PEDIDO_EN_CURSO.get(clienteId)?.metodoPago === 'efectivo_recoger'
+      if (!esPagoAlRecoger) {
+        enviarAlertaVentaCerrada({
+          cliente: ventaVerificada.cliente, producto: ventaVerificada.producto,
+          total: ventaVerificada.total, direccion: ventaVerificada.direccion,
+          numeroCliente: numeroReal,
+        }).catch(err => console.error('[bot] Telegram venta:', err))
+        registrarVenta(ventaVerificada.cliente, numeroReal, ventaVerificada.producto, ventaVerificada.total, ventaVerificada.direccion)
+          .catch(err => console.error('[bot] Error registrando venta:', err))
+      } else {
+        console.warn('[bot] Venta token ignorado como venta pagada: pago al recoger')
+      }
       apartarArreglo(ventaVerificada.producto, numeroReal)
         .catch(err => console.error('[bot] Error apartando:', err))
       VENTAS_CERRADAS.add(clienteId)
       VENTA_ACTUAL.set(clienteId, ventaVerificada)
       FOTOS_PENDIENTES.delete(clienteId) // limpiar fotos pendientes
-      // Guardar en reporte_ventas
-      registrarVenta(ventaVerificada.cliente, numeroReal, ventaVerificada.producto, ventaVerificada.total, ventaVerificada.direccion)
-        .catch(err => console.error('[bot] Error registrando venta:', err))
     }
 
     // Fallback: si el cliente confirmó pago pero la IA no generó el token
@@ -1548,6 +1595,13 @@ async function procesarMensaje(message: any): Promise<void> {
     const arreglosFinales = arreglosParaEnviar.length > 0 ? arreglosParaEnviar : (fotosPendientes?.arreglos ?? [])
 
     if (enviarFotos || (intencion === 'inventario' && fotosPendientes)) {
+      if (!puedeEnviarFotos(clienteId)) {
+        FOTOS_PENDIENTES.delete(clienteId)
+        const avisoLimite = 'Ya te reenvié las fotos varias veces hoy 🌸. Dime cuál te interesa y te ayudo con el apartado.'
+        await agregarAlHistorial(telefono, 'assistant', avisoLimite)
+        await message.reply(avisoLimite)
+        return
+      }
       FOTOS_PENDIENTES.delete(clienteId)
 
       if (arreglosFinales.length > 0) {
@@ -1752,10 +1806,12 @@ async function guardarConfigBot(clave: string, valor: string): Promise<void> {
 
 async function publicarEstadoBot(): Promise<void> {
   const qrAgeMs = BOT_QR_GENERADO_EN ? Date.now() - BOT_QR_GENERADO_EN : null
+  const state = await whatsappClient.getState().catch(() => null)
+  const conectado = BOT_READY || state === 'CONNECTED'
   const payload = {
-    connected: BOT_READY && whatsappClient?.info ? true : false,
-    estado: BOT_ESTADO,
-    estadoDetalle: BOT_ESTADO_DETALLE,
+    connected: conectado,
+    estado: conectado ? 'conectado' : BOT_ESTADO,
+    estadoDetalle: conectado ? 'WhatsApp conectado' : BOT_ESTADO_DETALLE,
     reconnecting: BOT_RECONNECTING,
     qrGeneradoEn: BOT_QR_GENERADO_EN ? new Date(BOT_QR_GENERADO_EN).toISOString() : null,
     qrAgeSeconds: qrAgeMs === null ? null : Math.round(qrAgeMs / 1000),

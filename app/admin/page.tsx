@@ -199,6 +199,28 @@ function BotStatusPanel() {
           </button>
         </div>
       </div>
+
+      {Array.isArray(status.ventasRecientes) && status.ventasRecientes.length > 0 && (
+        <div className="mt-5 border-t border-gray-100 pt-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-800">Pedidos pagados recientes</h3>
+            <span className="text-xs text-gray-400">Hoy</span>
+          </div>
+          <div className="space-y-2">
+            {status.ventasRecientes.map((venta: any, index: number) => (
+              <div key={`${venta.creado_en}-${index}`} className="rounded-xl bg-gray-50/80 p-3 text-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-gray-800">{venta.cliente_nombre || 'Cliente sin nombre'}</p>
+                    <p className="text-xs text-gray-500">{venta.producto || 'Pedido'} · {venta.direccion_entrega || 'Entrega por confirmar'}</p>
+                  </div>
+                  <p className="shrink-0 font-bold text-emerald-700">${Number(venta.precio_total || 0).toFixed(2)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
