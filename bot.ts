@@ -154,6 +154,10 @@ function obtenerMensajeId(message: any): string | null {
   return message?.id?._serialized || null
 }
 
+function marcarMensajeProcesado(id: string): void {
+  MENSAJES_PROCESADOS.set(id, Date.now())
+}
+
 function yaProcesadoRecientemente(message: any): boolean {
   const id = obtenerMensajeId(message)
   if (!id) return false
@@ -162,7 +166,7 @@ function yaProcesadoRecientemente(message: any): boolean {
   const procesadoEn = MENSAJES_PROCESADOS.get(id)
   if (procesadoEn && ahora - procesadoEn < MENSAJE_PROCESADO_TTL_MS) return true
 
-  MENSAJES_PROCESADOS.set(id, ahora)
+  marcarMensajeProcesado(id)
   if (MENSAJES_PROCESADOS.size > 1000) {
     for (const [msgId, ts] of MENSAJES_PROCESADOS) {
       if (ahora - ts > MENSAJE_PROCESADO_TTL_MS) MENSAJES_PROCESADOS.delete(msgId)
@@ -1536,16 +1540,28 @@ async function recuperarMensajesPerdidos(): Promise<void> {
       const batch = chatsPendientes.slice(i, i + BATCH_SIZE_RESCATE)
       await Promise.all(batch.map(async (chat) => {
         const mensajes = await chat.fetchMessages({ limit: chat.unreadCount })
-        for (const msg of mensajes) {
-          if (!msg.fromMe) {
-            const msgId = (msg as any).id?._serialized
-            if (msgId) MENSAJES_RESCATADOS.add(msgId)
+        const pendientes = mensajes
+          .filter(msg => !msg.fromMe && msg.type === 'chat' && msg.body?.trim())
+          .slice(-8)
 
-            console.log(`[bot] ♻️ Inyectando mensaje rescatado de ${chat.id._serialized}`)
-            manejarMensajeEntrante(msg)
-          }
-          await new Promise(r => setTimeout(r, 150))
+        if (pendientes.length === 0) return
+
+        const mensajeBase = pendientes[pendientes.length - 1] as any
+        const textoAgrupado = pendientes
+          .map(msg => String(msg.body).trim())
+          .filter(Boolean)
+          .join('\n')
+
+        for (const msg of pendientes) {
+          const msgId = obtenerMensajeId(msg)
+          if (!msgId) continue
+          MENSAJES_RESCATADOS.add(msgId)
+          if (msg !== mensajeBase) marcarMensajeProcesado(msgId)
         }
+
+        mensajeBase.body = textoAgrupado
+        console.log(`[bot] ♻️ Inyectando ${pendientes.length} mensajes agrupados de ${chat.id._serialized}`)
+        await manejarMensajeEntrante(mensajeBase)
       }))
     }
   } catch (err) {
@@ -1619,10 +1635,66 @@ let WATCHDOG_INICIADO = false
 let ULTIMA_RECARGA_WEB = 0
 let BOT_ESTADO: 'iniciando' | 'esperando_qr' | 'conectado' | 'reconectando' | 'desconectado' | 'error' = 'iniciando'
 let BOT_ESTADO_DETALLE = 'Arrancando bot'
+let ULTIMO_COMANDO_BOT: string | null = null
 
 function actualizarEstadoBot(estado: typeof BOT_ESTADO, detalle: string): void {
   BOT_ESTADO = estado
   BOT_ESTADO_DETALLE = detalle
+}
+
+async function guardarConfigBot(clave: string, valor: string): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('configuracion_bot')
+    .upsert({ clave, valor }, { onConflict: 'clave' })
+  if (error) throw error
+}
+
+async function publicarEstadoBot(): Promise<void> {
+  const qrAgeMs = BOT_QR_GENERADO_EN ? Date.now() - BOT_QR_GENERADO_EN : null
+  const payload = {
+    connected: BOT_READY && whatsappClient?.info ? true : false,
+    estado: BOT_ESTADO,
+    estadoDetalle: BOT_ESTADO_DETALLE,
+    reconnecting: BOT_RECONNECTING,
+    qrGeneradoEn: BOT_QR_GENERADO_EN ? new Date(BOT_QR_GENERADO_EN).toISOString() : null,
+    qrAgeSeconds: qrAgeMs === null ? null : Math.round(qrAgeMs / 1000),
+    qrExpiresInSeconds: qrAgeMs === null ? null : Math.max(0, Math.ceil((BOT_QR_TTL_MS - qrAgeMs) / 1000)),
+    qrScanGraceSeconds: qrAgeMs === null ? null : Math.max(0, Math.ceil((QR_SCAN_GRACE_MS - qrAgeMs) / 1000)),
+    qrVencido: qrAgeMs === null ? false : qrAgeMs > BOT_QR_TTL_MS,
+    ultimaActividad: `${Math.round((Date.now() - ultimaActividad) / 60_000)} min`,
+    updatedAt: new Date().toISOString(),
+  }
+
+  await guardarConfigBot('bot_status', JSON.stringify(payload))
+}
+
+async function revisarComandoRemoto(): Promise<void> {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('configuracion_bot')
+      .select('valor')
+      .eq('clave', 'bot_command')
+      .maybeSingle()
+    if (error || !data?.valor) return
+
+    const comando = JSON.parse(data.valor) as { id?: string; action?: string }
+    if (!comando.id || comando.id === ULTIMO_COMANDO_BOT) return
+
+    ULTIMO_COMANDO_BOT = comando.id
+    await guardarConfigBot('bot_command', '')
+
+    if (comando.action === 'recover') {
+      console.log('[bot] ♻️ Rescate remoto solicitado desde dashboard')
+      recuperarMensajesPerdidos().catch(err => console.error('[bot] Error en rescate remoto:', err))
+      return
+    }
+
+    if (comando.action === 'reconnect') {
+      reiniciarProceso('Reinicio remoto desde dashboard', false)
+    }
+  } catch (err) {
+    console.warn('[bot] No se pudo revisar comando remoto:', err)
+  }
 }
 
 function reiniciarProceso(motivo: string, contarCrash = true): never {
@@ -1686,6 +1758,7 @@ whatsappClient.on('qr', async (qr) => {
     }
   }
   if (!qrGuardado) console.warn('⚠️ No se pudo guardar el QR en Supabase; se muestra solo en consola.')
+  publicarEstadoBot().catch(err => console.warn('[bot] No se pudo publicar estado QR:', err))
   console.log('\n⚡ ¡NUEVO QR! Escanéalo ahora:')
   qrcode.generate(qr, { small: true })
   enviarAlertaQr()
@@ -1695,6 +1768,7 @@ whatsappClient.on('ready', async () => {
   BOT_READY = true
   BOT_RECONNECTING = false
   actualizarEstadoBot('conectado', 'WhatsApp conectado')
+  publicarEstadoBot().catch(err => console.warn('[bot] No se pudo publicar estado ready:', err))
   console.log('\n✅ Bot de Jardín RoCe conectado!')
   console.log('🌸 Flora está escuchando...\n')
   ultimaActividad = Date.now()
@@ -1773,6 +1847,7 @@ whatsappClient.on('disconnected', (reason) => {
   console.warn('⚠️ Desconectado:', reason)
   BOT_READY = false
   actualizarEstadoBot('desconectado', String(reason || 'WhatsApp desconectado'))
+  publicarEstadoBot().catch(err => console.warn('[bot] No se pudo publicar estado disconnected:', err))
   if (String(reason).toLowerCase().includes('max qrcode retries reached')) {
     reiniciarProceso('WhatsApp agotó los intentos de QR sin escaneo')
   }
@@ -1837,6 +1912,14 @@ async function manejarMensajeEntrante(message: any): Promise<void> {
 }
 
 whatsappClient.on('message_create', manejarMensajeEntrante)
+
+setInterval(() => {
+  publicarEstadoBot().catch(err => console.warn('[bot] No se pudo publicar estado remoto:', err))
+}, 15_000).unref()
+
+setInterval(() => {
+  revisarComandoRemoto().catch(err => console.warn('[bot] Error revisando comando remoto:', err))
+}, 5_000).unref()
 
 // ════════════════════════════════════════════════════════════════
 // ARRANQUE

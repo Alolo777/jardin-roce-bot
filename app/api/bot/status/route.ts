@@ -6,7 +6,7 @@ export async function GET() {
     // Obtener estado de pausa desde Supabase
     const { data: config, error: configError } = await supabaseAdmin
       .from('configuracion_agente')
-      .select('bot_pausado')
+      .select('bot_pausado, qr_code')
       .eq('id', 1)
       .single()
 
@@ -69,7 +69,31 @@ export async function GET() {
         qrVencido = botStatus.qrVencido ?? false
       }
     } catch {
-      // El bot Express puede no estar disponible
+      try {
+        const { data } = await supabaseAdmin
+          .from('configuracion_bot')
+          .select('valor')
+          .eq('clave', 'bot_status')
+          .maybeSingle()
+
+        if (data?.valor) {
+          const remoto = JSON.parse(data.valor)
+          const updatedAt = remoto.updatedAt ? new Date(remoto.updatedAt).getTime() : 0
+          const fresco = Date.now() - updatedAt < 90_000
+          botConnected = fresco ? remoto.connected ?? false : false
+          estado = fresco ? remoto.estado || estado : 'desconectado'
+          estadoDetalle = fresco ? remoto.estadoDetalle || estadoDetalle : 'Sin pulso reciente de la VM'
+          reconnecting = fresco ? remoto.reconnecting ?? false : false
+          qrGeneradoEn = remoto.qrGeneradoEn ?? null
+          qrAgeSeconds = remoto.qrAgeSeconds ?? null
+          qrExpiresInSeconds = remoto.qrExpiresInSeconds ?? null
+          qrScanGraceSeconds = remoto.qrScanGraceSeconds ?? null
+          qrVencido = remoto.qrVencido ?? false
+          ultimaActividad = remoto.ultimaActividad || ultimaActividad
+        }
+      } catch {
+        // Sin Express ni estado remoto.
+      }
     }
 
     return NextResponse.json({
@@ -78,7 +102,7 @@ export async function GET() {
       estado,
       estadoDetalle,
       reconnecting,
-      qr: botQr,
+      qr: botQr || config?.qr_code || null,
       qrGeneradoEn,
       qrAgeSeconds,
       qrExpiresInSeconds,

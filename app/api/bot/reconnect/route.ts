@@ -1,4 +1,13 @@
 import { NextResponse } from 'next/server'
+import { supabaseAdmin } from '@/lib/supabase'
+
+async function enviarComandoRemoto(action: string) {
+  const payload = JSON.stringify({ action, id: `${action}-${Date.now()}` })
+  const { error } = await supabaseAdmin
+    .from('configuracion_bot')
+    .upsert({ clave: 'bot_command', valor: payload }, { onConflict: 'clave' })
+  if (error) throw error
+}
 
 export async function POST() {
   try {
@@ -13,6 +22,12 @@ export async function POST() {
     return NextResponse.json(await res.json())
   } catch (error) {
     console.error('[API /bot/reconnect POST]', error)
-    return NextResponse.json({ error: 'No se pudo solicitar reconexión' }, { status: 503 })
+    try {
+      await enviarComandoRemoto('reconnect')
+      return NextResponse.json({ ok: true, mensaje: 'Comando de reinicio enviado a la VM' })
+    } catch (fallbackError) {
+      console.error('[API /bot/reconnect fallback]', fallbackError)
+      return NextResponse.json({ error: 'No se pudo solicitar reconexión' }, { status: 503 })
+    }
   }
 }
