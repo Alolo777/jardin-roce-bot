@@ -713,6 +713,8 @@ function parsearPedidoCotizador(texto: string): PedidoWebParseado {
 
 const FOTOS_PENDIENTES = new Map<string, { arreglos: ArregloConFoto[] }>()
 const ULTIMOS_ARREGLOS = new Map<string, ArregloConFoto[]>()
+const FOTOS_ENVIANDO = new Set<string>()
+const FOTOS_CANCELADAS = new Set<string>()
 const VENTAS_CERRADAS  = new Set<string>()
 const VENTA_ACTUAL     = new Map<string, VentaCerrada>()
 const ARREGLO_ELEGIDO  = new Map<string, ArregloConFoto>()
@@ -745,10 +747,14 @@ function ventaDesdeEstado(clienteId: string, fallback?: VentaCerrada): VentaCerr
     ? `${pedido.envio.zona}${pedido.direccion ? ` — ${pedido.direccion}` : ''}`
     : (pedido?.sucursal ? `Sucursal ${pedido.sucursal}` : (pedido?.direccion ?? fallback?.direccion ?? 'Por confirmar'))
 
+  const totalTexto = pedido?.envio
+    ? `$${total.toFixed(2)} MXN (ramo $${subtotal.toFixed(2)} + envío $${envio.toFixed(2)})`
+    : `$${total.toFixed(2)} MXN`
+
   return {
     cliente: pedido?.nombre ?? fallback?.cliente ?? 'Verificar en chat',
     producto,
-    total: `$${total.toFixed(2)} MXN`,
+    total: totalTexto,
     direccion,
     rawToken: fallback?.rawToken ?? '',
   }
@@ -791,6 +797,12 @@ const KW_COTIZADOR = [
 
 function detectarIntencion(texto: string, clienteId: string): 'inventario' | 'catalogo' | 'cotizador' | 'normal' {
   const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
+  if (/ya no quiero fotos|no quiero fotos|sin fotos/.test(n)) return 'normal'
+
+  if (ULTIMOS_ARREGLOS.has(clienteId) && /(me gusto|me gustaria|quiero|aparta|apartes|ramo de|el de|la segunda foto|segunda foto|primer foto|primera foto|tercer foto|tercera foto|lily|lilys|girasol|hortencia|hortensia)/.test(n) && !/(ver|manda|mandar|envia|enviar|reenviar).{0,15}foto/.test(n)) {
+    return 'normal'
+  }
 
   if (/foto.*(entrega|entreguen|entregado|repartidor)|comprobante.*entrega|cuando.*entreguen/.test(n)) {
     return 'normal'
@@ -1008,6 +1020,10 @@ async function enviarFotosArreglos(client: Client, chatId: string, arreglos: Arr
 
   let enviadas = 0
   for (const r of resultados) {
+    if (FOTOS_CANCELADAS.has(chatId)) {
+      console.log(`[bot] 🛑 Envío de fotos cancelado por cliente: ${chatId}`)
+      break
+    }
     if (!r.ok) continue
     try {
       const caption =
@@ -1205,7 +1221,10 @@ async function procesarMensaje(message: any): Promise<void> {
         await simularEscritura(chat, 900)
         await message.reply(respuestaFotos)
 
+        FOTOS_CANCELADAS.delete(clienteId)
+        FOTOS_ENVIANDO.add(clienteId)
         const fotosEnviadas = await enviarFotosArreglos(whatsappClient, clienteId, arreglos)
+          .finally(() => FOTOS_ENVIANDO.delete(clienteId))
         if (fotosEnviadas > 0) {
           marcarFotosEnviadas(clienteId)
           ULTIMOS_ARREGLOS.set(clienteId, arreglos)
@@ -1279,6 +1298,8 @@ async function procesarMensaje(message: any): Promise<void> {
       }
     } else {
       const envioMatch = await buscarPrecioEnvio(textoCliente)
+      const pareceDireccion = /\b(calle|av\.?|avenida|col\.?|colonia|num\.?|n[uú]mero|#|cp\s*\d{5}|\d{2,})\b/i.test(textoCliente)
+      if (pareceDireccion && ARREGLO_ELEGIDO.has(clienteId)) pedidoActual(clienteId).direccion = textoCliente
       if (envioMatch) {
         pedidoActual(clienteId).envio = { zona: envioMatch.zona, precio: envioMatch.precio }
         contextoExtra +=
@@ -1362,7 +1383,19 @@ async function procesarMensaje(message: any): Promise<void> {
     const ultimosArreglos = ULTIMOS_ARREGLOS.get(clienteId)
     if (ultimosArreglos?.length && textoCliente.length < 200) {
       const esEleccion = /me gust[oó]|quiero|ese|este|esye|eate|el[^a-zA-Z]|prefiero|me llevo|aparta|reply/i.test(textoCliente)
-      const match = encontrarMejorCoincidencia(textoCliente, ultimosArreglos)
+      const ordinalFoto = textoCliente.match(/(?:foto\s*)?\b([1-7])\b|(?:primer[ao]?|segunda|tercer[ao]?|cuart[ao]|quint[ao]|sext[ao]|septim[ao])\s+foto/i)?.[0]?.toLowerCase() ?? ''
+      const indiceOrdinal = ordinalFoto.includes('1') || ordinalFoto.includes('primer') ? 0
+        : ordinalFoto.includes('2') || ordinalFoto.includes('segunda') ? 1
+        : ordinalFoto.includes('3') || ordinalFoto.includes('tercer') ? 2
+        : ordinalFoto.includes('4') || ordinalFoto.includes('cuart') ? 3
+        : ordinalFoto.includes('5') || ordinalFoto.includes('quint') ? 4
+        : ordinalFoto.includes('6') || ordinalFoto.includes('sext') ? 5
+        : ordinalFoto.includes('7') || ordinalFoto.includes('sept') ? 6
+        : -1
+      const matchPorFoto = indiceOrdinal >= 0 && ultimosArreglos[indiceOrdinal]
+        ? { arreglo: ultimosArreglos[indiceOrdinal], score: 999 }
+        : null
+      const match = matchPorFoto ?? encontrarMejorCoincidencia(textoCliente, ultimosArreglos)
       const eleccionAmbigua = esEleccion && !match && !arregloReferenciado && !message.hasQuotedMsg
       if (eleccionAmbigua) {
         const nombres = ultimosArreglos.map(a => `- ${a.nombre}: $${a.precio.toFixed(2)} MXN`).join('\n')
@@ -1485,8 +1518,8 @@ async function procesarMensaje(message: any): Promise<void> {
     }
 
     // Alerta cotización de envío
-    if (mensajeFinal.toLowerCase().includes('verificar el costo')) {
-      enviarAlertaCotizacion(numeroReal, `📍 Cotización de envío solicitada.\nDirección: ${textoCliente}`)
+    if (mensajeFinal.toLowerCase().includes('verificar el costo') && /\b(calle|av\.?|avenida|col\.?|colonia|cp\s*\d{5}|\d{2,})\b/i.test(textoCliente)) {
+      enviarAlertaCotizacion(numeroReal, `📍 Cotización de envío solicitada.\nDirección/colonia: ${textoCliente}`)
         .catch(err => console.error('[bot] Telegram envío:', err))
     }
     // Alerta cotizador web
@@ -1521,6 +1554,10 @@ async function procesarMensaje(message: any): Promise<void> {
 
     // Venta cerrada
     if (ventaCerrada) {
+      if (VENTAS_CERRADAS.has(clienteId)) {
+        console.warn(`[bot] ⚠️ Token venta cerrada duplicado ignorado para ${clienteId}`)
+        return
+      }
       if (!tieneArregloVerificado(clienteId)) {
         console.warn(`[bot] ⚠️ Token venta cerrada ignorado: no hay arreglo verificado para ${clienteId}`)
         return
@@ -1547,7 +1584,7 @@ async function procesarMensaje(message: any): Promise<void> {
     }
 
     // Fallback: si el cliente confirmó pago pero la IA no generó el token
-    if (!ventaCerrada && KW_CONFIRMA_PAGO && (ARREGLO_ELEGIDO.has(clienteId) || (mensajeFinal.length < 150 && !mensajeFinal.includes('?')))) {
+    if (!ventaCerrada && !VENTAS_CERRADAS.has(clienteId) && KW_CONFIRMA_PAGO && (ARREGLO_ELEGIDO.has(clienteId) || (mensajeFinal.length < 150 && !mensajeFinal.includes('?')))) {
       const ventaVerificada = ventaDesdeEstado(clienteId)
       const ultimos = ULTIMOS_ARREGLOS.get(clienteId)
       const elegido = ARREGLO_ELEGIDO.get(clienteId)
@@ -1623,7 +1660,10 @@ async function procesarMensaje(message: any): Promise<void> {
 
       if (arreglosFinales.length > 0) {
         await new Promise(r => setTimeout(r, 500))
+        FOTOS_CANCELADAS.delete(clienteId)
+        FOTOS_ENVIANDO.add(clienteId)
         const fotosEnviadas = await enviarFotosArreglos(whatsappClient, clienteId, arreglosFinales)
+          .finally(() => FOTOS_ENVIANDO.delete(clienteId))
         if (fotosEnviadas > 0) marcarFotosEnviadas(clienteId)
 
         const resumenFotos = arreglosFinales.map((a, i) => `Foto ${i + 1}: ${a.nombre} ($${a.precio} MXN)`).join(', ')
@@ -1815,10 +1855,16 @@ function actualizarEstadoBot(estado: typeof BOT_ESTADO, detalle: string): void {
 }
 
 async function guardarConfigBot(clave: string, valor: string): Promise<void> {
-  const { error } = await supabaseAdmin
-    .from('configuracion_bot')
-    .upsert({ clave, valor }, { onConflict: 'clave' })
-  if (error) throw error
+  let ultimoError: unknown = null
+  for (let intento = 1; intento <= 3; intento++) {
+    const { error } = await supabaseAdmin
+      .from('configuracion_bot')
+      .upsert({ clave, valor }, { onConflict: 'clave' })
+    if (!error) return
+    ultimoError = error
+    await new Promise(r => setTimeout(r, 500 * intento))
+  }
+  throw ultimoError
 }
 
 async function publicarEstadoBot(): Promise<void> {
@@ -2073,6 +2119,14 @@ async function manejarMensajeEntrante(message: any): Promise<void> {
   }
 
   if (!message.body?.trim()) return
+  if (/ya no quiero fotos|no quiero fotos|sin fotos/i.test(message.body.trim())) {
+    FOTOS_CANCELADAS.add(clienteId)
+    FOTOS_PENDIENTES.delete(clienteId)
+  }
+  if (FOTOS_ENVIANDO.has(clienteId) && /^(gracias|graciass+|ok|va|espero|espero su mensaje)$/i.test(message.body.trim())) {
+    console.log(`[bot] 🖼️ Ignorando cortesía mientras se envían fotos: ${clienteId}`)
+    return
+  }
   if (estaRateLimited(clienteId)) { avisarRateLimitUnaVez(message, clienteId); return }
 
   verificarSiBotPausado().then(pausado => {
