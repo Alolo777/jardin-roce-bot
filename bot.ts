@@ -754,6 +754,10 @@ function ventaDesdeEstado(clienteId: string, fallback?: VentaCerrada): VentaCerr
   }
 }
 
+function tieneArregloVerificado(clienteId: string): boolean {
+  return Boolean(PEDIDO_EN_CURSO.get(clienteId)?.arreglo || ARREGLO_ELEGIDO.get(clienteId))
+}
+
 // ════════════════════════════════════════════════════════════════
 // DETECCIÓN DE INTENCIÓN
 // ════════════════════════════════════════════════════════════════
@@ -766,6 +770,7 @@ const KW_INVENTARIO = [
   'tienen hoy', 'hoy tienen', 'muestrame', 'muéstrame',
   'fotos', 'foto', 'ver ramos', 'ver arreglos',
   'verlos', 'verlas', 'averlos', 'averlas', 'a verlos', 'a verlas',
+  'si aver', 'sí aver', 'si a ver', 'sí a ver',
   'mandar de nuevo', 'manda de nuevo', 'mandamelas de nuevo', 'mándamelas de nuevo',
   'enviame fotos', 'envíame fotos', 'manda fotos', 'mandame fotos',
 ]
@@ -1356,8 +1361,16 @@ async function procesarMensaje(message: any): Promise<void> {
     // Detectar si el usuario está eligiendo un arreglo de la lista mostrada
     const ultimosArreglos = ULTIMOS_ARREGLOS.get(clienteId)
     if (ultimosArreglos?.length && textoCliente.length < 200) {
-      const esEleccion = /me gust[oó]|quiero|ese|este|el[^a-zA-Z]|prefiero|me llevo|aparta|reply/i.test(textoCliente)
+      const esEleccion = /me gust[oó]|quiero|ese|este|esye|eate|el[^a-zA-Z]|prefiero|me llevo|aparta|reply/i.test(textoCliente)
       const match = encontrarMejorCoincidencia(textoCliente, ultimosArreglos)
+      const eleccionAmbigua = esEleccion && !match && !arregloReferenciado && !message.hasQuotedMsg
+      if (eleccionAmbigua) {
+        const nombres = ultimosArreglos.map(a => `- ${a.nombre}: $${a.precio.toFixed(2)} MXN`).join('\n')
+        const aviso = `¿Me confirmas el nombre del arreglo que elegiste? 🌸\nTambién puedes responder directo a la foto.\n\n${nombres}`
+        await agregarAlHistorial(telefono, 'assistant', aviso)
+        await message.reply(aviso)
+        return
+      }
       if (match || esEleccion) {
         const lista = ultimosArreglos.map((a, i) => `"${a.nombre}" — $${a.precio} MXN`).join(' | ')
         let instruccion = `\n\n[ARREGLOS MOSTRADOS: ${lista}]`
@@ -1508,6 +1521,10 @@ async function procesarMensaje(message: any): Promise<void> {
 
     // Venta cerrada
     if (ventaCerrada) {
+      if (!tieneArregloVerificado(clienteId)) {
+        console.warn(`[bot] ⚠️ Token venta cerrada ignorado: no hay arreglo verificado para ${clienteId}`)
+        return
+      }
       const ventaVerificada = ventaDesdeEstado(clienteId, ventaCerrada) ?? ventaCerrada
       console.log(`[bot] 🎉 VENTA CERRADA: ${ventaVerificada.cliente} | ${numeroReal}`)
       const esPagoAlRecoger = PEDIDO_EN_CURSO.get(clienteId)?.metodoPago === 'efectivo_recoger'

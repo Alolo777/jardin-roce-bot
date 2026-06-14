@@ -200,11 +200,44 @@ function BotStatusPanel() {
         </div>
       </div>
 
+      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-xl bg-emerald-50 p-3">
+          <p className="text-xs text-emerald-600">Promedio venta</p>
+          <p className="text-base font-bold text-emerald-800">${Number(status.promedioVenta || 0).toFixed(2)}</p>
+        </div>
+        <div className="rounded-xl bg-rose-50 p-3">
+          <p className="text-xs text-rose-600">Ticket mayor</p>
+          <p className="text-base font-bold text-rose-800">${Number(status.ticketMayor || 0).toFixed(2)}</p>
+        </div>
+        <div className="rounded-xl bg-blue-50 p-3">
+          <p className="text-xs text-blue-600">Con envio</p>
+          <p className="text-base font-bold text-blue-800">{status.enviosHoy ?? 0}</p>
+        </div>
+        <div className="rounded-xl bg-amber-50 p-3">
+          <p className="text-xs text-amber-600">Sucursal</p>
+          <p className="text-base font-bold text-amber-800">{status.recogidasHoy ?? 0}</p>
+        </div>
+      </div>
+
+      {Array.isArray(status.productosTop) && status.productosTop.length > 0 && (
+        <div className="mt-5 rounded-2xl bg-gradient-to-br from-pink-50 to-rose-50 p-4">
+          <h3 className="mb-3 text-sm font-semibold text-gray-800">Mas pedidos hoy</h3>
+          <div className="space-y-2">
+            {status.productosTop.map((item: any) => (
+              <div key={item.producto} className="flex items-center justify-between gap-3 text-sm">
+                <span className="truncate text-gray-700">{item.producto}</span>
+                <span className="rounded-full bg-white px-2 py-0.5 text-xs font-bold text-rose-700">{item.cantidad}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {Array.isArray(status.ventasRecientes) && status.ventasRecientes.length > 0 && (
         <div className="mt-5 border-t border-gray-100 pt-4">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-800">Pedidos pagados recientes</h3>
-            <span className="text-xs text-gray-400">Hoy</span>
+            <span className="text-xs text-gray-400">{status.ultimaVentaHora ? new Date(status.ultimaVentaHora).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : 'Hoy'}</span>
           </div>
           <div className="space-y-2">
             {status.ventasRecientes.map((venta: any, index: number) => (
@@ -213,6 +246,7 @@ function BotStatusPanel() {
                   <div>
                     <p className="font-semibold text-gray-800">{venta.cliente_nombre || 'Cliente sin nombre'}</p>
                     <p className="text-xs text-gray-500">{venta.producto || 'Pedido'} · {venta.direccion_entrega || 'Entrega por confirmar'}</p>
+                    <p className="text-[11px] text-gray-400">{venta.cliente_telefono || 'Sin telefono'} · {venta.metodo_pago || 'metodo no registrado'}</p>
                   </div>
                   <p className="shrink-0 font-bold text-emerald-700">${Number(venta.precio_total || 0).toFixed(2)}</p>
                 </div>

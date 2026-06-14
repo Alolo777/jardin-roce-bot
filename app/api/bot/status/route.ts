@@ -31,6 +31,19 @@ export async function GET() {
     const cantidadVentas = ventas?.length ?? 0
     const totalVentas = ventas?.reduce((sum, v) => sum + (v.precio_total || 0), 0) ?? 0
     const ventasRecientes = (ventas ?? []).slice(0, 6)
+    const promedioVenta = cantidadVentas > 0 ? totalVentas / cantidadVentas : 0
+    const ticketMayor = (ventas ?? []).reduce((max, v) => Math.max(max, v.precio_total || 0), 0)
+    const enviosHoy = (ventas ?? []).filter(v => /env[ií]o|apizaco|tzompantepec|domicilio/i.test(v.direccion_entrega || '')).length
+    const recogidasHoy = (ventas ?? []).filter(v => /sucursal|recoger|centro|norte/i.test(v.direccion_entrega || '')).length
+    const ultimaVentaHora = ventas?.[0]?.creado_en ?? null
+    const productosTop = Object.entries((ventas ?? []).reduce<Record<string, number>>((acc, v) => {
+      const producto = v.producto || 'Pedido'
+      acc[producto] = (acc[producto] ?? 0) + 1
+      return acc
+    }, {}))
+      .map(([producto, cantidad]) => ({ producto, cantidad }))
+      .sort((a, b) => b.cantidad - a.cantidad)
+      .slice(0, 5)
 
     // Obtener mensajes de hoy
     const { count: mensajesHoy, error: msgsError } = await supabaseAdmin
@@ -53,6 +66,30 @@ export async function GET() {
     let estado = 'desconectado'
     let estadoDetalle = 'Bot Express no disponible'
     let reconnecting = false
+    async function cargarEstadoRemoto() {
+      const { data } = await supabaseAdmin
+        .from('configuracion_bot')
+        .select('valor')
+        .eq('clave', 'bot_status')
+        .maybeSingle()
+
+      if (!data?.valor) return
+
+      const remoto = JSON.parse(data.valor)
+      const updatedAt = remoto.updatedAt ? new Date(remoto.updatedAt).getTime() : 0
+      const fresco = Date.now() - updatedAt < 5 * 60_000
+      botConnected = fresco ? remoto.connected ?? false : false
+      estado = fresco ? remoto.estado || estado : 'desconectado'
+      estadoDetalle = fresco ? remoto.estadoDetalle || estadoDetalle : 'Sin pulso reciente de la VM'
+      reconnecting = fresco ? remoto.reconnecting ?? false : false
+      qrGeneradoEn = remoto.qrGeneradoEn ?? null
+      qrAgeSeconds = remoto.qrAgeSeconds ?? null
+      qrExpiresInSeconds = remoto.qrExpiresInSeconds ?? null
+      qrScanGraceSeconds = remoto.qrScanGraceSeconds ?? null
+      qrVencido = remoto.qrVencido ?? false
+      ultimaActividad = remoto.ultimaActividad || ultimaActividad
+    }
+
     try {
       const botPort = process.env.BOT_PORT || 10000
       const res = await fetch(`http://localhost:${botPort}/status`, { signal: AbortSignal.timeout(3000), cache: 'no-store' })
@@ -69,30 +106,12 @@ export async function GET() {
         qrExpiresInSeconds = botStatus.qrExpiresInSeconds ?? null
         qrScanGraceSeconds = botStatus.qrScanGraceSeconds ?? null
         qrVencido = botStatus.qrVencido ?? false
+      } else {
+        await cargarEstadoRemoto()
       }
     } catch {
       try {
-        const { data } = await supabaseAdmin
-          .from('configuracion_bot')
-          .select('valor')
-          .eq('clave', 'bot_status')
-          .maybeSingle()
-
-        if (data?.valor) {
-          const remoto = JSON.parse(data.valor)
-          const updatedAt = remoto.updatedAt ? new Date(remoto.updatedAt).getTime() : 0
-          const fresco = Date.now() - updatedAt < 5 * 60_000
-          botConnected = fresco ? remoto.connected ?? false : false
-          estado = fresco ? remoto.estado || estado : 'desconectado'
-          estadoDetalle = fresco ? remoto.estadoDetalle || estadoDetalle : 'Sin pulso reciente de la VM'
-          reconnecting = fresco ? remoto.reconnecting ?? false : false
-          qrGeneradoEn = remoto.qrGeneradoEn ?? null
-          qrAgeSeconds = remoto.qrAgeSeconds ?? null
-          qrExpiresInSeconds = remoto.qrExpiresInSeconds ?? null
-          qrScanGraceSeconds = remoto.qrScanGraceSeconds ?? null
-          qrVencido = remoto.qrVencido ?? false
-          ultimaActividad = remoto.ultimaActividad || ultimaActividad
-        }
+        await cargarEstadoRemoto()
       } catch {
         // Sin Express ni estado remoto.
       }
@@ -113,6 +132,12 @@ export async function GET() {
       ultimaActividad,
       ventasHoy: cantidadVentas,
       totalVentasHoy: totalVentas,
+      promedioVenta,
+      ticketMayor,
+      enviosHoy,
+      recogidasHoy,
+      ultimaVentaHora,
+      productosTop,
       ventasRecientes,
       clientesAtendidosHoy: mensajesHoy ?? 0,
     })
