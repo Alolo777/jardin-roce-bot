@@ -54,6 +54,26 @@ export async function GET() {
 
     if (msgsError) throw msgsError
 
+    let pedidosActivos: any[] = []
+    let zonasAmbiguasPendientes = 0
+    try {
+      const { data: pedidos } = await supabaseAdmin
+        .from('pedidos_bot')
+        .select('id, cliente_id, telefono, estado, cliente_nombre, producto, precio_arreglo, zona_envio, precio_envio, direccion, sucursal, metodo_pago, nota, total, ultimo_mensaje, requiere_revision, actualizado_en')
+        .in('estado', ['cotizacion', 'apartado'])
+        .order('actualizado_en', { ascending: false })
+        .limit(8)
+      pedidosActivos = pedidos ?? []
+
+      const { count } = await supabaseAdmin
+        .from('zonas_envio_ambiguas')
+        .select('*', { count: 'exact', head: true })
+        .eq('estado', 'pendiente')
+      zonasAmbiguasPendientes = count ?? 0
+    } catch {
+      // Tablas nuevas opcionales hasta aplicar migración.
+    }
+
     // Intentar obtener status del bot Express
     let botConnected = false
     let ultimaActividad = 'Desconocido'
@@ -139,6 +159,8 @@ export async function GET() {
       ultimaVentaHora,
       productosTop,
       ventasRecientes,
+      pedidosActivos,
+      zonasAmbiguasPendientes,
       clientesAtendidosHoy: mensajesHoy ?? 0,
     })
   } catch (error) {

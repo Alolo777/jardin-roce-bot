@@ -64,6 +64,7 @@ async function enviar(texto: string, intentos = 3): Promise<void> {
 export interface DatosVentaCerrada {
   cliente: string; producto: string; total: string
   direccion: string; numeroCliente: string
+  precioArreglo?: string; precioEnvio?: string; metodoPago?: string
 }
 
 export async function enviarAlertaVentaCerrada(datos: DatosVentaCerrada): Promise<void> {
@@ -73,8 +74,11 @@ export async function enviarAlertaVentaCerrada(datos: DatosVentaCerrada): Promis
     `👤 *Cliente:* ${esc(datos.cliente)}`,
     `📱 *Teléfono:* ${ultimos4(datos.numeroCliente)}`,
     `💐 *Producto:* ${esc(datos.producto)}`,
+    ...(datos.precioArreglo ? [`🌷 *Ramo:* ${esc(datos.precioArreglo)}`] : []),
+    ...(datos.precioEnvio ? [`🚚 *Envío:* ${esc(datos.precioEnvio)}`] : []),
     `💰 *Total:* ${esc(datos.total)}`,
     `📍 *Entrega:* ${esc(datos.direccion)}`,
+    ...(datos.metodoPago ? [`💳 *Pago:* ${esc(datos.metodoPago)}`] : []),
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
     '✅ _Confirmar pago y preparar el pedido_',
@@ -171,6 +175,50 @@ export async function enviarAlertaClienteFrustrado(
     '',
     '🙋 _Escríbele directamente para ayudarle_',
   ].join('\n')
+  await enviar(msg)
+}
+
+export interface DatosApartadoPedido {
+  cliente: string
+  producto: string
+  precioArreglo: string
+  precioEnvio?: string
+  total: string
+  entrega: string
+  metodoPago: string
+  numeroCliente: string
+}
+
+export async function enviarAlertaPedidoApartado(datos: DatosApartadoPedido): Promise<void> {
+  const msg = [
+    '📦 *PEDIDO APARTADO*',
+    '',
+    `👤 *Cliente:* ${esc(datos.cliente)}`,
+    `📱 *Teléfono:* ${ultimos4(datos.numeroCliente)}`,
+    `💐 *Producto:* ${esc(datos.producto)}`,
+    `🌷 *Ramo:* ${esc(datos.precioArreglo)}`,
+    ...(datos.precioEnvio ? [`🚚 *Envío:* ${esc(datos.precioEnvio)}`] : []),
+    `💰 *Total:* ${esc(datos.total)}`,
+    `📍 *Entrega:* ${esc(datos.entrega)}`,
+    `💳 *Pago:* ${esc(datos.metodoPago)}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '_Pedido apartado, pendiente de pago/confirmación final si aplica_',
+  ].join('\n')
+  await enviar(msg)
+}
+
+export async function enviarAlertaZonaAmbigua(numeroCliente: string, texto: string, candidatos?: string): Promise<void> {
+  const msg = [
+    '🧭 *ZONA DE ENVÍO AMBIGUA*',
+    '',
+    `📱 *Teléfono:* ${ultimos4(numeroCliente)}`,
+    `💬 *Cliente escribió:* ${esc(texto.slice(0, 300))}`,
+    candidatos ? `📍 *Posibles zonas:* ${esc(candidatos.slice(0, 500))}` : '',
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '_Revisar municipio/colonia antes de dar precio_',
+  ].filter(Boolean).join('\n')
   await enviar(msg)
 }
 

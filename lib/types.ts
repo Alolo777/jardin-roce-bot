@@ -96,3 +96,25 @@ export interface BotStatusFull {
   clientesAtendidosHoy: number
   version?: string
 }
+
+export interface PedidoBot {
+  id: string
+  cliente_id: string
+  telefono: string | null
+  estado: 'cotizacion' | 'apartado' | 'pagado' | 'entregado' | 'cancelado'
+  cliente_nombre: string | null
+  producto: string | null
+  arreglo_id: string | null
+  precio_arreglo: number | null
+  zona_envio: string | null
+  precio_envio: number | null
+  direccion: string | null
+  sucursal: string | null
+  metodo_pago: string | null
+  nota: string | null
+  total: number | null
+  ultimo_mensaje: string | null
+  requiere_revision: boolean
+  creado_en: string
+  actualizado_en: string
+}

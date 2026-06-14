@@ -20,6 +20,8 @@ import {
   enviarAlertaCancelacion,
   enviarAlertaQueja,
   enviarAlertaAtencionHumana,
+  enviarAlertaPedidoApartado,
+  enviarAlertaZonaAmbigua,
 } from './lib/telegram'
 import { supabaseAdmin } from './lib/supabase'
 import type { MensajeChat } from './lib/ai'
@@ -729,12 +731,70 @@ const FOTOS_CANCELADAS = new Set<string>()
 const VENTAS_CERRADAS  = new Set<string>()
 const VENTA_ACTUAL     = new Map<string, VentaCerrada>()
 const ARREGLO_ELEGIDO  = new Map<string, ArregloConFoto>()
-const PEDIDO_EN_CURSO  = new Map<string, { arreglo?: ArregloConFoto; envio?: { zona: string; precio: number }; nombre?: string; direccion?: string; sucursal?: string; metodoPago?: 'transferencia' | 'efectivo_recoger' }>()
+const PEDIDO_EN_CURSO  = new Map<string, { arreglo?: ArregloConFoto; envio?: { zona: string; precio: number }; nombre?: string; direccion?: string; sucursal?: string; metodoPago?: 'transferencia' | 'efectivo_recoger'; nota?: string }>()
 
 function pedidoActual(clienteId: string) {
   const pedido = PEDIDO_EN_CURSO.get(clienteId) ?? {}
   PEDIDO_EN_CURSO.set(clienteId, pedido)
   return pedido
+}
+
+function limpiarDireccionCliente(texto: string): string {
+  return String(texto || '')
+    .replace(GOOGLE_MAPS_REGEX, '')
+    .replace(/https?:\/\/\S+/gi, '')
+    .replace(/\s+/g, ' ')
+    .replace(/^,|,$/g, '')
+    .trim()
+}
+
+function totalPedidoNumerico(clienteId: string): number | null {
+  const pedido = PEDIDO_EN_CURSO.get(clienteId)
+  const arreglo = pedido?.arreglo ?? ARREGLO_ELEGIDO.get(clienteId)
+  if (!arreglo) return null
+  return arreglo.precio + (pedido?.envio?.precio ?? 0)
+}
+
+async function persistirPedido(clienteId: string, telefono: string | null, estado: 'cotizacion' | 'apartado' | 'pagado' | 'entregado' | 'cancelado', ultimoMensaje?: string): Promise<void> {
+  try {
+    const pedido = PEDIDO_EN_CURSO.get(clienteId)
+    const arreglo = pedido?.arreglo ?? ARREGLO_ELEGIDO.get(clienteId)
+    const total = totalPedidoNumerico(clienteId)
+    const { error } = await supabaseAdmin.from('pedidos_bot').upsert({
+      cliente_id: clienteId,
+      telefono,
+      estado,
+      cliente_nombre: pedido?.nombre ?? null,
+      producto: arreglo?.nombre ?? null,
+      arreglo_id: arreglo?.id ?? null,
+      precio_arreglo: arreglo?.precio ?? null,
+      zona_envio: pedido?.envio?.zona ?? null,
+      precio_envio: pedido?.envio?.precio ?? null,
+      direccion: pedido?.direccion ?? null,
+      sucursal: pedido?.sucursal ?? null,
+      metodo_pago: pedido?.metodoPago ?? null,
+      nota: pedido?.nota ?? null,
+      total,
+      ultimo_mensaje: ultimoMensaje ?? null,
+      requiere_revision: false,
+      actualizado_en: new Date().toISOString(),
+    }, { onConflict: 'cliente_id' })
+    if (error) throw error
+  } catch (err) {
+    console.warn('[pedidos_bot] No se pudo persistir pedido:', err)
+  }
+}
+
+async function registrarZonaAmbigua(texto: string, telefono: string | null, candidatos: unknown[]): Promise<void> {
+  try {
+    await supabaseAdmin.from('zonas_envio_ambiguas').insert({
+      texto_cliente: texto,
+      telefono,
+      candidatos,
+    })
+  } catch (err) {
+    console.warn('[zonas_envio_ambiguas] No se pudo registrar:', err)
+  }
 }
 
 function resetearPedidoCliente(clienteId: string): void {
@@ -912,7 +972,9 @@ function contieneFrase(texto: string, frase: string): boolean {
   return new RegExp(`(^|\\s)${segura}(\\s|$)`).test(texto)
 }
 
-async function buscarPrecioEnvio(texto: string): Promise<{ zona: string; precio: number; fuente: string } | null> {
+type ResultadoEnvio = { zona: string; precio: number; fuente: string } | { ambiguo: true; candidatos: Array<{ zona: string; precio: number; fuente: string }> }
+
+async function buscarPrecioEnvio(texto: string): Promise<ResultadoEnvio | null> {
   const n = normalizarTexto(texto)
   const tieneDatoDireccion = /\b(calle|av\.?|avenida|col\.?|colonia|cp\s*\d{5}|codigo\s*postal|#|num\.?|n[uú]mero|\d{2,})\b/i.test(texto)
 
@@ -945,7 +1007,10 @@ async function buscarPrecioEnvio(texto: string): Promise<{ zona: string; precio:
       const ambiguo = segundo && Math.abs(mejor.score - segundo.score) < 10
       if (!esMatchFuerte || ambiguo) {
         console.warn(`[envio] Zona ambigua/no fuerte para "${texto}". Mejor=${match.zona} score=${mejor.score}`)
-        return null
+        return {
+          ambiguo: true,
+          candidatos: candidatos.slice(0, 5).map(c => ({ zona: c.municipio.zona, precio: c.municipio.precio_envio, fuente: 'municipios' })),
+        }
       }
       return { zona: match.zona, precio: match.precio_envio, fuente: 'municipios' }
     }
@@ -1321,8 +1386,16 @@ async function procesarMensaje(message: any): Promise<void> {
     } else {
       const envioMatch = await buscarPrecioEnvio(textoCliente)
       const pareceDireccion = /\b(calle|av\.?|avenida|col\.?|colonia|num\.?|n[uú]mero|#|cp\s*\d{5}|\d{2,})\b/i.test(textoCliente)
-      if (pareceDireccion && ARREGLO_ELEGIDO.has(clienteId)) pedidoActual(clienteId).direccion = textoCliente
-      if (envioMatch) {
+      if (pareceDireccion && ARREGLO_ELEGIDO.has(clienteId)) pedidoActual(clienteId).direccion = limpiarDireccionCliente(textoCliente)
+      if (envioMatch && 'ambiguo' in envioMatch) {
+        const numeroRealTmp = await numeroRealPromise.catch(() => null)
+        const candidatosTxt = envioMatch.candidatos.map(c => `${c.zona} ($${c.precio})`).join(', ')
+        registrarZonaAmbigua(textoCliente, numeroRealTmp, envioMatch.candidatos).catch(() => {})
+        if (numeroRealTmp) enviarAlertaZonaAmbigua(numeroRealTmp, textoCliente, candidatosTxt).catch(err => console.error('[bot] Telegram zona ambigua:', err))
+        contextoExtra +=
+          `\n\n[ZONA DE ENVIO AMBIGUA] El texto "${textoCliente}" coincide con varias zonas o no es suficiente. ` +
+          `INSTRUCCION: NO des precio. Pide colonia, municipio completo, codigo postal o direccion completa.`
+      } else if (envioMatch) {
         pedidoActual(clienteId).envio = { zona: envioMatch.zona, precio: envioMatch.precio }
         contextoExtra +=
           `\n\n[CLIENTE MENCIONÓ UNA ZONA: "${envioMatch.zona}" — $${envioMatch.precio.toFixed(2)} MXN (${envioMatch.fuente})]\n` +
@@ -1454,14 +1527,20 @@ async function procesarMensaje(message: any): Promise<void> {
     const KW_CONFIRMA_PAGO = /ya pague|ya pagué|listo|comprobante|ya quedó|ya quedo|ya lo hice|ya la hice|ya la hizo|ya.*dep[oó]sito|hice.*dep[oó]sito|dep[oó]sito.*hecho|ya transfer[ií]|transfer[ií]|ya lo envi[eé]|ya lo mande|ya lo mand[eé]|ya llegó|ya llego|sipi|si ya|confirmo|confirmado|ya esta pagado/i.test(textoCliente)
     const consultaPagoEnviado = /le lleg[oó]|si lleg[oó]|sí lleg[oó]|recibieron|recibiste|dep[oó]sito|transfer/i.test(textoCliente)
     const pagoAlRecoger = /pago\s+al\s+recog?er|pagar[eé]?\s+al\s+recog?er|efectivo\s+al\s+recog?er|al\s+recog?er\s+gracias/i.test(textoCliente)
+    const pagoTransferencia = /transfer|tranfer|tranferencia|transferencia|dep[oó]sito|bbva/i.test(textoCliente)
 
     if (/\bcentro\b/i.test(textoCliente) && /sucursal|ubicaci[oó]n|recog|ursal/i.test(textoCliente)) pedidoActual(clienteId).sucursal = 'Centro'
     if (/\bnorte\b/i.test(textoCliente) && /sucursal|ubicaci[oó]n|recog|ursal/i.test(textoCliente)) pedidoActual(clienteId).sucursal = 'Norte'
     if (pagoAlRecoger) pedidoActual(clienteId).metodoPago = 'efectivo_recoger'
+    if (pagoTransferencia) pedidoActual(clienteId).metodoPago = 'transferencia'
 
-    const nombreMatch = textoCliente.match(/\b([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,5})\b(?=.*\b(entregar|entrega|apart|nombre|4\s*pm|[0-9]{1,2}\s*(?:am|pm)))/)
+    const notaMatch = textoCliente.match(/(?:notita|nota).*?(?:diga|decir|ponerle|poner)\s+(.+)/i)
+    if (notaMatch && ARREGLO_ELEGIDO.has(clienteId)) pedidoActual(clienteId).nota = notaMatch[1].trim().slice(0, 500)
+
+    const nombreMatch = textoCliente.match(/(?:a\s+nombre\s+de|nombre\s+de|a\s+)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,5})/i)
+      ?? textoCliente.match(/\b([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,5})\b(?=.*\b(entregar|entrega|apart|nombre|4\s*pm|[0-9]{1,2}\s*(?:am|pm)))/)
     if (nombreMatch && ARREGLO_ELEGIDO.has(clienteId)) {
-      pedidoActual(clienteId).nombre = nombreMatch[1].trim()
+      pedidoActual(clienteId).nombre = nombreMatch[1].trim().replace(/\b\w/g, c => c.toUpperCase())
     }
 
     if (KW_PAGO && intencion === 'normal') {
@@ -1529,6 +1608,9 @@ async function procesarMensaje(message: any): Promise<void> {
     await message.reply(mensajeFinal)
 
     const numeroReal = await numeroRealPromise
+    if (tieneArregloVerificado(clienteId)) {
+      persistirPedido(clienteId, numeroReal, VENTAS_CERRADAS.has(clienteId) ? 'pagado' : 'cotizacion', textoCliente).catch(() => {})
+    }
 
     if (motivoAtencionHumana && debeNotificarAtencionHumana(clienteId)) {
       const contexto = historialCompleto
@@ -1589,15 +1671,35 @@ async function procesarMensaje(message: any): Promise<void> {
       console.log(`[bot] 🎉 VENTA CERRADA: ${ventaVerificada.cliente} | ${numeroReal}`)
       const esPagoAlRecoger = PEDIDO_EN_CURSO.get(clienteId)?.metodoPago === 'efectivo_recoger'
       if (!esPagoAlRecoger) {
+        const pedido = PEDIDO_EN_CURSO.get(clienteId)
+        const arreglo = pedido?.arreglo ?? ARREGLO_ELEGIDO.get(clienteId)
         enviarAlertaVentaCerrada({
           cliente: ventaVerificada.cliente, producto: ventaVerificada.producto,
           total: ventaVerificada.total, direccion: ventaVerificada.direccion,
           numeroCliente: numeroReal,
+          precioArreglo: arreglo ? `$${arreglo.precio.toFixed(2)} MXN` : undefined,
+          precioEnvio: pedido?.envio ? `$${pedido.envio.precio.toFixed(2)} MXN (${pedido.envio.zona})` : undefined,
+          metodoPago: pedido?.metodoPago ?? 'transferencia',
         }).catch(err => console.error('[bot] Telegram venta:', err))
         registrarVenta(ventaVerificada.cliente, numeroReal, ventaVerificada.producto, ventaVerificada.total, ventaVerificada.direccion)
           .catch(err => console.error('[bot] Error registrando venta:', err))
+        persistirPedido(clienteId, numeroReal, 'pagado', textoCliente).catch(() => {})
       } else {
         console.warn('[bot] Venta token ignorado como venta pagada: pago al recoger')
+        const pedido = PEDIDO_EN_CURSO.get(clienteId)
+        const arreglo = pedido?.arreglo ?? ARREGLO_ELEGIDO.get(clienteId)
+        if (arreglo) {
+          enviarAlertaPedidoApartado({
+            cliente: ventaVerificada.cliente,
+            producto: ventaVerificada.producto,
+            precioArreglo: `$${arreglo.precio.toFixed(2)} MXN`,
+            total: `$${arreglo.precio.toFixed(2)} MXN`,
+            entrega: ventaVerificada.direccion,
+            metodoPago: 'Efectivo/tarjeta al recoger',
+            numeroCliente: numeroReal,
+          }).catch(err => console.error('[bot] Telegram apartado pedido:', err))
+        }
+        persistirPedido(clienteId, numeroReal, 'apartado', textoCliente).catch(() => {})
       }
       apartarArreglo(ventaVerificada.producto, numeroReal)
         .catch(err => console.error('[bot] Error apartando:', err))
@@ -1615,6 +1717,7 @@ async function procesarMensaje(message: any): Promise<void> {
       const totalArreglo = ventaVerificada?.total ?? `$${(elegido?.precio ?? ultimos?.[0]?.precio ?? 0).toFixed(2)} MXN`
       const clienteVenta = ventaVerificada?.cliente ?? 'Verificar en chat'
       const direccionVenta = ventaVerificada?.direccion ?? 'Por confirmar'
+      const pedido = PEDIDO_EN_CURSO.get(clienteId)
       console.log(`[bot] ⚠️ Cliente confirmó pago pero IA no generó token. Notificando igual.`)
       enviarAlertaVentaCerrada({
         cliente: clienteVenta,
@@ -1622,12 +1725,16 @@ async function procesarMensaje(message: any): Promise<void> {
         total: totalArreglo,
         direccion: direccionVenta,
         numeroCliente: numeroReal,
+        precioArreglo: elegido ? `$${elegido.precio.toFixed(2)} MXN` : undefined,
+        precioEnvio: pedido?.envio ? `$${pedido.envio.precio.toFixed(2)} MXN (${pedido.envio.zona})` : undefined,
+        metodoPago: pedido?.metodoPago ?? 'transferencia',
       }).catch(err => console.error('[bot] Telegram venta fallback:', err))
       apartarArreglo(nombreArreglo, numeroReal)
         .catch(err => console.error('[bot] Error apartando fallback:', err))
       registrarVenta(clienteVenta, numeroReal, nombreArreglo, totalArreglo, direccionVenta)
         .catch(err => console.error('[bot] Error registrando venta fallback:', err))
       VENTAS_CERRADAS.add(clienteId)
+      persistirPedido(clienteId, numeroReal, 'pagado', textoCliente).catch(() => {})
       VENTA_ACTUAL.set(clienteId, {
         cliente: clienteVenta,
         producto: nombreArreglo,

@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "build:local": "node scripts/build-local.mjs",
+    "test:flows": "node tests/conversation-flows.test.mjs",
     "start": "next start",
     "bot": "tsx --env-file=.env.local bot.ts",
     "bot:prod": "NODE_OPTIONS='--max-old-space-size=380' tsx --env-file=.env.local bot.ts",
