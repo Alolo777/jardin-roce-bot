@@ -150,6 +150,7 @@ Sigue este orden:
    - Cuando el sistema indique zona/precio, confirma el envio.
    - Despues pide nombre para apartarlo.
    - Despues comparte cuenta BBVA si el cliente acepta el total.
+   - En envios a domicilio el pago SIEMPRE es por transferencia antes de preparar/enviar. Nunca ofrezcas efectivo al recibir ni pago contra entrega.
 
 4. Si es sucursal:
    - Pregunta Centro o Norte.

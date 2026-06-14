@@ -376,7 +376,7 @@ function debeNotificarAtencionHumana(clienteId: string): boolean {
 // ════════════════════════════════════════════════════════════════
 
 function encontrarMejorCoincidencia(texto: string, arreglos: ArregloConFoto[]): { arreglo: ArregloConFoto; score: number } | null {
-  const textoLower = texto.toLowerCase()
+  const textoLower = normalizarTexto(texto)
 
   // 1. Por precio exacto
   const precioMatch = texto.match(/\$\s*([\d,]+(?:\.\d{1,2})?)/)
@@ -387,19 +387,30 @@ function encontrarMejorCoincidencia(texto: string, arreglos: ArregloConFoto[]): 
   }
 
   // 2. Por palabras del nombre (scoring)
-  const palabrasCliente = textoLower.split(/\s+/).filter(p => p.length > 2)
+  const STOP_MATCH_ARREGLOS = new Set([
+    'ramo', 'ramos', 'arreglo', 'arreglos', 'bouquet', 'flor', 'flores',
+    'este', 'esta', 'ese', 'esa', 'bien', 'chido', 'padre', 'bonito', 'bonita',
+    'gusto', 'gustaria', 'quiero', 'porfavor', 'favor', 'mucho', 'uno', 'una',
+  ])
+  const palabrasCliente = textoLower
+    .split(/\s+/)
+    .map(p => p.replace(/[^a-z0-9]/g, ''))
+    .filter(p => p.length > 2 && !STOP_MATCH_ARREGLOS.has(p))
   if (palabrasCliente.length === 0) return null
 
   let mejor = { arreglo: arreglos[0], score: 0 }
   for (const a of arreglos) {
-    const palabrasArreglo = a.nombre.toLowerCase().split(/\s+/).filter(p => p.length > 2)
+    const palabrasArreglo = normalizarTexto(a.nombre)
+      .split(/\s+/)
+      .map(p => p.replace(/[^a-z0-9]/g, ''))
+      .filter(p => p.length > 2 && !STOP_MATCH_ARREGLOS.has(p))
     const score = palabrasCliente.filter(pc =>
       palabrasArreglo.some(pa => pa.includes(pc) || pc.includes(pa))
     ).length
     if (score > mejor.score) mejor = { arreglo: a, score }
   }
 
-  return mejor.score > 0 ? mejor : null
+  return mejor.score >= 2 ? mejor : null
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -903,6 +914,7 @@ function contieneFrase(texto: string, frase: string): boolean {
 
 async function buscarPrecioEnvio(texto: string): Promise<{ zona: string; precio: number; fuente: string } | null> {
   const n = normalizarTexto(texto)
+  const tieneDatoDireccion = /\b(calle|av\.?|avenida|col\.?|colonia|cp\s*\d{5}|codigo\s*postal|#|num\.?|n[uú]mero|\d{2,})\b/i.test(texto)
 
   // 1. Buscar por scoring: CP > municipio > colonia. Evita que "centro" gane sobre "San Andrés".
   const municipios = await obtenerMunicipiosEnvio()
@@ -925,8 +937,18 @@ async function buscarPrecioEnvio(texto: string): Promise<{ zona: string; precio:
       .filter(c => c.score > 0)
       .sort((a, b) => b.score - a.score)
 
-    const match = candidatos[0]?.municipio
-    if (match) return { zona: match.zona, precio: match.precio_envio, fuente: 'municipios' }
+    const mejor = candidatos[0]
+    const segundo = candidatos[1]
+    if (mejor) {
+      const match = mejor.municipio
+      const esMatchFuerte = mejor.score >= 120 || tieneDatoDireccion
+      const ambiguo = segundo && Math.abs(mejor.score - segundo.score) < 10
+      if (!esMatchFuerte || ambiguo) {
+        console.warn(`[envio] Zona ambigua/no fuerte para "${texto}". Mejor=${match.zona} score=${mejor.score}`)
+        return null
+      }
+      return { zona: match.zona, precio: match.precio_envio, fuente: 'municipios' }
+    }
   }
 
   // 2. Fallback: buscar en zonas_envio por palabras clave exactas por frase.
@@ -938,7 +960,7 @@ async function buscarPrecioEnvio(texto: string): Promise<{ zona: string; precio:
         return palabra && contieneFrase(n, palabra)
       })
     )
-    if (zonaMatch) return { zona: zonaMatch.zona, precio: zonaMatch.precio, fuente: 'zonas' }
+    if (zonaMatch && tieneDatoDireccion) return { zona: zonaMatch.zona, precio: zonaMatch.precio, fuente: 'zonas' }
   }
 
   return null
@@ -1429,7 +1451,7 @@ async function procesarMensaje(message: any): Promise<void> {
 
     // Detectar continuacion de venta (pago/envio)
     const KW_PAGO = /pago|pagar|transferencia|deposito|depósito|bbva|banco|tarjeta|efectivo|oxxo|okei|okis|okas|ok|va|dale|acuerdo|confirmo|si[^a-zA-Z]|simon|sip|sipo|está bien|esta bien|le pago|voy a pagar|ya pague|ya pagué|ya me dijo|listo|comprobante/i.test(textoCliente)
-    const KW_CONFIRMA_PAGO = /ya pague|ya pagué|listo|comprobante|ya quedó|ya quedo|ya la hice|ya la hizo|ya.*dep[oó]sito|hice.*dep[oó]sito|dep[oó]sito.*hecho|ya transfer[ií]|transfer[ií]|ya llegó|ya llego|sipi|si ya|confirmo|confirmado|ya esta pagado/i.test(textoCliente)
+    const KW_CONFIRMA_PAGO = /ya pague|ya pagué|listo|comprobante|ya quedó|ya quedo|ya lo hice|ya la hice|ya la hizo|ya.*dep[oó]sito|hice.*dep[oó]sito|dep[oó]sito.*hecho|ya transfer[ií]|transfer[ií]|ya lo envi[eé]|ya lo mande|ya lo mand[eé]|ya llegó|ya llego|sipi|si ya|confirmo|confirmado|ya esta pagado/i.test(textoCliente)
     const consultaPagoEnviado = /le lleg[oó]|si lleg[oó]|sí lleg[oó]|recibieron|recibiste|dep[oó]sito|transfer/i.test(textoCliente)
     const pagoAlRecoger = /pago\s+al\s+recog?er|pagar[eé]?\s+al\s+recog?er|efectivo\s+al\s+recog?er|al\s+recog?er\s+gracias/i.test(textoCliente)
 
@@ -1482,7 +1504,8 @@ async function procesarMensaje(message: any): Promise<void> {
         `${pedido.envio ? `Envío: ${pedido.envio.zona} — $${pedido.envio.precio.toFixed(2)} MXN. ` : ''}` +
         `Total actual: $${totalPedido.toFixed(2)} MXN. ` +
         `${pedido.nombre ? `Nombre: ${pedido.nombre}. ` : ''}` +
-        `NO cambies el producto por otro del historial. Si cierras venta, usa exactamente estos datos.`
+        `NO cambies el producto por otro del historial. Si cierras venta, usa exactamente estos datos. ` +
+        `${pedido.envio ? 'Como es ENVIO A DOMICILIO, el pago debe ser por transferencia antes de preparar/enviar. NO ofrezcas efectivo al recibir ni efectivo al recoger. ' : ''}`
     }
 
     await chat.sendStateTyping()
@@ -1600,6 +1623,8 @@ async function procesarMensaje(message: any): Promise<void> {
         direccion: direccionVenta,
         numeroCliente: numeroReal,
       }).catch(err => console.error('[bot] Telegram venta fallback:', err))
+      apartarArreglo(nombreArreglo, numeroReal)
+        .catch(err => console.error('[bot] Error apartando fallback:', err))
       registrarVenta(clienteVenta, numeroReal, nombreArreglo, totalArreglo, direccionVenta)
         .catch(err => console.error('[bot] Error registrando venta fallback:', err))
       VENTAS_CERRADAS.add(clienteId)
