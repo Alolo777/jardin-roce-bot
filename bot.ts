@@ -1869,6 +1869,12 @@ async function recuperarMensajesPerdidos(): Promise<void> {
       return
     }
 
+    // FIX: Verificar que pupPage exista antes de getChats()
+    if (!whatsappClient.pupPage) {
+      console.log('[bot] ⚠️ Página de WhatsApp no disponible (pupPage undefined). Omitiendo rescate.')
+      return
+    }
+
     console.log('[bot] 🧹 Buscando mensajes no leídos...')
     const chats = await whatsappClient.getChats()
     const chatsPendientes = chats.filter(c => c.unreadCount > 0 && !c.isGroup)
@@ -2001,8 +2007,8 @@ async function guardarConfigBot(clave: string, valor: string): Promise<void> {
 
 async function publicarEstadoBot(): Promise<void> {
   const qrAgeMs = BOT_QR_GENERADO_EN ? Date.now() - BOT_QR_GENERADO_EN : null
-  const state = await whatsappClient.getState().catch(() => null)
-  const conectado = BOT_READY || state === 'CONNECTED'
+  const estadoReal = BOT_READY && whatsappClient?.info && !!whatsappClient.pupPage ? 'conectado' : BOT_ESTADO
+  const conectado = estadoReal === 'conectado'
   const payload = {
     connected: conectado,
     estado: conectado ? 'conectado' : BOT_ESTADO,

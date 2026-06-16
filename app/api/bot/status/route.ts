@@ -74,7 +74,7 @@ export async function GET() {
       // Tablas nuevas opcionales hasta aplicar migración.
     }
 
-    // Intentar obtener status del bot Express
+    // Intentar obtener status del bot — en Vercel solo vía Supabase
     let botConnected = false
     let ultimaActividad = 'Desconocido'
     let botQr: string | null = null
@@ -86,6 +86,8 @@ export async function GET() {
     let estado = 'desconectado'
     let estadoDetalle = 'Bot Express no disponible'
     let reconnecting = false
+    const FRESCURA_MS = 10 * 60_000 // 10 min de tolerancia en Vercel
+
     async function cargarEstadoRemoto() {
       const { data } = await supabaseAdmin
         .from('configuracion_bot')
@@ -97,7 +99,7 @@ export async function GET() {
 
       const remoto = JSON.parse(data.valor)
       const updatedAt = remoto.updatedAt ? new Date(remoto.updatedAt).getTime() : 0
-      const fresco = Date.now() - updatedAt < 5 * 60_000
+      const fresco = Date.now() - updatedAt < FRESCURA_MS
       botConnected = fresco ? remoto.connected ?? false : false
       estado = fresco ? remoto.estado || estado : 'desconectado'
       estadoDetalle = fresco ? remoto.estadoDetalle || estadoDetalle : 'Sin pulso reciente de la VM'
@@ -110,30 +112,32 @@ export async function GET() {
       ultimaActividad = remoto.ultimaActividad || ultimaActividad
     }
 
-    try {
-      const botPort = process.env.BOT_PORT || 10000
-      const res = await fetch(`http://localhost:${botPort}/status`, { signal: AbortSignal.timeout(3000), cache: 'no-store' })
-      if (res.ok) {
-        const botStatus = await res.json()
-        botConnected = botStatus.connected
-        estado = botStatus.estado || (botConnected ? 'conectado' : 'desconectado')
-        estadoDetalle = botStatus.estadoDetalle || estadoDetalle
-        reconnecting = botStatus.reconnecting ?? false
-        ultimaActividad = botStatus.ultimaActividad || ultimaActividad
-        botQr = botStatus.qr || null
-        qrGeneradoEn = botStatus.qrGeneradoEn || null
-        qrAgeSeconds = botStatus.qrAgeSeconds ?? null
-        qrExpiresInSeconds = botStatus.qrExpiresInSeconds ?? null
-        qrScanGraceSeconds = botStatus.qrScanGraceSeconds ?? null
-        qrVencido = botStatus.qrVencido ?? false
-      } else {
-        await cargarEstadoRemoto()
-      }
-    } catch {
+    const enVercel = process.env.VERCEL === '1'
+    if (enVercel) {
+      // En Vercel no hay Express local, solo Supabase
+      await cargarEstadoRemoto().catch(() => {})
+    } else {
       try {
-        await cargarEstadoRemoto()
+        const botPort = process.env.BOT_PORT || 10000
+        const res = await fetch(`http://localhost:${botPort}/status`, { signal: AbortSignal.timeout(3000), cache: 'no-store' })
+        if (res.ok) {
+          const botStatus = await res.json()
+          botConnected = botStatus.connected
+          estado = botStatus.estado || (botConnected ? 'conectado' : 'desconectado')
+          estadoDetalle = botStatus.estadoDetalle || estadoDetalle
+          reconnecting = botStatus.reconnecting ?? false
+          ultimaActividad = botStatus.ultimaActividad || ultimaActividad
+          botQr = botStatus.qr || null
+          qrGeneradoEn = botStatus.qrGeneradoEn || null
+          qrAgeSeconds = botStatus.qrAgeSeconds ?? null
+          qrExpiresInSeconds = botStatus.qrExpiresInSeconds ?? null
+          qrScanGraceSeconds = botStatus.qrScanGraceSeconds ?? null
+          qrVencido = botStatus.qrVencido ?? false
+        } else {
+          await cargarEstadoRemoto()
+        }
       } catch {
-        // Sin Express ni estado remoto.
+        await cargarEstadoRemoto().catch(() => {})
       }
     }
 
