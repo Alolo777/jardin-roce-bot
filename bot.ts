@@ -1605,7 +1605,16 @@ async function procesarMensaje(message: any): Promise<void> {
 
     const mensajeFinal = limpiarRespuestaIA(mensaje)
     await simularEscritura(chat, calcularDelayEscritura(mensajeFinal))
-    await message.reply(mensajeFinal)
+    try {
+      await message.reply(mensajeFinal)
+    } catch (sendErr) {
+      console.warn(`[bot] ⚠️ message.reply falló, intentando chat.sendMessage:`, (sendErr as Error)?.message?.slice(0, 80))
+      try {
+        await chat.sendMessage(mensajeFinal)
+      } catch (chatSendErr) {
+        console.warn(`[bot] ⚠️ chat.sendMessage también falló:`, (chatSendErr as Error)?.message?.slice(0, 80))
+      }
+    }
 
     const numeroReal = await numeroRealPromise
     if (tieneArregloVerificado(clienteId)) {
@@ -1929,7 +1938,7 @@ const isProduction = process.platform === 'linux';
 // 2. Asignamos las banderas según el sistema operativo
 const puppeteerArgs = isProduction ? [
   // Banderas extremas para sobrevivir en Google Cloud
-  '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+  '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process',
   '--disk-cache-size=0', '--media-cache-size=0', '--disable-application-cache',
   '--disable-gpu', '--disable-gpu-sandbox', '--use-gl=swiftshader',
   '--disable-accelerated-2d-canvas',
@@ -1983,6 +1992,9 @@ const QR_SCAN_GRACE_MS = 15 * 60_000
 let BOT_RECONNECTING = false
 let WATCHDOG_INICIADO = false
 let ULTIMA_RECARGA_WEB = 0
+let CONTADOR_RECARGAS_WEB = 0
+let PRIMERA_RECARGA_WEB = 0
+const MAX_RECARGAS_WEB = 5 // si recarga >5 veces en 2min, forzamos reconexión
 let BOT_ESTADO: 'iniciando' | 'esperando_qr' | 'conectado' | 'reconectando' | 'desconectado' | 'error' = 'iniciando'
 let BOT_ESTADO_DETALLE = 'Arrancando bot'
 let ULTIMO_COMANDO_BOT: string | null = null
@@ -2193,7 +2205,18 @@ whatsappClient.on('ready', async () => {
       page.on('framenavigated', (frame: any) => {
         if (frame !== page.mainFrame() || BOT_RECONNECTING) return
         ULTIMA_RECARGA_WEB = Date.now()
-        console.warn('[bot] 🔄 WhatsApp Web navegó/recargó. No se fuerza reconexión; el watchdog revisará después.')
+        const ahora = Date.now()
+        if (ahora - PRIMERA_RECARGA_WEB > 120_000) {
+          CONTADOR_RECARGAS_WEB = 0
+          PRIMERA_RECARGA_WEB = ahora
+        }
+        CONTADOR_RECARGAS_WEB++
+        console.warn(`[bot] 🔄 WhatsApp Web navegó/recargó (${CONTADOR_RECARGAS_WEB}/${MAX_RECARGAS_WEB})`)
+        if (CONTADOR_RECARGAS_WEB >= MAX_RECARGAS_WEB) {
+          console.error(`[bot] 🔄 Demasiadas recargas (${CONTADOR_RECARGAS_WEB}) — forzando reconexión`)
+          CONTADOR_RECARGAS_WEB = 0
+          reconectarWhatsapp('Demasiadas recargas de WhatsApp Web').catch(console.error)
+        }
       })
     }
   } catch (err) { console.warn('[bot] No se pudo registrar framenavigated:', err) }
