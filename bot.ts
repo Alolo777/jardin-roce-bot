@@ -2005,6 +2005,7 @@ let BOT_QR_GENERADO_EN: number | null = null
 const BOT_QR_TTL_MS = 60_000
 const QR_SCAN_GRACE_MS = 15 * 60_000
 let BOT_RECONNECTING = false
+let RECONNECT_START = 0
 let WATCHDOG_INICIADO = false
 let ULTIMA_RECARGA_WEB = 0
 let CONTADOR_RECARGAS_WEB = 0
@@ -2095,6 +2096,7 @@ async function reconectarWhatsapp(motivo: string): Promise<void> {
   }
 
   BOT_RECONNECTING = true
+  RECONNECT_START = Date.now()
   BOT_READY = false
   actualizarEstadoBot('reconectando', motivo)
   console.warn(`[bot] 🔄 Reconectando WhatsApp: ${motivo}`)
@@ -2102,9 +2104,15 @@ async function reconectarWhatsapp(motivo: string): Promise<void> {
   try {
     await whatsappClient.destroy().catch(() => {})
     await new Promise(r => setTimeout(r, 5000))
-    await whatsappClient.initialize()
+    await Promise.race([
+      whatsappClient.initialize(),
+      new Promise((_, reject) => setTimeout(
+        () => reject(new Error('Timeout: initialize() no respondió en 90s')), 90_000
+      )),
+    ])
   } catch (err) {
     BOT_RECONNECTING = false
+    RECONNECT_START = 0
     actualizarEstadoBot('error', 'Fallo reconectando WhatsApp')
     console.error('[bot] ❌ No se pudo reconectar — forzando reinicio:', err)
     registrarCrash()
@@ -2152,6 +2160,7 @@ whatsappClient.on('qr', async (qr) => {
 whatsappClient.on('ready', async () => {
   BOT_READY = true
   BOT_RECONNECTING = false
+  RECONNECT_START = 0
   actualizarEstadoBot('conectado', 'WhatsApp conectado')
   publicarEstadoBot().catch(err => console.warn('[bot] No se pudo publicar estado ready:', err))
   console.log('\n✅ Bot de Jardín RoCe conectado!')
@@ -2163,6 +2172,11 @@ whatsappClient.on('ready', async () => {
     const minSinMensajes = Math.round((Date.now() - ultimaActividad) / 60_000)
 
     if (BOT_RECONNECTING || Date.now() - ULTIMA_RECARGA_WEB < 2 * 60_000) {
+      if (BOT_RECONNECTING && RECONNECT_START > 0 && Date.now() - RECONNECT_START > 3 * 60_000) {
+        console.error(`[Watchdog] 🧟 Reconexión atorada >3 min — forzando reinicio`)
+        process.exit(1)
+        return
+      }
       console.log('[Watchdog] ⏳ Reconexión/recarga en curso — esperando...')
       return
     }
@@ -2218,6 +2232,11 @@ whatsappClient.on('ready', async () => {
     } catch (err) {
       // getState() falló — el cliente está desconectado
       if (BOT_RECONNECTING || Date.now() - ULTIMA_RECARGA_WEB < 2 * 60_000) {
+        if (BOT_RECONNECTING && RECONNECT_START > 0 && Date.now() - RECONNECT_START > 3 * 60_000) {
+          console.error(`[Watchdog] 🧟 Reconexión atorada >3 min — forzando reinicio`)
+          process.exit(1)
+          return
+        }
         console.warn('[Watchdog] getState falló durante recarga; no se reinicia proceso.')
         return
       }
