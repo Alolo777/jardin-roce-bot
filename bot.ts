@@ -1605,14 +1605,24 @@ async function procesarMensaje(message: any): Promise<void> {
 
     const mensajeFinal = limpiarRespuestaIA(mensaje)
     await simularEscritura(chat, calcularDelayEscritura(mensajeFinal))
+
+    let mensajeEnviado = false
     try {
       await message.reply(mensajeFinal)
+      mensajeEnviado = true
     } catch (sendErr) {
       console.warn(`[bot] ⚠️ message.reply falló, intentando chat.sendMessage:`, (sendErr as Error)?.message?.slice(0, 80))
       try {
         await chat.sendMessage(mensajeFinal)
+        mensajeEnviado = true
       } catch (chatSendErr) {
         console.warn(`[bot] ⚠️ chat.sendMessage también falló:`, (chatSendErr as Error)?.message?.slice(0, 80))
+        try {
+          await whatsappClient.sendMessage(clienteId, mensajeFinal)
+          mensajeEnviado = true
+        } catch (clientSendErr) {
+          console.error(`[bot] ❌ whatsappClient.sendMessage también falló:`, (clientSendErr as Error)?.message?.slice(0, 80))
+        }
       }
     }
 
@@ -1823,7 +1833,11 @@ async function procesarMensaje(message: any): Promise<void> {
       }
     }
 
-    console.log(`[${new Date().toLocaleTimeString('es-MX')}] ✅ Listo para ${clienteId}`)
+    if (mensajeEnviado) {
+      console.log(`[${new Date().toLocaleTimeString('es-MX')}] ✅ Listo para ${clienteId}`)
+    } else {
+      console.error(`[${new Date().toLocaleTimeString('es-MX')}] ❌ No se pudo enviar mensaje a ${clienteId} — los 3 métodos fallaron`)
+    }
 
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error)
@@ -2157,8 +2171,13 @@ whatsappClient.on('ready', async () => {
       const state = await whatsappClient.getState()
 
       if (state !== 'CONNECTED') {
+        const estadosReconectables = ['UNPAIRED', 'DISCONNECTED', 'UNKNOWN', 'PROXYBLOCK', 'DEPRECATED_VERSION']
+        if (estadosReconectables.includes(state)) {
+          console.error(`[Watchdog] ⚠️ Estado: ${state} — forzando reconexión inmediata`)
+          reconectarWhatsapp(`Estado: ${state}`).catch(console.error)
+          return
+        }
         console.warn(`[Watchdog] ⚠️ Estado: ${state}. Esperando próximo ciclo antes de reconectar.`)
-        ultimaActividad = Date.now()
         return
       }
 
