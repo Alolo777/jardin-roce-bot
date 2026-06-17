@@ -2195,6 +2195,13 @@ whatsappClient.on('ready', async () => {
     await supabaseAdmin.from('configuracion_agente').update({ qr_code: null }).eq('id', 1)
   } catch (err) { console.error('[bot] Error limpiando QR:', err) }
 
+  // 👇 Keepalive: enviar presencia cada 2min para evitar que WhatsApp Web se duerma o recargue
+  setInterval(() => {
+    if (whatsappClient?.sendPresenceAvailable) {
+      whatsappClient.sendPresenceAvailable().catch(() => {})
+    }
+  }, 2 * 60_000)
+
   // 👇 FIX MÁGICO: Ejecutar el rescate de mensajes justo al arrancar en limpio
   recuperarMensajesPerdidos().catch(err => console.error('[bot] Error recuperando:', err))
 
