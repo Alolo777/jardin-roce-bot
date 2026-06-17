@@ -389,6 +389,48 @@ export async function enviarAlertaVentaDelDia(
   await enviar(msg)
 }
 
+// ════════════════════════════════════════════════════════════════
+// 15. ENVIAR FOTO (BASE64) A TELEGRAM
+// ════════════════════════════════════════════════════════════════
+
+export async function enviarFotoTelegram(
+  base64: string,
+  caption: string,
+  mimetype = 'image/png'
+): Promise<void> {
+  if (!process.env.TELEGRAM_BOT_TOKEN || !CHAT_ID) {
+    console.warn('[Telegram] Variables no configuradas para foto.')
+    return
+  }
+
+  try {
+    const buf = Buffer.from(base64, 'base64')
+    const blob = new Blob([buf], { type: mimetype })
+    const form = new FormData()
+    form.append('chat_id', CHAT_ID)
+    form.append('photo', blob, `comprobante.${mimetype.includes('png') ? 'png' : 'jpg'}`)
+    form.append('caption', caption)
+    form.append('parse_mode', 'Markdown')
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15_000)
+
+    const res = await fetch(`${API_BASE}/sendPhoto`, {
+      method: 'POST',
+      body: form as any,
+      signal: controller.signal,
+    })
+    clearTimeout(timeout)
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      console.warn('[Telegram] Error sendPhoto:', JSON.stringify(err))
+    }
+  } catch (err) {
+    console.warn('[Telegram] Error enviando foto:', (err as Error).message)
+  }
+}
+
 // ── Export legacy ─────────────────────────────────────────────────────────────
 export async function enviarAlertaTelegram(datos: DatosVentaCerrada): Promise<void> {
   return enviarAlertaVentaCerrada(datos)

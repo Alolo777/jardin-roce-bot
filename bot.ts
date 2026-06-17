@@ -22,6 +22,7 @@ import {
   enviarAlertaAtencionHumana,
   enviarAlertaPedidoApartado,
   enviarAlertaZonaAmbigua,
+  enviarFotoTelegram,
 } from './lib/telegram'
 import { supabaseAdmin } from './lib/supabase'
 import type { MensajeChat } from './lib/ai'
@@ -304,8 +305,7 @@ function detectarEvento(texto: string): string | null {
 // VALIDACIÓN POST-AI DE PRECIOS
 // ════════════════════════════════════════════════════════════════
 
-function validarPreciosEnRespuesta(respuesta: string, arreglos: ArregloConFoto[]): { valido: boolean; advertencia?: string } {
-  // Extraer montos en formato $XXX del texto
+function validarPreciosEnRespuesta(respuesta: string, arreglos: ArregloConFoto[], envioPrecio?: number): { valido: boolean; advertencia?: string } {
   const preciosMencionados = respuesta.match(/\$\s*([\d,]+(?:\.\d{1,2})?)\s*MXN/g)
   if (!preciosMencionados) return { valido: true }
 
@@ -314,19 +314,23 @@ function validarPreciosEnRespuesta(respuesta: string, arreglos: ArregloConFoto[]
 
   for (const p of preciosConTexto) {
     const monto = parseFloat(p.replace(/[$,]\s*/g, '').replace(/,/g, ''))
-    // Si menciona un precio que no existe en inventario ni es $60 (precio general) ni es precio de envío
-    if (!preciosReales.has(monto) && monto !== 60 && !respuesta.includes('envío') && !respuesta.includes('Envío')) {
-      // Checar si está mencionando un arreglo específico con este precio
-      const contextoAlrededor = respuesta.substring(
-        Math.max(0, respuesta.indexOf(p) - 40),
-        Math.min(respuesta.length, respuesta.indexOf(p) + 40)
-      )
-      // Si el contexto incluye "desde" o "base", es un precio general, no un arreglo específico
-      if (contextoAlrededor.includes('desde') || contextoAlrededor.includes('base')) continue
-      return {
-        valido: false,
-        advertencia: `La IA mencionó el precio ${p} que no coincide con ningún arreglo disponible (${arreglos.map(a => `$${a.precio}`).join(', ')})`
-      }
+    // Si el precio coincide con algún arreglo, ok
+    if (preciosReales.has(monto)) continue
+    // Si es $60 (precio de envío general), ok
+    if (monto === 60) continue
+    // Si el texto menciona "envío", asumimos que es precio de envío
+    if (respuesta.includes('envío') || respuesta.includes('Envío')) continue
+    // Si el precio es ramo + envío (precio de arreglo + costo de envío), ok
+    if (envioPrecio && arreglos.some(a => a.precio + envioPrecio === monto)) continue
+
+    const contextoAlrededor = respuesta.substring(
+      Math.max(0, respuesta.indexOf(p) - 40),
+      Math.min(respuesta.length, respuesta.indexOf(p) + 40)
+    )
+    if (contextoAlrededor.includes('desde') || contextoAlrededor.includes('base')) continue
+    return {
+      valido: false,
+      advertencia: `La IA mencionó el precio ${p} que no coincide con ningún arreglo disponible (${arreglos.map(a => `$${a.precio}`).join(', ')})`
     }
   }
   return { valido: true }
@@ -1003,7 +1007,7 @@ async function buscarPrecioEnvio(texto: string): Promise<ResultadoEnvio | null> 
     const segundo = candidatos[1]
     if (mejor) {
       const match = mejor.municipio
-      const esMatchFuerte = mejor.score >= 120 || tieneDatoDireccion
+      const esMatchFuerte = mejor.score >= 180 || tieneDatoDireccion
       const ambiguo = segundo && Math.abs(mejor.score - segundo.score) < 10
       if (!esMatchFuerte || ambiguo) {
         console.warn(`[envio] Zona ambigua/no fuerte para "${texto}". Mejor=${match.zona} score=${mejor.score}`)
@@ -1612,7 +1616,8 @@ async function procesarMensaje(message: any): Promise<void> {
     // ── Validación post-AI de precios ─────────────────────────────
     const arreglosAI = await obtenerArreglosConFotos()
     if (arreglosAI.length > 0) {
-      const validacion = validarPreciosEnRespuesta(mensaje, arreglosAI)
+      const envioPrecio = PEDIDO_EN_CURSO.get(clienteId)?.envio?.precio
+      const validacion = validarPreciosEnRespuesta(mensaje, arreglosAI, envioPrecio)
       if (!validacion.valido) {
         console.warn(`[bot] ⚠️ ${validacion.advertencia}`)
       }
@@ -2388,7 +2393,44 @@ async function manejarMensajeEntrante(message: any): Promise<void> {
 
   if (message.type && message.type !== 'chat') {
     if (TIPOS_MEDIA_NO_SOPORTADOS.has(message.type)) {
-      message.reply('Por ahora solo puedo leer mensajes de *texto* 🌸. ¿Qué necesitas?').catch(() => {})
+      // Si el cliente está en proceso de compra y envía imagen (comprobante), cerrar venta
+      if (message.type === 'image' && (ARREGLO_ELEGIDO.has(clienteId) || PEDIDO_EN_CURSO.has(clienteId))) {
+        message.reply('¡Gracias! He recibido tu comprobante 🌸 Lo estoy registrando y notificando al equipo para que preparen tu pedido.').catch(() => {})
+        try {
+          const media = await message.downloadMedia()
+          if (media) {
+            const caption = `📸 *Comprobante de pago* — ${clienteId.replace(/@.*$/, '')}`
+            enviarFotoTelegram(media.data, caption, media.mimetype).catch(() => {})
+          }
+        } catch (e) {
+          console.warn('[bot] Error descargando media para Telegram:', e)
+        }
+        // Marcar venta como cerrada
+        const elegido = ARREGLO_ELEGIDO.get(clienteId) ?? PEDIDO_EN_CURSO.get(clienteId)?.arreglo
+        if (elegido && !VENTAS_CERRADAS.has(clienteId)) {
+          const numeroReal = await obtenerNumeroReal(message).catch(() => null)
+          const pedido = PEDIDO_EN_CURSO.get(clienteId)
+          const total = elegido.precio + (pedido?.envio?.precio ?? 0)
+          const totalTexto = pedido?.envio
+            ? `$${total.toFixed(2)} MXN (ramo $${elegido.precio.toFixed(2)} + envío $${pedido.envio.precio.toFixed(2)})`
+            : `$${total.toFixed(2)} MXN`
+          enviarAlertaVentaCerrada({
+            cliente: pedido?.nombre ?? 'Verificar en chat',
+            producto: elegido.nombre,
+            total: totalTexto,
+            direccion: pedido?.envio?.zona ?? 'Por confirmar',
+            numeroCliente: numeroReal ?? 'desconocido',
+            precioArreglo: `$${elegido.precio.toFixed(2)} MXN`,
+            precioEnvio: pedido?.envio
+              ? `$${pedido.envio.precio.toFixed(2)} MXN (${pedido.envio.zona})`
+              : undefined,
+            metodoPago: 'transferencia',
+          }).catch(err => console.error('[bot] Telegram venta img:', err))
+          VENTAS_CERRADAS.add(clienteId)
+        }
+      } else {
+        message.reply('Por ahora solo puedo leer mensajes de *texto* 🌸. ¿Qué necesitas?').catch(() => {})
+      }
     }
     return
   }

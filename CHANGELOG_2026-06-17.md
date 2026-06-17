@@ -57,6 +57,7 @@ message.reply → falló → chat.sendMessage → falló → whatsappClient.send
 | `01ae65c` | fix: third send fallback via whatsappClient.sendMessage, conditional ✅ Listo, watchdog auto-reconnect on UNPAIRED |
 | `e4b99e2` | fix: timeout 90s en initialize() + watchdog force-exit si reconexión atorada >3 min |
 | `12f7a91` | fix: refactor inicializarBot(), force-ready 120s, retry media con reintento 3x |
+| `913623d` | fix: envio score 180, validador tolera ramo+envio, imagen comprobante cierra venta + telegram |
 
 ---
 
@@ -99,3 +100,24 @@ message.reply → falló → chat.sendMessage → falló → whatsappClient.send
    - Dejar corriendo 30+ min
    - Sin recargas continuas ni UNPAIRED espontáneo
    - Los mensajes se responden sin errores de chat table
+
+---
+
+## Fixes adicionales (ronda 2)
+
+### g) Score de envío más estricto (120 → 180)
+- Se elevó el umbral `esMatchFuerte` de 120 a 180 en `buscarPrecioEnvio()`
+- **Problema que resuelve:** Zonas con score bajo (como "Cuaxomulco" con score 130) ahora se marcan como ambiguas y la AI pide más datos en vez de dar un precio incorrecto
+
+### h) Validador de precios tolera ramo + envío
+- `validarPreciosEnRespuesta()` ahora acepta un parámetro `envioPrecio` opcional
+- Si el monto mencionado = precio_arreglo + precio_envío, se considera válido
+- **Problema que resuelve:** IA decía "$310 MXN" ($260 ramo + $50 envío) y el validador lo marcaba como error, impidiendo apartar el arreglo
+
+### i) Imagen de comprobante cierra venta y se reenvía a Telegram
+- `enviarFotoTelegram()` en `lib/telegram.ts` — envía foto en base64 a Telegram via `sendPhoto`
+- Cuando un cliente en proceso de compra envía una imagen, el bot:
+  - Agradece y confirma registro del comprobante
+  - Descarga la imagen y la reenvía a Telegram con caption
+  - Marca la venta como cerrada con todos los datos del pedido
+- **Problema que resuelve:** Antes decía "solo puedo leer mensajes de texto" — ahora procesa comprobantes automáticamente
