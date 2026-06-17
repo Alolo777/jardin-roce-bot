@@ -1939,6 +1939,7 @@ const isProduction = process.platform === 'linux';
 const puppeteerArgs = isProduction ? [
   // Banderas extremas para sobrevivir en Google Cloud
   '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+  '--disable-gcm',
   '--disk-cache-size=0', '--media-cache-size=0', '--disable-application-cache',
   '--disable-gpu', '--disable-gpu-sandbox', '--use-gl=swiftshader',
   '--disable-accelerated-2d-canvas',
@@ -1952,7 +1953,7 @@ const puppeteerArgs = isProduction ? [
   '--no-first-run', '--no-default-browser-check', '--no-pings',
   '--password-store=basic', '--use-mock-keychain', '--metrics-recording-only',
   '--js-flags=--max-old-space-size=512',
-  '--disable-features=TranslateUI,BlinkGenPropertyTrees,AudioServiceOutOfProcess,AudioServiceSandbox',
+  '--disable-features=TranslateUI,BlinkGenPropertyTrees,AudioServiceOutOfProcess,AudioServiceSandbox,ChromeWhatsNew,ChromeWhatsNewUI,GoogleCloudMessaging',
   '--use-fake-device-for-media-stream',
   '--use-fake-ui-for-media-stream',
   '--disable-component-extensions-with-background-pages',
@@ -1976,7 +1977,7 @@ const whatsappClient = new Client({
   qrMaxRetries:  20,
   puppeteer: {
     headless:        true,
-    dumpio:          true, //Activar para ver logs detallados de Puppeteer
+    dumpio:          false, // Desactivado: en VM chica el stderr de Chromium (dbus/ALSA/GCM) satura Node.js
     executablePath:  process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     timeout:         120000,
     protocolTimeout: 600000, // 10 minutos de paciencia
