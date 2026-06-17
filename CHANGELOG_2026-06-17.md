@@ -57,7 +57,7 @@ message.reply → falló → chat.sendMessage → falló → whatsappClient.send
 | `01ae65c` | fix: third send fallback via whatsappClient.sendMessage, conditional ✅ Listo, watchdog auto-reconnect on UNPAIRED |
 | `e4b99e2` | fix: timeout 90s en initialize() + watchdog force-exit si reconexión atorada >3 min |
 | `12f7a91` | fix: refactor inicializarBot(), force-ready 120s, retry media con reintento 3x |
-| `913623d` | fix: envio score 180, validador tolera ramo+envio, imagen comprobante cierra venta + telegram |
+| `478cb8a` | fix: envio score 180, validador tolera ramo+envio, imagen comprobante cierra venta + telegram |
 
 ---
 
