@@ -56,7 +56,7 @@ message.reply → falló → chat.sendMessage → falló → whatsappClient.send
 | `b6dd863` | fix: detect zombie state faster after WA Web reload with page health check |
 | `01ae65c` | fix: third send fallback via whatsappClient.sendMessage, conditional ✅ Listo, watchdog auto-reconnect on UNPAIRED |
 | `e4b99e2` | fix: timeout 90s en initialize() + watchdog force-exit si reconexión atorada >3 min |
-| `93963ee` | fix: refactor inicializarBot(), force-ready 120s, retry media con reintento 3x |
+| `12f7a91` | fix: refactor inicializarBot(), force-ready 120s, retry media con reintento 3x |
 
 ---
 
