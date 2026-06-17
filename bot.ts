@@ -1938,7 +1938,7 @@ const isProduction = process.platform === 'linux';
 // 2. Asignamos las banderas según el sistema operativo
 const puppeteerArgs = isProduction ? [
   // Banderas extremas para sobrevivir en Google Cloud
-  '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process',
+  '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
   '--disk-cache-size=0', '--media-cache-size=0', '--disable-application-cache',
   '--disable-gpu', '--disable-gpu-sandbox', '--use-gl=swiftshader',
   '--disable-accelerated-2d-canvas',
