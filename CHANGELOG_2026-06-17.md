@@ -56,6 +56,7 @@ message.reply → falló → chat.sendMessage → falló → whatsappClient.send
 | `b6dd863` | fix: detect zombie state faster after WA Web reload with page health check |
 | `01ae65c` | fix: third send fallback via whatsappClient.sendMessage, conditional ✅ Listo, watchdog auto-reconnect on UNPAIRED |
 | `e4b99e2` | fix: timeout 90s en initialize() + watchdog force-exit si reconexión atorada >3 min |
+| `93963ee` | fix: refactor inicializarBot(), force-ready 120s, retry media con reintento 3x |
 
 ---
 
@@ -65,6 +66,18 @@ message.reply → falló → chat.sendMessage → falló → whatsappClient.send
 - Watchdog verifica: si `BOT_RECONNECTING` lleva **>3 min activo**, fuerza `process.exit(1)` (en ambos lugares donde antes ignoraba el estado)
 - `RECONNECT_START` se resetea al reconectar exitosamente o al fallar
 - **Problema que resuelve:** Bot quedaba atorado para siempre en "Reconexión/recarga en curso — esperando..." porque `initialize()` colgaba sin resolver (por RAM insuficiente en e2-micro) y el watchdog no tenía timeout
+
+### e) Refactor: extraer `inicializarBot()` + force-ready si `ready` no llega (fix #3)
+- El evento `ready` de whatsapp-web.js es **intermitente**: a veces el estado es CONNECTED pero `ready` nunca se dispara
+- Se extrajo toda la lógica de inicialización a `inicializarBot(origen)` — llamada desde `ready` Y desde el startup watchdog
+- Startup watchdog: si tras **120s CONNECTED sin `ready`**, fuerza `inicializarBot('forzado')` automáticamente
+- **Problema que resuelve:** Antes el bot esperaba 600s y reiniciaba en ciclo infinito si `ready` no llegaba — ahora opera aunque `ready` nunca dispare
+
+### f) Retry al enviar fotos con `enviarMediaConReintento()` (fix #4)
+- Nueva función con hasta 3 intentos y backoff progresivo (3s, 6s)
+- Captura específica del error `"media entry was not created"` que ocurría cuando WhatsApp Web no estaba listo
+- Los errores de recarga/contexto destruido siguen abortando el lote inmediatamente
+- **Problema que resuelve:** `Error enviando "Ramo 3 girasoles": upload failed: media entry was not created` — ahora reintenta y eventualmente funciona
 
 ---
 

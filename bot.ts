@@ -1112,21 +1112,12 @@ async function enviarFotosArreglos(client: Client, chatId: string, arreglos: Arr
       break
     }
     if (!r.ok) continue
-    try {
-      const caption =
-        `💐 *${r.arreglo.nombre}*\n💰 $${r.arreglo.precio.toFixed(2)} MXN` +
-        (r.arreglo.descripcion ? `\n📝 ${r.arreglo.descripcion}` : '')
-      await client.sendMessage(chatId, r.media, { caption })
-      enviadas++
-      await new Promise(res => setTimeout(res, 200))
-    } catch (err) {
-      const errStr = String(err)
-      if (errStr.includes('Execution context was destroyed') || errStr.includes('Target closed')) {
-        console.warn(`[bot] ⚠️ Recarga durante envío de fotos a ${chatId}. Abortando lote.`)
-        break
-      }
-      console.error(`[bot] Error enviando "${r.arreglo.nombre}":`, err)
-    }
+    const caption =
+      `💐 *${r.arreglo.nombre}*\n💰 $${r.arreglo.precio.toFixed(2)} MXN` +
+      (r.arreglo.descripcion ? `\n📝 ${r.arreglo.descripcion}` : '')
+    await enviarMediaConReintento(chatId, r.media, caption, r.arreglo.nombre)
+    enviadas++
+    await new Promise(res => setTimeout(res, 200))
   }
 
   return enviadas
@@ -1135,6 +1126,32 @@ async function enviarFotosArreglos(client: Client, chatId: string, arreglos: Arr
 // ════════════════════════════════════════════════════════════════
 // UTILIDADES
 // ════════════════════════════════════════════════════════════════
+
+async function enviarMediaConReintento(
+  chatId: string, media: any, caption: string, nombreArreglo: string, reintentos = 3
+): Promise<void> {
+  const MAX_RETRIES = reintentos
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    try {
+      await whatsappClient.sendMessage(chatId, media, { caption })
+      return
+    } catch (err) {
+      const errStr = String(err)
+      if (errStr.includes('Execution context was destroyed') || errStr.includes('Target closed')) {
+        console.warn(`[bot] ⚠️ Recarga durante envío de fotos a ${chatId}. Abortando lote.`)
+        throw err
+      }
+      if (errStr.includes('media entry was not created') && i < MAX_RETRIES - 1) {
+        const wait = (i + 1) * 3_000
+        console.warn(`[bot] ⚠️ Reintento ${i + 1}/${MAX_RETRIES - 1} enviando "${nombreArreglo}" en ${wait}ms...`)
+        await new Promise(r => setTimeout(r, wait))
+        continue
+      }
+      console.error(`[bot] Error enviando "${nombreArreglo}":`, err)
+      return
+    }
+  }
+}
 
 function limpiarRespuestaIA(texto: string): string {
   return texto
@@ -2157,13 +2174,14 @@ whatsappClient.on('qr', async (qr) => {
   enviarAlertaQr()
 })
 
-whatsappClient.on('ready', async () => {
+async function inicializarBot(origen: 'ready' | 'forzado'): Promise<void> {
+  if (BOT_READY) return
   BOT_READY = true
   BOT_RECONNECTING = false
   RECONNECT_START = 0
-  actualizarEstadoBot('conectado', 'WhatsApp conectado')
+  actualizarEstadoBot('conectado', `WhatsApp conectado (${origen})`)
   publicarEstadoBot().catch(err => console.warn('[bot] No se pudo publicar estado ready:', err))
-  console.log('\n✅ Bot de Jardín RoCe conectado!')
+  console.log(`\n✅ Bot de Jardín RoCe conectado! (${origen})`)
   console.log('🌸 Flora está escuchando...\n')
   ultimaActividad = Date.now()
   if (BOT_QR_EMITIDO) enviarAlertaReconectado()
@@ -2220,7 +2238,7 @@ whatsappClient.on('ready', async () => {
       // ZOMBIE DETECTION: conectado pero sin mensajes por mucho tiempo en horario laboral.
       if (minSinMensajes >= 45 && estaEnHorario()) {
         console.error(`[Watchdog] 🧟 ESTADO ZOMBIE detectado: ${minSinMensajes} min sin mensajes en horario laboral. getState()=CONNECTED pero hooks muertos.`)
-        process.exit(1) // systemd Restart=always lo levanta limpio
+        process.exit(1)
         return
       }
 
@@ -2262,23 +2280,7 @@ whatsappClient.on('ready', async () => {
     }
   }, 2 * 60_000)
 
-  // 👇 FIX MÁGICO: Ejecutar el rescate de mensajes justo al arrancar en limpio
-  recuperarMensajesPerdidos().catch(err => console.error('[bot] Error recuperando:', err))
-
-  async function verificarPaginaViva(): Promise<boolean> {
-    try {
-      const page = whatsappClient?.pupPage
-      if (!page) return false
-      const resultado = await Promise.race([
-        page.evaluate(() => typeof window !== 'undefined' && !!navigator.onLine),
-        new Promise<false>((_, reject) => setTimeout(() => reject(new Error('timeout')), 15_000)),
-      ])
-      return resultado === true
-    } catch {
-      return false
-    }
-  }
-
+  // 👇 Registrar listener de recarga de página
   try {
     const page = whatsappClient.pupPage
     if (page) {
@@ -2293,7 +2295,6 @@ whatsappClient.on('ready', async () => {
         }
         CONTADOR_RECARGAS_WEB++
         console.warn(`[bot] 🔄 WhatsApp Web navegó/recargó (${CONTADOR_RECARGAS_WEB}/${MAX_RECARGAS_WEB})`)
-        // Verificar si la página quedó funcional después de la recarga
         setTimeout(async () => {
           const viva = await verificarPaginaViva()
           if (!viva) {
@@ -2304,7 +2305,6 @@ whatsappClient.on('ready', async () => {
           }
           console.log(`[bot] Página respira OK tras recarga`)
           ultimaActividad = Date.now()
-          // Si estaba zombie, rescatamos mensajes perdidos
           recuperarMensajesPerdidos().catch(() => {})
         }, 10_000)
         if (CONTADOR_RECARGAS_WEB >= MAX_RECARGAS_WEB) {
@@ -2315,7 +2315,26 @@ whatsappClient.on('ready', async () => {
       })
     }
   } catch (err) { console.warn('[bot] No se pudo registrar framenavigated:', err) }
-})
+
+  // 👇 Ejecutar el rescate de mensajes justo al arrancar en limpio
+  recuperarMensajesPerdidos().catch(err => console.error('[bot] Error recuperando:', err))
+}
+
+whatsappClient.on('ready', () => inicializarBot('ready').catch(console.error))
+
+async function verificarPaginaViva(): Promise<boolean> {
+  try {
+    const page = whatsappClient?.pupPage
+    if (!page) return false
+    const resultado = await Promise.race([
+      page.evaluate(() => typeof window !== 'undefined' && !!navigator.onLine),
+      new Promise<false>((_, reject) => setTimeout(() => reject(new Error('timeout')), 15_000)),
+    ])
+    return resultado === true
+  } catch {
+    return false
+  }
+}
 
 whatsappClient.on('auth_failure', (msg) => { console.error('❌ Auth:', msg); registrarCrash(); process.exit(1) })
 
@@ -2412,6 +2431,7 @@ console.log('🌸 Iniciando bot de Jardín RoCe...')
 const BOT_START_TIME = Date.now()
 const STARTUP_WARN_SECONDS = 180
 const STARTUP_RESTART_SECONDS = 600
+const STARTUP_FORCE_READY_SECONDS = 120
 let BOT_READY = false
 
 const startupWatchdog = setInterval(() => {
@@ -2435,7 +2455,20 @@ const startupWatchdog = setInterval(() => {
       .catch(err => console.warn(`[Startup] Error getState:`, err))
   }
 
-  if (elapsed > STARTUP_RESTART_SECONDS) {
+  // FIX: si la sesión ya está CONNECTED pero ready no ha llegado, forzar inicialización
+  if (elapsed > STARTUP_FORCE_READY_SECONDS && !BOT_READY && !BOT_QR_EMITIDO) {
+    whatsappClient.getState()
+      .then(async (state) => {
+        if (state === 'CONNECTED' && !BOT_READY) {
+          console.warn(`[Startup] ⚡ ${elapsed}s CONNECTED sin "ready" — forzando init...`)
+          clearInterval(startupWatchdog)
+          await inicializarBot('forzado')
+        }
+      })
+      .catch(() => {})
+  }
+
+  if (elapsed > STARTUP_RESTART_SECONDS && !BOT_READY) {
     // Forzar reconexión completa
     clearInterval(startupWatchdog)
     reiniciarProceso(`${elapsed}s sin "ready" ni QR`)
