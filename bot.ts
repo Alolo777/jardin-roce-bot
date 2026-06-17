@@ -2161,8 +2161,29 @@ whatsappClient.on('ready', async () => {
         return
       }
 
+      // ZOMBIE DETECTION: verificar que la página esté realmente viva
+      if (minSinMensajes >= 5) {
+        try {
+          const page = whatsappClient?.pupPage
+          if (page) {
+            const viva = await Promise.race([
+              page.evaluate(() => typeof window !== 'undefined' && !!navigator.onLine),
+              new Promise<false>((_, reject) => setTimeout(() => reject(new Error('timeout')), 10_000)),
+            ])
+            if (!viva) {
+              console.error(`[Watchdog] 🧟 Página no responde — forzando reinicio`)
+              process.exit(1)
+              return
+            }
+          }
+        } catch {
+          console.error(`[Watchdog] 🧟 Error verificando página — forzando reinicio`)
+          process.exit(1)
+          return
+        }
+      }
+
       // ZOMBIE DETECTION: conectado pero sin mensajes por mucho tiempo en horario laboral.
-      // En VM chica WhatsApp Web puede tardar en estabilizarse; 15 min era demasiado agresivo.
       if (minSinMensajes >= 45 && estaEnHorario()) {
         console.error(`[Watchdog] 🧟 ESTADO ZOMBIE detectado: ${minSinMensajes} min sin mensajes en horario laboral. getState()=CONNECTED pero hooks muertos.`)
         process.exit(1) // systemd Restart=always lo levanta limpio
@@ -2186,7 +2207,7 @@ whatsappClient.on('ready', async () => {
         process.exit(1)
       }
     }
-  }, 5 * 60_000)
+  }, 2 * 60_000)
   WATCHDOG_INICIADO = true
 
   BOT_QR_ACTUAL = null
@@ -2205,6 +2226,20 @@ whatsappClient.on('ready', async () => {
   // 👇 FIX MÁGICO: Ejecutar el rescate de mensajes justo al arrancar en limpio
   recuperarMensajesPerdidos().catch(err => console.error('[bot] Error recuperando:', err))
 
+  async function verificarPaginaViva(): Promise<boolean> {
+    try {
+      const page = whatsappClient?.pupPage
+      if (!page) return false
+      const resultado = await Promise.race([
+        page.evaluate(() => typeof window !== 'undefined' && !!navigator.onLine),
+        new Promise<false>((_, reject) => setTimeout(() => reject(new Error('timeout')), 15_000)),
+      ])
+      return resultado === true
+    } catch {
+      return false
+    }
+  }
+
   try {
     const page = whatsappClient.pupPage
     if (page) {
@@ -2219,6 +2254,20 @@ whatsappClient.on('ready', async () => {
         }
         CONTADOR_RECARGAS_WEB++
         console.warn(`[bot] 🔄 WhatsApp Web navegó/recargó (${CONTADOR_RECARGAS_WEB}/${MAX_RECARGAS_WEB})`)
+        // Verificar si la página quedó funcional después de la recarga
+        setTimeout(async () => {
+          const viva = await verificarPaginaViva()
+          if (!viva) {
+            console.error(`[bot] Página no responde tras recarga — forzando reconexión`)
+            CONTADOR_RECARGAS_WEB = 0
+            reconectarWhatsapp('Página muerta tras recarga').catch(console.error)
+            return
+          }
+          console.log(`[bot] Página respira OK tras recarga`)
+          ultimaActividad = Date.now()
+          // Si estaba zombie, rescatamos mensajes perdidos
+          recuperarMensajesPerdidos().catch(() => {})
+        }, 10_000)
         if (CONTADOR_RECARGAS_WEB >= MAX_RECARGAS_WEB) {
           console.error(`[bot] 🔄 Demasiadas recargas (${CONTADOR_RECARGAS_WEB}) — forzando reconexión`)
           CONTADOR_RECARGAS_WEB = 0
