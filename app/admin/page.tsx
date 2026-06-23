@@ -6,10 +6,10 @@ import QrSection from '@/componets/admin/QrSection'
 
 const FEATURES = [
   {
-    href: '/admin/inventario',
-    icon: '🌸',
-    title: 'Inventario del Día',
-    desc: 'Sube fotos, asigna precios y actualiza el catálogo que Flora ofrece hoy a tus clientes.',
+    href: '/admin/empleados',
+    icon: '👥',
+    title: 'Empleados',
+    desc: 'Gestiona los números de WhatsApp que recibirán avisos cuando un cliente pida fotos o cotización.',
     gradient: 'from-rose-400 to-pink-400',
     shadow: 'shadow-rose-200/40',
   },

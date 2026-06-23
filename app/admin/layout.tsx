@@ -149,8 +149,8 @@ function QrDisplay() {
 
 const NAV_LINKS = [
   { href: '/admin', label: 'Dashboard', icon: '📊' },
-  { href: '/admin/inventario', label: 'Inventario', icon: '🌷' },
   { href: '/admin/prompt', label: 'Cerebro', icon: '🧠' },
+  { href: '/admin/empleados', label: 'Empleados', icon: '👥' },
   { href: '/admin/ignorados', label: 'Silenciados', icon: '🔇' },
 ]
 

@@ -201,30 +201,3 @@ export async function getAIResponse(
   }
 }
 
-// ─── Obtener inventario diario de Supabase ───────────────────────────────────
-export async function obtenerInventarioDiario(): Promise<string> {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('arreglos_diarios')
-      .select('nombre, descripcion, precio, foto_url')
-      .eq('estado', 'disponible')
-      .order('creado_en', { ascending: false })
-
-    if (error) throw error
-
-    if (!data || data.length === 0) {
-      return 'Hoy no tenemos arreglos armados disponibles para entrega inmediata.'
-    }
-
-    return data
-      .map((a, i) =>
-        `${i + 1}. ${a.nombre} — $${a.precio} MXN` +
-        (a.descripcion ? `\n   Descripción: ${a.descripcion}` : '') +
-        `\n   Foto: ${a.foto_url}`
-      )
-      .join('\n\n')
-  } catch (error) {
-    console.error('[ai.ts] Error al obtener inventario diario:', error)
-    return 'No pude consultar el inventario en este momento.'
-  }
-}

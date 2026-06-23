@@ -1,14 +1,3 @@
-export interface ArregloDiario {
-  id: string
-  nombre: string
-  descripcion: string | null
-  precio: number
-  foto_url: string
-  estado: 'disponible' | 'apartado' | 'vendido'
-  creado_en: string
-  actualizado_en: string
-}
-
 export interface VentaCerrada {
   cliente: string
   producto: string

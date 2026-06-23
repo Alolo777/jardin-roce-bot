@@ -1,7 +1,7 @@
 // bot.ts — Jardín RoCe 🌸
 // Optimizado para GCP e2-micro (1GB RAM) con systemd
 
-import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js'
+import { Client, LocalAuth } from 'whatsapp-web.js'
 import qrcode from 'qrcode-terminal'
 import dotenv from 'dotenv'
 
@@ -137,27 +137,11 @@ async function agregarAlHistorial(telefono: string, role: 'user' | 'assistant', 
 }
 
 // ════════════════════════════════════════════════════════════════
-// CONTROL DE FOTOS ENVIADAS
+// DEDUPLICACIÓN DE MENSAJES
 // ════════════════════════════════════════════════════════════════
 
-const FOTOS_ENVIADAS_HOY = new Map<string, number>()
-const MAX_ENVIOS_FOTOS_DIA = 3
 const MENSAJES_PROCESADOS = new Map<string, number>()
 const MENSAJE_PROCESADO_TTL_MS = 2 * 60 * 60_000
-
-function enviosFotosRestantes(id: string): number {
-  return Math.max(0, MAX_ENVIOS_FOTOS_DIA - (FOTOS_ENVIADAS_HOY.get(id) ?? 0))
-}
-
-function puedeEnviarFotos(id: string): boolean { return enviosFotosRestantes(id) > 0 }
-
-function marcarFotosEnviadas(id: string): void {
-  FOTOS_ENVIADAS_HOY.set(id, (FOTOS_ENVIADAS_HOY.get(id) ?? 0) + 1)
-  const manana = new Date()
-  manana.setDate(manana.getDate() + 1)
-  manana.setHours(0, 0, 0, 0)
-  setTimeout(() => FOTOS_ENVIADAS_HOY.delete(id), manana.getTime() - Date.now())
-}
 
 const MENSAJES_RESCATADOS = new Set<string>()
 
@@ -363,40 +347,7 @@ async function notificarEmpleadosWhatsApp(mensaje: string): Promise<void> {
   }
 }
 
-// ════════════════════════════════════════════════════════════════
-// VALIDACIÓN POST-AI DE PRECIOS
-// ════════════════════════════════════════════════════════════════
 
-function validarPreciosEnRespuesta(respuesta: string, arreglos: ArregloConFoto[], envioPrecio?: number): { valido: boolean; advertencia?: string } {
-  const preciosMencionados = respuesta.match(/\$\s*([\d,]+(?:\.\d{1,2})?)\s*MXN/g)
-  if (!preciosMencionados) return { valido: true }
-
-  const preciosReales = new Set(arreglos.map(a => a.precio))
-  const preciosConTexto = respuesta.match(/\$\s*([\d,]+(?:\.\d{1,2})?)\s*MXN/g) || []
-
-  for (const p of preciosConTexto) {
-    const monto = parseFloat(p.replace(/[$,]\s*/g, '').replace(/,/g, ''))
-    // Si el precio coincide con algún arreglo, ok
-    if (preciosReales.has(monto)) continue
-    // Si es $60 (precio de envío general), ok
-    if (monto === 60) continue
-    // Si el texto menciona "envío", asumimos que es precio de envío
-    if (respuesta.includes('envío') || respuesta.includes('Envío')) continue
-    // Si el precio es ramo + envío (precio de arreglo + costo de envío), ok
-    if (envioPrecio && arreglos.some(a => a.precio + envioPrecio === monto)) continue
-
-    const contextoAlrededor = respuesta.substring(
-      Math.max(0, respuesta.indexOf(p) - 40),
-      Math.min(respuesta.length, respuesta.indexOf(p) + 40)
-    )
-    if (contextoAlrededor.includes('desde') || contextoAlrededor.includes('base')) continue
-    return {
-      valido: false,
-      advertencia: `La IA mencionó el precio ${p} que no coincide con ningún arreglo disponible (${arreglos.map(a => `$${a.precio}`).join(', ')})`
-    }
-  }
-  return { valido: true }
-}
 
 // ════════════════════════════════════════════════════════════════
 // DETECCIÓN DE FRUSTRACIÓN
@@ -440,47 +391,7 @@ function debeNotificarAtencionHumana(clienteId: string): boolean {
   return true
 }
 
-// ════════════════════════════════════════════════════════════════
-// UTILIDAD: Encontrar mejor coincidencia de arreglo en texto
-// ════════════════════════════════════════════════════════════════
 
-function encontrarMejorCoincidencia(texto: string, arreglos: ArregloConFoto[]): { arreglo: ArregloConFoto; score: number } | null {
-  const textoLower = normalizarTexto(texto)
-
-  // 1. Por precio exacto
-  const precioMatch = texto.match(/\$\s*([\d,]+(?:\.\d{1,2})?)/)
-  if (precioMatch) {
-    const precio = parseFloat(precioMatch[1].replace(/,/g, ''))
-    const exacto = arreglos.find(a => Math.abs(a.precio - precio) < 0.01)
-    if (exacto) return { arreglo: exacto, score: 999 }
-  }
-
-  // 2. Por palabras del nombre (scoring)
-  const STOP_MATCH_ARREGLOS = new Set([
-    'ramo', 'ramos', 'arreglo', 'arreglos', 'bouquet', 'flor', 'flores',
-    'este', 'esta', 'ese', 'esa', 'bien', 'chido', 'padre', 'bonito', 'bonita',
-    'gusto', 'gustaria', 'quiero', 'porfavor', 'favor', 'mucho', 'uno', 'una',
-  ])
-  const palabrasCliente = textoLower
-    .split(/\s+/)
-    .map(p => p.replace(/[^a-z0-9]/g, ''))
-    .filter(p => p.length > 2 && !STOP_MATCH_ARREGLOS.has(p))
-  if (palabrasCliente.length === 0) return null
-
-  let mejor = { arreglo: arreglos[0], score: 0 }
-  for (const a of arreglos) {
-    const palabrasArreglo = normalizarTexto(a.nombre)
-      .split(/\s+/)
-      .map(p => p.replace(/[^a-z0-9]/g, ''))
-      .filter(p => p.length > 2 && !STOP_MATCH_ARREGLOS.has(p))
-    const score = palabrasCliente.filter(pc =>
-      palabrasArreglo.some(pa => pa.includes(pc) || pc.includes(pa))
-    ).length
-    if (score > mejor.score) mejor = { arreglo: a, score }
-  }
-
-  return mejor.score >= 2 ? mejor : null
-}
 
 // ════════════════════════════════════════════════════════════════
 // PAUSA DEL BOT
@@ -554,7 +465,6 @@ setInterval(() => {
   if (rss > 440) {
     console.warn('[RAM] ⚠️ Memoria alta — limpiando...')
     CACHE_CLIENTE_UUID.clear()
-    FOTOS_ENVIADAS_HOY.clear()
     CACHE_NUMEROS.clear()
     FRUSTRACION_NOTIFICADA.clear()
     RATE_TIMESTAMPS.clear()
@@ -788,14 +698,6 @@ function parsearPedidoCotizador(texto: string): PedidoWebParseado {
   }
 }
 
-// ════════════════════════════════════════════════════════════════
-// FOTOS PENDIENTES (cuando la IA pregunta "¿quieres ver?")
-// ════════════════════════════════════════════════════════════════
-
-const FOTOS_PENDIENTES = new Map<string, { arreglos: ArregloConFoto[] }>()
-const ULTIMOS_ARREGLOS = new Map<string, ArregloConFoto[]>()
-const FOTOS_ENVIANDO = new Set<string>()
-const FOTOS_CANCELADAS = new Set<string>()
 const VENTAS_CERRADAS  = new Set<string>()
 const VENTA_ACTUAL     = new Map<string, VentaCerrada>()
 const ARREGLO_ELEGIDO  = new Map<string, ArregloConFoto>()
@@ -868,7 +770,6 @@ async function registrarZonaAmbigua(texto: string, telefono: string | null, cand
 function resetearPedidoCliente(clienteId: string): void {
   PEDIDO_EN_CURSO.delete(clienteId)
   ARREGLO_ELEGIDO.delete(clienteId)
-  FOTOS_PENDIENTES.delete(clienteId)
   VENTAS_CERRADAS.delete(clienteId)
   VENTA_ACTUAL.delete(clienteId)
 }
@@ -907,26 +808,12 @@ function tieneArregloVerificado(clienteId: string): boolean {
 // DETECCIÓN DE INTENCIÓN
 // ════════════════════════════════════════════════════════════════
 
-const KW_INVENTARIO = [
-  'disponible', 'disponibles', 'armado', 'armados',
-  'tienes hoy', 'hay hoy', 'entrega inmediata', 'para hoy',
-  'que tienes', 'que tienen', 'tienen algo', 'hay algo',
-  'ramitos', 'que ramitos', 'que ramos', 'ramos de hoy',
-  'tienen hoy', 'hoy tienen', 'muestrame', 'muéstrame',
-  'fotos', 'foto', 'ver ramos', 'ver arreglos',
-  'verlos', 'verlas', 'averlos', 'averlas', 'a verlos', 'a verlas',
-  'si aver', 'sí aver', 'si a ver', 'sí a ver',
-  'mandar de nuevo', 'manda de nuevo', 'mandamelas de nuevo', 'mándamelas de nuevo',
-  'enviame fotos', 'envíame fotos', 'manda fotos', 'mandame fotos',
-]
 
 const KW_CATALOGO = [
   'catalogo', 'catálogo', 'drive', 'ver mas', 'ver más',
   'mas opciones', 'más opciones', 'otros ramos', 'que mas tienen', 'que más tienen',
 ]
 
-// FIX: eliminado 'precio', 'qué precio', 'que precio', 'cuanto sale' — demasiado genéricos
-// y causaban Telegram spam cuando preguntaban por el precio de arreglos del día
 const KW_COTIZADOR = [
   'cotizar', 'cotizacion', 'cotización', 'cuanto cuesta', 'cuánto cuesta',
   'cuanto vale', 'cuánto vale', 'precio de un ramo', 'hacer un ramo',
@@ -934,55 +821,29 @@ const KW_COTIZADOR = [
   'tienen web', 'tienes web', 'pagina', 'página', 'diseñar',
 ]
 
-function detectarIntencion(texto: string, clienteId: string): 'inventario' | 'catalogo' | 'cotizador' | 'normal' {
+function detectarIntencion(texto: string, clienteId: string): 'catalogo' | 'cotizador' | 'normal' {
   const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-
-  if (/ya no quiero fotos|no quiero fotos|sin fotos/.test(n)) return 'normal'
-
-  if (ULTIMOS_ARREGLOS.has(clienteId) && /(me gusto|me gustaria|quiero|aparta|apartes|ramo de|el de|la segunda foto|segunda foto|primer foto|primera foto|tercer foto|tercera foto|lily|lilys|girasol|hortencia|hortensia)/.test(n) && !/(ver|manda|mandar|envia|enviar|reenviar).{0,15}foto/.test(n)) {
-    return 'normal'
-  }
 
   if (/foto.*(entrega|entreguen|entregado|repartidor)|comprobante.*entrega|cuando.*entreguen/.test(n)) {
     return 'normal'
   }
 
   if (VENTAS_CERRADAS.has(clienteId)) {
-    // Cliente ya compró — no ofrecer inventario ni fotos
     return 'normal'
   }
 
-  if (FOTOS_PENDIENTES.has(clienteId)) {
-    const esAfirmativo = /^(s[ií]+|si+|ok|dale|va|quiero|enseñame|muestra|ci|claro|por favor|porfavor|sip|sii+|ándale|andele|yes|adelante|manda|mandame|envía|enviame|oka+s?|hí|súbelas|súbelos|muéstralos)/i.test(n.trim())
-    if (esAfirmativo) {
-      console.log(`[bot] ✅ Afirmativo detectado para fotos pendientes de ${clienteId}`)
-      return 'inventario'
-    }
-  }
-
-  if (KW_INVENTARIO.some(k => n.includes(k))) return 'inventario'
   if (KW_CATALOGO.some(k => n.includes(k)))   return 'catalogo'
   if (KW_COTIZADOR.some(k => n.includes(k)))  return 'cotizador'
   return 'normal'
 }
 
 // ════════════════════════════════════════════════════════════════
-// ARREGLOS DEL DÍA
+// TIPOS DE ARREGLO
 // ════════════════════════════════════════════════════════════════
 
 interface ArregloConFoto {
   id: string; nombre: string; precio: number
   descripcion: string | null; foto_url: string
-}
-
-async function obtenerArreglosConFotos(): Promise<ArregloConFoto[]> {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('arreglos_diarios').select('id, nombre, precio, descripcion, foto_url')
-      .eq('estado', 'disponible').order('creado_en', { ascending: false })
-    if (error) throw error
-    return data ?? []
-  } catch (err) { console.error('[bot] Error obteniendo arreglos:', err); return [] }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1111,115 +972,9 @@ function formatearZonasParaPrompt(zonas: ZonaEnvioData[]): string {
   return zonas.map(z => `- ${z.zona}: $${z.precio.toFixed(2)} MXN (${z.palabras_clave})`).join('\n')
 }
 
-async function apartarArreglo(nombreProducto: string, numeroCliente: string): Promise<void> {
-  try {
-    const prodSeguro = nombreProducto ? String(nombreProducto).trim() : 'Desconocido'
-    console.log(`[bot] 🔍 Buscando en DB: "${prodSeguro}"`)
 
-    const { data: arreglos, error } = await supabaseAdmin
-      .from('arreglos_diarios').select('id, nombre, precio, estado').in('estado', ['disponible', 'apartado'])
 
-    if (error) { console.error('[bot] ❌ Error DB:', error.message); return }
-    if (!arreglos?.length) { console.log('[bot] ⚠️ No hay arreglos disponibles.'); return }
 
-    const quitarEmojis = (s: string) => s.replace(/[\u{1F300}-\u{1F9FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}]/gu, '').trim()
-    const norm     = (s: string) => quitarEmojis(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
-    const normProd = norm(prodSeguro)
-    const normPals = normProd.split(/\s+/).filter(Boolean)
-
-    let match: { id: string; nombre: string; precio: number; estado: string } | undefined
-    for (const a of arreglos) {
-      const n = norm(a.nombre)
-      if (n === normProd) { match = a; break }
-    }
-    if (!match) {
-      for (const a of arreglos) {
-        const n = norm(a.nombre)
-        if (n.includes(normProd) || normProd.includes(n)) { match = a; break }
-      }
-    }
-    const palabrasClave = normPals.filter(p => !['ramo', 'ramos', 'arreglo', 'arreglos', 'bouquet', 'flor', 'flores'].includes(p))
-    if (!match && palabrasClave.length >= 2) {
-      for (const a of arreglos) {
-        const n = norm(a.nombre)
-        const aciertos = palabrasClave.filter(p => n.includes(p))
-        if (aciertos.length >= Math.ceil(palabrasClave.length * 0.75)) { match = a; break }
-      }
-    }
-
-    if (match) {
-      if (match.estado !== 'apartado') {
-        const { error: updateError } = await supabaseAdmin
-          .from('arreglos_diarios').update({ estado: 'apartado' }).eq('id', match.id)
-        if (updateError) throw updateError
-      }
-      console.log(`[bot] 📦 "${match.nombre}" → apartado`)
-      enviarAlertaArregloApartado(match.nombre, match.precio, numeroCliente)
-        .catch(err => console.error('[bot] Telegram apartado:', err))
-    } else {
-      console.warn(`[bot] ⚠️ Sin match para "${prodSeguro}". Disponibles:`, arreglos.map(a => a.nombre).join(', '))
-    }
-  } catch (err) { console.error('[bot] Error apartando:', err) }
-}
-
-async function enviarFotosArreglos(client: Client, chatId: string, arreglos: ArregloConFoto[]): Promise<number> {
-  if (!arreglos.length) return 0
-
-  const resultados = await Promise.all(
-    arreglos.map(a =>
-      MessageMedia.fromUrl(a.foto_url, { unsafeMime: true })
-        .then(media => ({ ok: true as const, media, arreglo: a }))
-        .catch(() => ({ ok: false as const, arreglo: a }))
-    )
-  )
-
-  let enviadas = 0
-  for (const r of resultados) {
-    if (FOTOS_CANCELADAS.has(chatId)) {
-      console.log(`[bot] 🛑 Envío de fotos cancelado por cliente: ${chatId}`)
-      break
-    }
-    if (!r.ok) continue
-    const caption =
-      `💐 *${r.arreglo.nombre}*\n💰 $${r.arreglo.precio.toFixed(2)} MXN` +
-      (r.arreglo.descripcion ? `\n📝 ${r.arreglo.descripcion}` : '')
-    await enviarMediaConReintento(chatId, r.media, caption, r.arreglo.nombre)
-    enviadas++
-    await new Promise(res => setTimeout(res, 200))
-  }
-
-  return enviadas
-}
-
-// ════════════════════════════════════════════════════════════════
-// UTILIDADES
-// ════════════════════════════════════════════════════════════════
-
-async function enviarMediaConReintento(
-  chatId: string, media: any, caption: string, nombreArreglo: string, reintentos = 3
-): Promise<void> {
-  const MAX_RETRIES = reintentos
-  for (let i = 0; i < MAX_RETRIES; i++) {
-    try {
-      await whatsappClient.sendMessage(chatId, media, { caption })
-      return
-    } catch (err) {
-      const errStr = String(err)
-      if (errStr.includes('Execution context was destroyed') || errStr.includes('Target closed')) {
-        console.warn(`[bot] ⚠️ Recarga durante envío de fotos a ${chatId}. Abortando lote.`)
-        throw err
-      }
-      if (errStr.includes('media entry was not created') && i < MAX_RETRIES - 1) {
-        const wait = (i + 1) * 3_000
-        console.warn(`[bot] ⚠️ Reintento ${i + 1}/${MAX_RETRIES - 1} enviando "${nombreArreglo}" en ${wait}ms...`)
-        await new Promise(r => setTimeout(r, wait))
-        continue
-      }
-      console.error(`[bot] Error enviando "${nombreArreglo}":`, err)
-      return
-    }
-  }
-}
 
 function limpiarRespuestaIA(texto: string): string {
   return texto
@@ -1322,26 +1077,11 @@ async function procesarMensaje(message: any): Promise<void> {
     }
 
     // ── Detección de reply (quote) ────────────────────────────────
-    let arregloReferenciado: ArregloConFoto | null = null
     let textoCitado = ''
     if (message.hasQuotedMsg) {
       try {
         const quoted = await message.getQuotedMessage()
         textoCitado = (quoted?.caption || quoted?.body || '').trim()
-        // Intentar emparejar con foto mostrada
-        if (textoCitado) {
-          const ultimosArreglos = ULTIMOS_ARREGLOS.get(clienteId) ?? []
-          const match = ultimosArreglos.find(a =>
-            textoCitado.includes(a.nombre) ||
-            textoCitado.includes(a.precio.toFixed(2))
-          )
-          if (match) {
-            arregloReferenciado = match
-            ARREGLO_ELEGIDO.set(clienteId, match)
-            pedidoActual(clienteId).arreglo = match
-            console.log(`[bot] 📸 Cliente respondió a foto de "${match.nombre}"`)
-          }
-        }
       } catch { /* ignorar si falla getQuotedMessage */ }
     }
 
@@ -1376,65 +1116,17 @@ async function procesarMensaje(message: any): Promise<void> {
         '\nMáximo 2 líneas. NUNCA te presentes de nuevo si ya hay conversación.'
     }
 
-    let   arreglosParaEnviar: ArregloConFoto[] = []
-    let   enviarFotos   = false
-
-    if (intencion === 'inventario') {
-      FOTOS_PENDIENTES.delete(clienteId)
-      const arreglos = await obtenerArreglosConFotos()
-      if (arreglos.length > 0) {
-        contextoExtra +=
-          `\n\n[FOTOS SOLICITADAS] El cliente pidió ver fotos de los arreglos disponibles. ` +
-          `INSTRUCCION: Responde amablemente que le pedirás a una compañera que le mande las fotos actuales. ` +
-          `No digas que las enviarás tú. Di algo como "Déjame pedirle a una compañera que te mande las fotos actuales de lo que tenemos 🌸" ` +
-          `o similar. El sistema notificará al equipo para que le envíen las fotos directamente.`
-
-        notificarEmpleadosWhatsApp(
-          `📸 *Cliente pide fotos:* ${telefono}\n\nEl cliente está preguntando por los arreglos disponibles. Por favor envíale las fotos actuales directamente por WhatsApp.`
-        ).catch(() => {})
-
-        const numeroRealTmp = await numeroRealPromise.catch(() => null)
-        if (numeroRealTmp) {
-          enviarAlertaEmpleadoFotos(numeroRealTmp, telefono).catch(() => {})
-        }
-      } else {
-        contextoExtra += `\n\nHoy NO hay arreglos listos. Ofrece pedido personalizado 24-48h. Máximo 2 líneas.`
-      }
-    }
-
-    else if (intencion === 'catalogo') {
+    if (intencion === 'catalogo') {
       contextoExtra +=
         `\n\nINSTRUCCION: Envía DIRECTAMENTE: ` +
         `https://drive.google.com/drive/folders/1s7Hs5JKBSezcqVznKwl6TT866UqRCB4N Máximo 2 líneas.`
     }
 
     // ── COTIZADOR ─────────────────────────────────────────────────
-    else if (intencion === 'cotizador') {
-      const arreglosHoy = await obtenerArreglosConFotos()
-
-      if (!estaEnHorario()) {
-        if (arreglosHoy.length > 0) {
-          FOTOS_PENDIENTES.set(clienteId, { arreglos: arreglosHoy })
-        }
-        contextoExtra +=
-          `\n\nINSTRUCCION (Fuera de horario): ` +
-          `Primero envía el cotizador: https://floreria-app-mauve.vercel.app/ ` +
-          `${arreglosHoy.length > 0 ? 'También ofrecele ver las fotos de los ramos del día que sí podemos apartar para mañana.' : ''} ` +
-          `Para envío complejo: confirmamos a las 10am. Máximo 4 líneas.`
-      } else {
-        if (arreglosHoy.length > 0) {
-          const resumen = arreglosHoy.map((a, i) => `Foto ${i + 1}: "${a.nombre}" — $${a.precio} MXN`).join('\n')
-          FOTOS_PENDIENTES.set(clienteId, { arreglos: arreglosHoy })
-          contextoExtra +=
-            `\n\nINVENTARIO HOY LISTO PARA MOSTRAR:\n${resumen}\n\n` +
-            `INSTRUCCION: Pregunta si quiere ver los arreglos del día (son más rápidos y ya están listos). ` +
-            `Si prefiere personalizado: https://floreria-app-mauve.vercel.app/ Máximo 3 líneas.`
-        } else {
-          contextoExtra +=
-            `\n\nINSTRUCCION: Envía DIRECTAMENTE el cotizador: ` +
-            `https://floreria-app-mauve.vercel.app/ Menciona que puede subir foto de referencia. Máximo 3 líneas.`
-        }
-      }
+    if (intencion === 'cotizador') {
+      contextoExtra +=
+        `\n\nINSTRUCCION: Envía DIRECTAMENTE el cotizador: ` +
+        `https://floreria-app-mauve.vercel.app/ Menciona que puede subir foto de referencia. Máximo 3 líneas.`
     }
 
     // ── GOOGLE MAPS / ZONAS DE ENVÍO ──────────────────────────────
@@ -1463,19 +1155,8 @@ async function procesarMensaje(message: any): Promise<void> {
       }
     }
 
-    // Inyectar contexto del arreglo referenciado si aplica
-    if (arregloReferenciado) {
-      const ultimosArreglos = ULTIMOS_ARREGLOS.get(clienteId) ?? []
-      const lista = ultimosArreglos.map(a => `"${a.nombre}" — $${a.precio} MXN`).join(' | ')
-      contextoExtra +=
-        `\n\n[CLIENTE RESPONDIÓ A LA FOTO DE: "${arregloReferenciado.nombre}" — $${arregloReferenciado.precio} MXN]` +
-        `\n[TODOS LOS ARREGLOS MOSTRADOS: ${lista}]` +
-        `\nINSTRUCCION URGENTE: El cliente eligió ESE arreglo específico. ` +
-        `Confirma nombre y precio en 1 línea y pregunta SOLO: "¿Lo recoges en sucursal o necesitas envío?"`
-    }
-
-    // ── Contexto genérico de reply (aunque no sea foto) ──────────
-    if (message.hasQuotedMsg && !arregloReferenciado && textoCitado) {
+    // ── Contexto genérico de reply ──────────────────────────────
+    if (message.hasQuotedMsg && textoCitado) {
       contextoExtra +=
         `\n\n[CLIENTE RESPONDIÓ AL MENSAJE: "${textoCitado.replace(/"/g, "'")}"]` +
         `\nINSTRUCCION: El usuario respondió específicamente a ese mensaje. Úsalo para entender a qué se refiere.`
@@ -1531,55 +1212,6 @@ async function procesarMensaje(message: any): Promise<void> {
         `Si pide foto de entrega o comprobante de entrega, responde: "Claro, se lo comento al equipo/repartidor para que puedan apoyarte con eso 🌸". ` +
         `No digas que no puedes coordinarlo. No lo prometas como garantía. ` +
         `Si quiere cancelar o reporta problema, NO le pidas nombre/precio si ya aparece en el pedido actual; di que notificarás al equipo.`
-      enviarFotos = false // no enviar fotos nuevas
-    }
-
-    // Detectar si el usuario está eligiendo un arreglo de la lista mostrada
-    const ultimosArreglos = ULTIMOS_ARREGLOS.get(clienteId)
-    if (ultimosArreglos?.length && textoCliente.length < 200) {
-      const esEleccion = /me gust[oó]|quiero|ese|este|esye|eate|el[^a-zA-Z]|prefiero|me llevo|aparta|reply/i.test(textoCliente)
-      const ordinalFoto = textoCliente.match(/(?:foto\s*)?\b([1-7])\b|(?:primer[ao]?|segunda|tercer[ao]?|cuart[ao]|quint[ao]|sext[ao]|septim[ao])\s+foto/i)?.[0]?.toLowerCase() ?? ''
-      const indiceOrdinal = ordinalFoto.includes('1') || ordinalFoto.includes('primer') ? 0
-        : ordinalFoto.includes('2') || ordinalFoto.includes('segunda') ? 1
-        : ordinalFoto.includes('3') || ordinalFoto.includes('tercer') ? 2
-        : ordinalFoto.includes('4') || ordinalFoto.includes('cuart') ? 3
-        : ordinalFoto.includes('5') || ordinalFoto.includes('quint') ? 4
-        : ordinalFoto.includes('6') || ordinalFoto.includes('sext') ? 5
-        : ordinalFoto.includes('7') || ordinalFoto.includes('sept') ? 6
-        : -1
-      const matchPorFoto = indiceOrdinal >= 0 && ultimosArreglos[indiceOrdinal]
-        ? { arreglo: ultimosArreglos[indiceOrdinal], score: 999 }
-        : null
-      const match = matchPorFoto ?? encontrarMejorCoincidencia(textoCliente, ultimosArreglos)
-      const eleccionAmbigua = esEleccion && !match && !arregloReferenciado && !message.hasQuotedMsg
-      if (eleccionAmbigua) {
-        const nombres = ultimosArreglos.map(a => `- ${a.nombre}: $${a.precio.toFixed(2)} MXN`).join('\n')
-        const aviso = `¿Me confirmas el nombre del arreglo que elegiste? 🌸\nTambién puedes responder directo a la foto.\n\n${nombres}`
-        await agregarAlHistorial(telefono, 'assistant', aviso)
-        await message.reply(aviso)
-        return
-      }
-      if (match || esEleccion) {
-        const lista = ultimosArreglos.map((a, i) => `"${a.nombre}" — $${a.precio} MXN`).join(' | ')
-        let instruccion = `\n\n[ARREGLOS MOSTRADOS: ${lista}]`
-        if (match && match.score >= 2) {
-          ARREGLO_ELEGIDO.set(clienteId, match.arreglo)
-          pedidoActual(clienteId).arreglo = match.arreglo
-          instruccion += `\n[CLIENTE ELIGIÓ: "${match.arreglo.nombre}" — $${match.arreglo.precio} MXN (coincidencia exacta)]`
-        } else if (match) {
-          ARREGLO_ELEGIDO.set(clienteId, match.arreglo)
-          pedidoActual(clienteId).arreglo = match.arreglo
-          instruccion += `\n[POSIBLE ELECCIÓN: "${match.arreglo.nombre}" — $${match.arreglo.precio} MXN]`
-        }
-        if (esEleccion) {
-          instruccion += `\n[EXPRESIÓN DE ELECCIÓN DETECTADA: "${textoCliente}"]`
-        }
-        instruccion +=
-          `\nINSTRUCCION: Confirma el nombre y precio exacto del arreglo elegido en 1 línea` +
-          ` y pasa DIRECTAMENTE a preguntar si lo recoge o necesita envío. ` +
-          `NO preguntes "cuál te gustó" — el usuario ya lo dijo.`
-        contextoExtra += instruccion
-      }
     }
 
     // Detectar continuacion de venta (pago/envio)
@@ -1651,16 +1283,6 @@ async function procesarMensaje(message: any): Promise<void> {
     const historialAI = await obtenerHistorial(telefono)
     const { mensaje, ventaCerrada } = await getAIResponse(historialAI, contextoExtra)
     await chat.clearState()
-
-    // ── Validación post-AI de precios ─────────────────────────────
-    const arreglosAI = await obtenerArreglosConFotos()
-    if (arreglosAI.length > 0) {
-      const envioPrecio = PEDIDO_EN_CURSO.get(clienteId)?.envio?.precio
-      const validacion = validarPreciosEnRespuesta(mensaje, arreglosAI, envioPrecio)
-      if (!validacion.valido) {
-        console.warn(`[bot] ⚠️ ${validacion.advertencia}`)
-      }
-    }
 
     await agregarAlHistorial(telefono, 'assistant', mensaje)
 
@@ -1786,20 +1408,16 @@ async function procesarMensaje(message: any): Promise<void> {
         }
         persistirPedido(clienteId, numeroReal, 'apartado', textoCliente).catch(() => {})
       }
-      apartarArreglo(ventaVerificada.producto, numeroReal)
-        .catch(err => console.error('[bot] Error apartando:', err))
       VENTAS_CERRADAS.add(clienteId)
       VENTA_ACTUAL.set(clienteId, ventaVerificada)
-      FOTOS_PENDIENTES.delete(clienteId) // limpiar fotos pendientes
     }
 
     // Fallback: si el cliente confirmó pago pero la IA no generó el token
     if (!ventaCerrada && !VENTAS_CERRADAS.has(clienteId) && KW_CONFIRMA_PAGO && (ARREGLO_ELEGIDO.has(clienteId) || (mensajeFinal.length < 150 && !mensajeFinal.includes('?')))) {
       const ventaVerificada = ventaDesdeEstado(clienteId)
-      const ultimos = ULTIMOS_ARREGLOS.get(clienteId)
       const elegido = ARREGLO_ELEGIDO.get(clienteId)
-      const nombreArreglo = ventaVerificada?.producto ?? elegido?.nombre ?? ultimos?.[0]?.nombre ?? 'Pedido'
-      const totalArreglo = ventaVerificada?.total ?? `$${(elegido?.precio ?? ultimos?.[0]?.precio ?? 0).toFixed(2)} MXN`
+      const nombreArreglo = ventaVerificada?.producto ?? elegido?.nombre ?? 'Pedido'
+      const totalArreglo = ventaVerificada?.total ?? `$${(elegido?.precio ?? 0).toFixed(2)} MXN`
       const clienteVenta = ventaVerificada?.cliente ?? 'Verificar en chat'
       const direccionVenta = ventaVerificada?.direccion ?? 'Por confirmar'
       const pedido = PEDIDO_EN_CURSO.get(clienteId)
@@ -1814,8 +1432,6 @@ async function procesarMensaje(message: any): Promise<void> {
         precioEnvio: pedido?.envio ? `$${pedido.envio.precio.toFixed(2)} MXN (${pedido.envio.zona})` : undefined,
         metodoPago: pedido?.metodoPago ?? 'transferencia',
       }).catch(err => console.error('[bot] Telegram venta fallback:', err))
-      apartarArreglo(nombreArreglo, numeroReal)
-        .catch(err => console.error('[bot] Error apartando fallback:', err))
       registrarVenta(clienteVenta, numeroReal, nombreArreglo, totalArreglo, direccionVenta)
         .catch(err => console.error('[bot] Error registrando venta fallback:', err))
       VENTAS_CERRADAS.add(clienteId)
@@ -1833,10 +1449,9 @@ async function procesarMensaje(message: any): Promise<void> {
     if (/venta\s*cerrada|venta.*cerrada|sale.*closed|closed.*sale/i.test(textoCliente)) {
       console.log(`[bot] 🚨 Usuario indicó venta cerrada manualmente: ${numeroReal}`)
       const ventaVerificada = ventaDesdeEstado(clienteId)
-      const ultimos = ULTIMOS_ARREGLOS.get(clienteId)
       const elegido = ARREGLO_ELEGIDO.get(clienteId)
-      const nombreArreglo = ventaVerificada?.producto ?? elegido?.nombre ?? ultimos?.[0]?.nombre ?? 'Pedido'
-      const totalVenta = ventaVerificada?.total ?? `$${(elegido?.precio ?? ultimos?.[0]?.precio ?? 0).toFixed(2)} MXN`
+      const nombreArreglo = ventaVerificada?.producto ?? elegido?.nombre ?? 'Pedido'
+      const totalVenta = ventaVerificada?.total ?? `$${(elegido?.precio ?? 0).toFixed(2)} MXN`
       const direccionVenta = ventaVerificada?.direccion ?? 'Verificar en chat'
       const clienteVenta = ventaVerificada?.cliente ?? 'Manual'
       enviarAlertaVentaCerrada({
@@ -1846,8 +1461,6 @@ async function procesarMensaje(message: any): Promise<void> {
         direccion: direccionVenta,
         numeroCliente: numeroReal,
       }).catch(err => console.error('[bot] Telegram venta manual:', err))
-      apartarArreglo(nombreArreglo, numeroReal)
-        .catch(err => console.error('[bot] Error apartando manual:', err))
       VENTAS_CERRADAS.add(clienteId)
       VENTA_ACTUAL.set(clienteId, {
         cliente: clienteVenta,
@@ -1856,18 +1469,11 @@ async function procesarMensaje(message: any): Promise<void> {
         direccion: direccionVenta,
         rawToken: '',
       })
-      FOTOS_PENDIENTES.delete(clienteId)
       registrarVenta(clienteVenta, numeroReal, nombreArreglo, totalVenta, direccionVenta)
         .catch(err => console.error('[bot] Error registrando venta manual:', err))
     }
 
-    // Ya no se envían fotos automáticamente — el equipo las envía directamente.
-    // Limpiar estado pendiente si el inventario ya fue atendido
-    if (intencion === 'inventario') {
-      FOTOS_CANCELADAS.delete(clienteId)
-      FOTOS_ENVIANDO.delete(clienteId)
-      FOTOS_PENDIENTES.delete(clienteId)
-    }
+
 
     if (mensajeEnviado) {
       console.log(`[${new Date().toLocaleTimeString('es-MX')}] ✅ Listo para ${clienteId}`)
@@ -2451,14 +2057,6 @@ async function manejarMensajeEntrante(message: any): Promise<void> {
   }
 
   if (!message.body?.trim()) return
-  if (/ya no quiero fotos|no quiero fotos|sin fotos/i.test(message.body.trim())) {
-    FOTOS_CANCELADAS.add(clienteId)
-    FOTOS_PENDIENTES.delete(clienteId)
-  }
-  if (FOTOS_ENVIANDO.has(clienteId) && /^(gracias|graciass+|ok|va|espero|espero su mensaje)$/i.test(message.body.trim())) {
-    console.log(`[bot] 🖼️ Ignorando cortesía mientras se envían fotos: ${clienteId}`)
-    return
-  }
   if (estaRateLimited(clienteId)) { avisarRateLimitUnaVez(message, clienteId); return }
 
   verificarSiBotPausado().then(pausado => {
