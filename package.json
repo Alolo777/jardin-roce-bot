@@ -2,6 +2,7 @@
   "name": "floreria-agent-service",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "node scripts/build-local.mjs",
@@ -27,9 +28,6 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "tsx": "^4.22.3"
-  },
-  "overrides": {
-    "whatsapp-rust-bridge": "0.5.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
