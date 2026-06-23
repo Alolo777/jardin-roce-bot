@@ -1,7 +1,18 @@
 // bot.ts — Jardín RoCe 🌸
-// Optimizado para GCP e2-micro (1GB RAM) con systemd
+// Adaptado para Baileys (sin Chrome/Chromium) en GCP e2-micro
 
-import { Client, LocalAuth } from 'whatsapp-web.js'
+import makeWASocket from '@whiskeysockets/baileys'
+import {
+  useMultiFileAuthState,
+  DisconnectReason,
+  Browsers,
+  getContentType,
+  downloadContentFromMessage,
+  fetchLatestBaileysVersion,
+  isJidGroup,
+} from '@whiskeysockets/baileys'
+import type { Boom } from '@hapi/boom'
+import pino from 'pino'
 import qrcode from 'qrcode-terminal'
 import dotenv from 'dotenv'
 
@@ -68,10 +79,13 @@ async function cargarIgnorados(): Promise<string[]> {
   return IGNORADOS_CACHE
 }
 
-function extraerTelefono(message: any): string {
-  const raw = message.from as string
-  const limpio = raw.replace(/@[^\s]*/g, '').trim()
+function jidToTelefono(jid: string): string {
+  const limpio = (jid || '').replace(/@[^\s]*/g, '').trim()
   return limpio.startsWith('52') ? `+${limpio}` : limpio
+}
+
+function extraerTelefono(msg: any): string {
+  return jidToTelefono(msg.key?.remoteJid || '')
 }
 
 async function obtenerClienteId(telefono: string): Promise<string | null> {
@@ -145,16 +159,16 @@ const MENSAJE_PROCESADO_TTL_MS = 2 * 60 * 60_000
 
 const MENSAJES_RESCATADOS = new Set<string>()
 
-function obtenerMensajeId(message: any): string | null {
-  return message?.id?._serialized || null
+function obtenerMensajeId(msg: any): string | null {
+  return msg?.key?.id || null
 }
 
 function marcarMensajeProcesado(id: string): void {
   MENSAJES_PROCESADOS.set(id, Date.now())
 }
 
-function yaProcesadoRecientemente(message: any): boolean {
-  const id = obtenerMensajeId(message)
+function yaProcesadoRecientemente(msg: any): boolean {
+  const id = obtenerMensajeId(msg)
   if (!id) return false
 
   const ahora = Date.now()
@@ -168,6 +182,58 @@ function yaProcesadoRecientemente(message: any): boolean {
     }
   }
   return false
+}
+
+// ════════════════════════════════════════════════════════════════
+// EXTRACCIÓN DE TEXTO Y TIPO DE MENSAJE (proto Baileys)
+// ════════════════════════════════════════════════════════════════
+
+function getMessageBody(msg: any): string {
+  const full = msg?.message
+  if (!full) return ''
+  const type = getContentType(full)
+  if (!type) return ''
+  if (type === 'conversation') return full.conversation || ''
+  if (type === 'extendedTextMessage') return full.extendedTextMessage?.text || ''
+  if (type === 'imageMessage') return full.imageMessage?.caption || ''
+  if (type === 'videoMessage') return full.videoMessage?.caption || ''
+  if (type === 'documentMessage') return full.documentMessage?.caption || ''
+  if (type === 'buttonsResponseMessage') return full.buttonsResponseMessage?.selectedButtonId || ''
+  if (type === 'listResponseMessage') return full.listResponseMessage?.singleSelectReply?.selectedRowId || ''
+  return ''
+}
+
+function getMessageType(msg: any): string {
+  const full = msg?.message
+  if (!full) return 'unknown'
+  const type = getContentType(full)
+  if (type === 'conversation' || type === 'extendedTextMessage') return 'chat'
+  if (type === 'imageMessage') return 'image'
+  if (type === 'videoMessage') return 'video'
+  if (type === 'audioMessage') return 'audio'
+  if (type === 'documentMessage') return 'document'
+  if (type === 'stickerMessage') return 'sticker'
+  return 'unknown'
+}
+
+function hasQuotedMsg(msg: any): boolean {
+  const ci = msg?.message?.extendedTextMessage?.contextInfo
+    || msg?.message?.imageMessage?.contextInfo
+    || msg?.message?.videoMessage?.contextInfo
+  return !!(ci?.stanzaId || ci?.quotedMessage)
+}
+
+function getQuotedText(msg: any): string {
+  const ci = msg?.message?.extendedTextMessage?.contextInfo
+    || msg?.message?.imageMessage?.contextInfo
+    || msg?.message?.videoMessage?.contextInfo
+  if (!ci?.quotedMessage) return ''
+  const q = ci.quotedMessage
+  if (q.conversation) return q.conversation
+  if (q.extendedTextMessage?.text) return q.extendedTextMessage.text
+  if (q.imageMessage?.caption) return q.imageMessage.caption
+  if (q.videoMessage?.caption) return q.videoMessage.caption
+  return ''
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -188,7 +254,6 @@ function getContextoHorario(): string {
   const ahora = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
   const hora = ahora.getHours();
   
-  // Detectar si es antes de abrir (mañana) o después de cerrar (tarde/noche)
   const estadoHorario = hora < 10 
     ? 'Aún no abrimos (abrimos a las 10:00 am).' 
     : 'Ya cerramos por hoy (abrimos mañana a las 10:00 am).';
@@ -196,7 +261,7 @@ function getContextoHorario(): string {
   return (
     `\n\n[CONTEXTO: Fuera de Horario] ${estadoHorario} ` +
     `REGLA DE ORO: NUNCA le digas al cliente "mañana te muestro" o "mañana te atiendo". ` +
-    `SÍ PUEDES y DEBES enviarle el inventario de hoy, el link del catálogo o el cotizador web (https://floreria-app-mauve.vercel.app/) en este momento para que adelante su pedido y quede agendado para nuestra apertura. ` +
+    `SÍ PUEDES y DEBES enviarle el link del catálogo o el cotizador web (https://floreria-app-mauve.vercel.app/) en este momento para que adelante su pedido y quede agendado para nuestra apertura. ` +
     `Para cotizaciones de envío complejas que no estén en la web, dile amablemente que a las 10 am le confirmas el costo exacto.`
   );
 }
@@ -207,43 +272,15 @@ function getContextoHorario(): string {
 
 const CACHE_NUMEROS = new Map<string, string>()
 
-async function obtenerNumeroReal(message: any): Promise<string> {
-  const raw = message.from as string
-  if (CACHE_NUMEROS.has(raw)) return CACHE_NUMEROS.get(raw)!
-
+async function obtenerNumeroReal(msg: any): Promise<string> {
+  const jid = msg.key?.remoteJid || ''
+  if (CACHE_NUMEROS.has(jid)) return CACHE_NUMEROS.get(jid)!
   if (CACHE_NUMEROS.size > 500) CACHE_NUMEROS.clear()
 
-  // Detectar @lid (Low-Integrity Device) — el número real requiere más tiempo
-  const esLid = raw.includes('@lid')
-
-  try {
-    // Timeout más largo en e2-micro (15s vs 5s) para LIDs
-    const timeoutMs = esLid ? 20_000 : 10_000
-    const contact = await Promise.race([
-      message.getContact(),
-      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
-    ]) as any
-
-    // contact.number tiene el teléfono real; contact.id.user puede ser un LID
-    let num = contact?.number || ''
-
-    // Si contact.number no dio resultado, intentar contact.id.user
-    if (!num || esLid && String(num).length > 13) {
-      num = contact?.id?.user || ''
-    }
-
-    // Último recurso: extraer de message.from
-    if (!num) num = raw.replace(/@[^\s]*/g, '').trim()
-
-    const real = String(num).startsWith('52') ? `+${num}` : String(num)
-    CACHE_NUMEROS.set(raw, real)
-    return real
-  } catch {
-    const limpio = raw.replace(/@[^\s]*/g, '').trim()
-    const numero = limpio.startsWith('52') ? `+${limpio}` : limpio
-    CACHE_NUMEROS.set(raw, numero)
-    return numero
-  }
+  const limpio = jid.replace(/@[^\s]*/g, '').trim()
+  const numero = limpio.startsWith('52') ? `+${limpio}` : limpio
+  CACHE_NUMEROS.set(jid, numero)
+  return numero
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -336,18 +373,16 @@ async function obtenerEmpleadosANotificar(): Promise<string[]> {
 
 async function notificarEmpleadosWhatsApp(mensaje: string): Promise<void> {
   const numeros = await obtenerEmpleadosANotificar()
-  if (numeros.length === 0 || !whatsappClient?.info) return
+  if (numeros.length === 0 || !sock?.user) return
   for (const num of numeros) {
     try {
-      const chatId = num.includes('@c.us') ? num : `${num}@c.us`
-      await whatsappClient.sendMessage(chatId, mensaje)
+      const jid = num.includes('@') ? num : `${num}@s.whatsapp.net`
+      await sock.sendMessage(jid, { text: mensaje })
     } catch (err) {
       console.warn(`[bot] Error notificando a empleado ${num}:`, err)
     }
   }
 }
-
-
 
 // ════════════════════════════════════════════════════════════════
 // DETECCIÓN DE FRUSTRACIÓN
@@ -391,20 +426,18 @@ function debeNotificarAtencionHumana(clienteId: string): boolean {
   return true
 }
 
-
-
 // ════════════════════════════════════════════════════════════════
 // PAUSA DEL BOT
 // ════════════════════════════════════════════════════════════════
 
 let BOT_PAUSADO        = false
 let ultimaVerifPausa   = 0
-let verificacionEnCurso = false // FIX: mutex para evitar llamadas concurrentes a Supabase
+let verificacionEnCurso = false
 const PAUSA_CACHE_MS   = 5_000
 
 async function verificarSiBotPausado(): Promise<boolean> {
   if (Date.now() - ultimaVerifPausa < PAUSA_CACHE_MS) return BOT_PAUSADO
-  if (verificacionEnCurso) return BOT_PAUSADO // FIX: si ya hay una consulta en curso, usar valor actual
+  if (verificacionEnCurso) return BOT_PAUSADO
 
   verificacionEnCurso = true
   try {
@@ -419,14 +452,14 @@ async function verificarSiBotPausado(): Promise<boolean> {
 }
 
 // ════════════════════════════════════════════════════════════════
-// WATCHDOG — UNA SOLA DECLARACIÓN (fix: eliminado el duplicado)
+// WATCHDOG
 // ════════════════════════════════════════════════════════════════
 
 let ultimaActividad = Date.now()
 function registrarActividad(): void { ultimaActividad = Date.now() }
 
 // ════════════════════════════════════════════════════════════════
-// CONTADOR DE REINICIOS — limpia sesión tras 3 fallos en 10 min
+// CONTADOR DE REINICIOS
 // ════════════════════════════════════════════════════════════════
 
 let crashCount      = 0
@@ -444,8 +477,8 @@ function registrarCrash(): void {
   console.warn(`[Crash] ${crashCount}/${MAX_CRASHES} reinicios en ventana de 10 min`)
 
   if (crashCount >= MAX_CRASHES) {
-    const sessionPath = process.env.WWEBJS_DATA_PATH || './.wwebjs_auth'
-    console.warn(`[Crash] 🧹 Demasiados reinicios — limpiando sesión WhatsApp en ${sessionPath}...`)
+    const sessionPath = process.env.BAILEYS_DATA_PATH || './.baileys_auth'
+    console.warn(`[Crash] 🧹 Demasiados reinicios — limpiando sesión en ${sessionPath}...`)
     import('fs').then(fs => {
       fs.rmSync(sessionPath, { recursive: true, force: true })
       console.warn('[Crash] ✅ Sesión eliminada. Se generará QR fresco al reiniciar.')
@@ -475,22 +508,6 @@ setInterval(() => {
 }, 5 * 60_000)
 
 // ════════════════════════════════════════════════════════════════
-// AUTO-LIMPIEZA CHROMIUM (FIX: destruir CDPSession después de usar)
-// ════════════════════════════════════════════════════════════════
-
-setInterval(async () => {
-  try {
-    const page = whatsappClient.pupPage
-    if (!page) return
-    console.log('[bot] 🧹 Vaciando caché de Chromium...')
-    const cdp = await page.target().createCDPSession()
-    await cdp.send('Network.clearBrowserCache')
-    await cdp.detach() // FIX: destruir la session para no acumularlas
-    console.log('[bot] ✨ Caché limpia.')
-  } catch { /* ignorar si la página se estaba recargando */ }
-}, 45 * 60_000)
-
-// ════════════════════════════════════════════════════════════════
 // ALERTA PERIÓDICA DE DESCONEXIÓN — cada 30 min revisa si toca avisar
 // ════════════════════════════════════════════════════════════════
 
@@ -502,7 +519,6 @@ setInterval(() => {
   const hora  = d.getHours()
   const dia   = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
-  // A las 8:00-8:30 AM, si sigue desconectado y no hemos avisado hoy
   if (hora === 8 && dia !== ultimoDiaAlertaDiaria) {
     ultimoDiaAlertaDiaria = dia
     enviarAlertaDiariaDesconexion().catch(() => {})
@@ -526,7 +542,7 @@ function estaRateLimited(id: string): boolean {
   recientes.push(ahora)
 
   if (recientes.length === 0) {
-    RATE_TIMESTAMPS.delete(id) // FIX: liberar key cuando no hay actividad reciente
+    RATE_TIMESTAMPS.delete(id)
   } else {
     RATE_TIMESTAMPS.set(id, recientes)
   }
@@ -534,10 +550,17 @@ function estaRateLimited(id: string): boolean {
   return recientes.length > RATE_LIMIT_MAX
 }
 
-function avisarRateLimitUnaVez(message: any, id: string): void {
+async function responderMensaje(msg: any, texto: string): Promise<any> {
+  if (!sock) return
+  const jid = msg.key?.remoteJid
+  if (!jid) return
+  return sock.sendMessage(jid, { text: texto }, { quoted: msg })
+}
+
+function avisarRateLimitUnaVez(msg: any, id: string): void {
   if (RATE_AVISADOS.has(id)) return
   RATE_AVISADOS.add(id)
-  message.reply('Voy un poquito rápido 🌸 Dame un momento. ¿Va?').catch(() => {})
+  responderMensaje(msg, 'Voy un poquito rápido 🌸 Dame un momento. ¿Va?').catch(() => {})
   setTimeout(() => RATE_AVISADOS.delete(id), RATE_LIMIT_WINDOW_MS)
 }
 
@@ -619,21 +642,21 @@ function encolarPorCliente(id: string, tarea: () => Promise<void>): void {
   siguiente.finally(() => { if (COLA_POR_CLIENTE.get(id) === siguiente) COLA_POR_CLIENTE.delete(id) })
 }
 
-function encolarMensajeAgrupado(clienteId: string, message: any): void {
+function encolarMensajeAgrupado(clienteId: string, msg: any): void {
   const actual = MENSAJES_POR_AGRUPAR.get(clienteId)
   if (actual) clearTimeout(actual.timer)
 
-  const mensajes = [...(actual?.mensajes ?? []), message]
+  const mensajes = [...(actual?.mensajes ?? []), msg]
   const timer = setTimeout(() => {
     MENSAJES_POR_AGRUPAR.delete(clienteId)
-    const textos = mensajes.map(m => String(m.body || '').trim()).filter(Boolean)
+    const textos = mensajes.map(m => getMessageBody(m)).filter(Boolean)
     if (textos.length === 0) return
 
-    const base = mensajes.find(m => m.hasQuotedMsg) ?? mensajes[mensajes.length - 1]
+    const base = mensajes.find(m => hasQuotedMsg(m)) ?? mensajes[mensajes.length - 1]
     base.body = textos.join('\n')
-    for (const msg of mensajes) {
-      const id = obtenerMensajeId(msg)
-      if (id && msg !== base) marcarMensajeProcesado(id)
+    for (const m of mensajes) {
+      const id = obtenerMensajeId(m)
+      if (id && m !== base) marcarMensajeProcesado(id)
     }
 
     console.log(`[bot] 🧵 Agrupando ${mensajes.length} mensajes de ${clienteId}`)
@@ -808,7 +831,6 @@ function tieneArregloVerificado(clienteId: string): boolean {
 // DETECCIÓN DE INTENCIÓN
 // ════════════════════════════════════════════════════════════════
 
-
 const KW_CATALOGO = [
   'catalogo', 'catálogo', 'drive', 'ver mas', 'ver más',
   'mas opciones', 'más opciones', 'otros ramos', 'que mas tienen', 'que más tienen',
@@ -907,7 +929,7 @@ async function buscarPrecioEnvio(texto: string): Promise<ResultadoEnvio | null> 
   const n = normalizarTexto(texto)
   const tieneDatoDireccion = /\b(calle|av\.?|avenida|col\.?|colonia|cp\s*\d{5}|codigo\s*postal|#|num\.?|n[uú]mero|\d{2,})\b/i.test(texto)
 
-  // 1. Buscar por scoring: CP > municipio > colonia. Evita que "centro" gane sobre "San Andrés".
+  // 1. Buscar por scoring: CP > municipio > colonia.
   const municipios = await obtenerMunicipiosEnvio()
   if (municipios.length > 0) {
     const candidatos = municipios
@@ -972,16 +994,11 @@ function formatearZonasParaPrompt(zonas: ZonaEnvioData[]): string {
   return zonas.map(z => `- ${z.zona}: $${z.precio.toFixed(2)} MXN (${z.palabras_clave})`).join('\n')
 }
 
-
-
-
-
 function limpiarRespuestaIA(texto: string): string {
   return texto
     .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$2')
     .replace(/\[([^\]]*)\]\(([^)]+)\)/g, '$2')
     .replace(/https:\/\/[^\s]+supabase\.co\/storage\/[^\s]*/g, '')
-    // Eliminar anotaciones internas que la IA a veces reproduce
     .replace(/\[(?:CLIENTE|CONTEXTO|INSTRUCCION|ARREGLO|TODOS|EXPRESIÓN|POSIBLE)[^\]]*\]\n?/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
@@ -992,11 +1009,12 @@ function calcularDelayEscritura(texto: string): number {
   return base + (Math.random() * 300 - 150)
 }
 
-async function simularEscritura(chat: any, ms: number): Promise<void> {
+async function simularEscritura(jid: string, ms: number): Promise<void> {
+  if (!sock) return
   try {
-    await chat.sendStateTyping()
+    await sock.sendPresenceUpdate('composing', jid)
     await new Promise(r => setTimeout(r, ms))
-    await chat.clearState()
+    await sock.sendPresenceUpdate('paused', jid)
   } catch { /* no fatal */ }
 }
 
@@ -1011,15 +1029,16 @@ function getFechaActual(): string {
 // FLUJO: PEDIDO DEL COTIZADOR WEB
 // ════════════════════════════════════════════════════════════════
 
-async function procesarPedidoWeb(message: any): Promise<void> {
-  const clienteId        = message.from as string
-  const texto            = message.body as string
-  const chat             = await message.getChat()
+async function procesarPedidoWeb(msg: any): Promise<void> {
+  const clienteId        = msg.key?.remoteJid as string
+  const texto            = getMessageBody(msg) || msg.body || ''
   const pedido           = parsearPedidoCotizador(texto)
-  const numeroRealPromise = obtenerNumeroReal(message)
+  const numeroRealPromise = obtenerNumeroReal(msg)
+  const jid = msg.key?.remoteJid
 
-  await simularEscritura(chat, 1500)
-  await message.reply(
+  if (!jid) return
+  await simularEscritura(jid, 1500)
+  await responderMensaje(msg,
     `¡Qué bonita elección! 🌸 Ya recibimos tu pedido.\n\n` +
     `💐 ${pedido.flores.slice(0, 60)}${pedido.flores.length > 60 ? '...' : ''}\n` +
     `💰 Total: *${pedido.total}*\n` +
@@ -1044,21 +1063,22 @@ async function procesarPedidoWeb(message: any): Promise<void> {
 // FLUJO PRINCIPAL
 // ════════════════════════════════════════════════════════════════
 
-async function procesarMensaje(message: any): Promise<void> {
-  const clienteId    = message.from as string
-  const telefono     = extraerTelefono(message)
-  let   textoCliente = (message.body as string).trim()
+async function procesarMensaje(msg: any): Promise<void> {
+  const clienteId    = msg.key?.remoteJid as string
+  if (!clienteId) return
+  const telefono     = extraerTelefono(msg)
+  let   textoCliente = (getMessageBody(msg) || '').trim()
 
+  if (!textoCliente) return
   if (textoCliente.length > MAX_LONGITUD_MENSAJE) textoCliente = textoCliente.slice(0, MAX_LONGITUD_MENSAJE)
 
   console.log(`[${new Date().toLocaleTimeString('es-MX')}] 📨 ${clienteId}: ${textoCliente.substring(0, 80)}`)
 
-  const numeroRealPromise = obtenerNumeroReal(message)
+  const numeroRealPromise = obtenerNumeroReal(msg)
   const esFrustrado       = detectarFrustracion(textoCliente)
   const esInteresCompra   = detectarInteresCompra(textoCliente)
 
   try {
-    const chat = await message.getChat()
     await new Promise(r => setTimeout(r, 400 + Math.random() * 300))
 
     await agregarAlHistorial(telefono, 'user', textoCliente)
@@ -1078,11 +1098,8 @@ async function procesarMensaje(message: any): Promise<void> {
 
     // ── Detección de reply (quote) ────────────────────────────────
     let textoCitado = ''
-    if (message.hasQuotedMsg) {
-      try {
-        const quoted = await message.getQuotedMessage()
-        textoCitado = (quoted?.caption || quoted?.body || '').trim()
-      } catch { /* ignorar si falla getQuotedMessage */ }
+    if (hasQuotedMsg(msg)) {
+      textoCitado = getQuotedText(msg)
     }
 
     // ── Saludo dinámico en primer mensaje ─────────────────────────
@@ -1142,21 +1159,34 @@ async function procesarMensaje(message: any): Promise<void> {
         `\n\n[CLIENTE PREGUNTA POR ENVÍO] El cliente quiere saber sobre envío a domicilio. ` +
         `INSTRUCCION: Responde que el costo exacto de envío depende de la ubicación, ` +
         `y que una compañera del equipo le confirmará el precio exacto. ` +
-        `Di algo como "Déjame consultar con mi equipo y te confirmamos el costo de envío exacto 🌸" ` +
-        `NO des un precio de envío por tu cuenta. El sistema notificará al equipo.`
+        `Menciona que el equipo le contactará pronto. Máximo 3 líneas.`
+    }
 
-      const numeroRealTmp = await numeroRealPromise.catch(() => null)
-      if (numeroRealTmp) {
-        const ubicacionTexto = detectarLinkMaps(textoCliente) ? 'Compartió link de Google Maps' : textoCliente.slice(0, 200)
-        notificarEmpleadosWhatsApp(
-          `🚚 *Cliente necesita cotización de envío:* ${telefono}\n\nUbicación: ${ubicacionTexto}\n\nPor favor confírmale el precio exacto de envío.`
-        ).catch(() => {})
-        enviarAlertaEmpleadoEnvio(numeroRealTmp, ubicacionTexto).catch(() => {})
-      }
+    const resultadoEnvio = pareceEnvio ? await buscarPrecioEnvio(textoCliente).catch(() => null) : null
+
+    if (resultadoEnvio && !('ambiguo' in resultadoEnvio)) {
+      const telefonoReal = await numeroRealPromise
+      console.log(`[bot] 📬 Envío match: ${resultadoEnvio.zona} — $${resultadoEnvio.precio}`)
+      notificarEmpleadosWhatsApp(
+        `🚚 *Cliente necesita cotización de envío:* ${telefonoReal}\n\nZona detectada: ${resultadoEnvio.zona} — $${resultadoEnvio.precio}\n\nPor favor confírmale el precio exacto de envío.`
+      ).catch(() => {})
+    } else if (resultadoEnvio && 'ambiguo' in resultadoEnvio && resultadoEnvio.ambiguo) {
+      const telefonoReal = await numeroRealPromise
+      registrarZonaAmbigua(textoCliente, telefonoReal, resultadoEnvio.candidatos).catch(() => {})
+      notificarEmpleadosWhatsApp(
+        `🚚 *Cliente necesita cotización de envío:* ${telefonoReal}\n\nUbicación: ${textoCliente.slice(0, 100)}\n\nPor favor confírmale el precio exacto de envío.`
+      ).catch(() => {})
+      enviarAlertaEmpleadoEnvio(clienteId, textoCliente).catch(() => {})
+    } else if (pareceEnvio && !resultadoEnvio) {
+      const telefonoReal = await numeroRealPromise
+      notificarEmpleadosWhatsApp(
+        `🚚 *Cliente necesita cotización de envío:* ${telefonoReal}\n\nUbicación: ${textoCliente.slice(0, 100)}\n\nPor favor confírmale el precio exacto de envío.`
+      ).catch(() => {})
+      enviarAlertaEmpleadoEnvio(clienteId, textoCliente).catch(() => {})
     }
 
     // ── Contexto genérico de reply ──────────────────────────────
-    if (message.hasQuotedMsg && textoCitado) {
+    if (hasQuotedMsg(msg) && textoCitado) {
       contextoExtra +=
         `\n\n[CLIENTE RESPONDIÓ AL MENSAJE: "${textoCitado.replace(/"/g, "'")}"]` +
         `\nINSTRUCCION: El usuario respondió específicamente a ese mensaje. Úsalo para entender a qué se refiere.`
@@ -1170,491 +1200,239 @@ async function procesarMensaje(message: any): Promise<void> {
         `NO prometas reembolsos ni descuentos. El sistema notificará automáticamente al administrador.`
     }
 
-    // ── QUEJA / RECLAMO ─────────────────────────────────────────
+    // ── QUEJA ────────────────────────────────────────────────────
     if (detectarQueja(textoCliente)) {
       contextoExtra +=
-        `\n\n[CLIENTE REPORTA UN PROBLEMA]` +
-        `\nINSTRUCCION: Discúlpate sinceramente UNA vez. Di que reportarás al equipo inmediatamente. ` +
-        `NO ofrezcas compensaciones ni descuentos sin autorización. El sistema notificará al administrador.`
+        `\n\n[CLIENTE TIENE UNA QUEJA O RECLAMO]` +
+        `\nINSTRUCCION: Responde con empatía. Pide disculpas y di que lo reportas al equipo. ` +
+        `NO ofrezcas compensaciones ni descuentos. El sistema notificará automáticamente.`
     }
 
-    // ── EVENTOS ESPECIALES ─────────────────────────────────────
-    const eventoDetectado = detectarEvento(textoCliente)
-    if (eventoDetectado) {
-      const guias: Record<string, string> = {
-        'boda': 'Sugiere: arreglos elegantes, colores coordinados con la temática. Podemos trabajar con anticipación.',
-        'casamiento': 'Sugiere: arreglos elegantes, colores coordinados con la temática.',
-        'xv': 'Sugiere: arreglos llamativos y coloridos, ideales para celebración.',
-        'quinceañera': 'Sugiere: arreglos llamativos y coloridos, ideales para celebración.',
-        'funeral': 'Sugiere: arreglos sobrios y elegantes, tonos blancos y verdes.',
-        'velorio': 'Sugiere: arreglos sobrios y elegantes, tonos blancos y verdes.',
-        'aniversario': 'Sugiere: flores con significado especial, preguntar por flor favorita.',
-        'graduación': 'Sugiere: arreglos vibrantes y modernos para celebrar el logro.',
-        'baby shower': 'Sugiere: arreglos tiernos y pasteles, ideales para recibir al bebé.',
-        'san valentín': 'Sugiere: arreglos románticos con rosas rojas, colores pasión.',
-        'madres': 'Sugiere: arreglos coloridos y alegres, ideales para consentir a mamá.',
+    // ── EVENTOS ESPECIALES ──────────────────────────────────────
+    const evento = detectarEvento(textoCliente)
+    if (evento) {
+      const contextoEvento: Record<string, string> = {
+        'boda': 'Sugiere ramos de novia elegantes, centros de mesa, arreglos para ceremonia.',
+        'xv años': 'Sugiere ramos y arreglos juveniles, colores vibrantes, para quinceañera.',
+        'funeral': 'Sé sensible y respetuosa. Sugiere coronas fúnebres, ramos de luto, arreglos blancos.',
+        'aniversario': 'Sugiere ramos románticos con rosas o flores favoritas.',
+        'graduación': 'Sugiere ramos alegres y coloridos, girasoles, arreglos para celebrar.',
       }
-      const guia = Object.entries(guias).find(([k]) => eventoDetectado.includes(k))?.[1] || 'Sugiere arreglos acordes al evento.'
-      contextoExtra +=
-        `\n\n[CLIENTE MENCIONÓ UN EVENTO ESPECIAL: "${eventoDetectado}"]` +
-        `\nINSTRUCCION: ${guia} Pregunta por colores o estilo que busca. Máximo 3 líneas.`
+      const sugerencia = Object.entries(contextoEvento).find(([k]) => evento.includes(k))?.[1] || ''
+      contextoExtra += `\n\n[EVENTO: ${evento.toUpperCase()}] ${sugerencia}`
     }
 
-    // ── Cliente con venta ya cerrada ─────────────────────────────
-    if (VENTAS_CERRADAS.has(clienteId)) {
-      const venta = VENTA_ACTUAL.get(clienteId)
-      const detalleVenta = venta
-        ? `Pedido actual: ${venta.producto}, total ${venta.total}, entrega ${venta.direccion}. `
-        : ''
-      contextoExtra +=
-        `\n\n[VENTA YA CERRADA PARA ESTE CLIENTE] ${detalleVenta}El usuario ya completó su compra. ` +
-        `Atiende dudas post-venta (seguimiento, quejas, cambios) pero NO ofrezcas nuevos arreglos ni preguntes "cuál te gustó". ` +
-        `Si pide foto de entrega o comprobante de entrega, responde: "Claro, se lo comento al equipo/repartidor para que puedan apoyarte con eso 🌸". ` +
-        `No digas que no puedes coordinarlo. No lo prometas como garantía. ` +
-        `Si quiere cancelar o reporta problema, NO le pidas nombre/precio si ya aparece en el pedido actual; di que notificarás al equipo.`
+    // ── DETECCIÓN DE FRUSTRACIÓN ───────────────────────────────
+    if (esFrustrado) {
+      const ahoraFrustracion = FRUSTRACION_NOTIFICADA.get(clienteId) ?? 0
+      if (Date.now() - ahoraFrustracion > 30 * 60_000) {
+        FRUSTRACION_NOTIFICADA.set(clienteId, Date.now())
+        enviarAlertaClienteFrustrado(
+          telefono, textoCliente.substring(0, 200)
+        ).catch(() => {})
+      }
     }
 
-    // Detectar continuacion de venta (pago/envio)
-    const KW_PAGO = /pago|pagar|transferencia|deposito|depósito|bbva|banco|tarjeta|efectivo|oxxo|okei|okis|okas|ok|va|dale|acuerdo|confirmo|si[^a-zA-Z]|simon|sip|sipo|está bien|esta bien|le pago|voy a pagar|ya pague|ya pagué|ya me dijo|listo|comprobante/i.test(textoCliente)
-    const KW_CONFIRMA_PAGO = /ya pague|ya pagué|listo|comprobante|ya quedó|ya quedo|ya lo hice|ya la hice|ya la hizo|ya.*dep[oó]sito|hice.*dep[oó]sito|dep[oó]sito.*hecho|ya transfer[ií]|transfer[ií]|ya lo envi[eé]|ya lo mande|ya lo mand[eé]|ya llegó|ya llego|sipi|si ya|confirmo|confirmado|ya esta pagado/i.test(textoCliente)
-    const consultaPagoEnviado = /le lleg[oó]|si lleg[oó]|sí lleg[oó]|recibieron|recibiste|dep[oó]sito|transfer/i.test(textoCliente)
-    const pagoAlRecoger = /pago\s+al\s+recog?er|pagar[eé]?\s+al\s+recog?er|efectivo\s+al\s+recog?er|al\s+recog?er\s+gracias/i.test(textoCliente)
-    const pagoTransferencia = /transfer|tranfer|tranferencia|transferencia|dep[oó]sito|bbva/i.test(textoCliente)
+    // ── DETECCIÓN DE INTERÉS DE COMPRA ──────────────────────────
+    if (esInteresCompra) {
+      const ahoraInteres = INTERES_COMPRA_NOTIFICADO.get(clienteId) ?? 0
+      if (Date.now() - ahoraInteres > 30 * 60_000) {
+        INTERES_COMPRA_NOTIFICADO.set(clienteId, Date.now())
+        const telefonoReal = await numeroRealPromise
+        console.log(`[bot] 💰 Interés de compra de ${telefonoReal}: ${textoCliente.substring(0, 80)}`)
+        enviarAlertaClienteInteresado(telefonoReal, textoCliente.substring(0, 300)).catch(() => {})
+      }
+    }
 
-    if (/\bcentro\b/i.test(textoCliente) && /sucursal|ubicaci[oó]n|recog|ursal/i.test(textoCliente)) pedidoActual(clienteId).sucursal = 'Centro'
-    if (/\bnorte\b/i.test(textoCliente) && /sucursal|ubicaci[oó]n|recog|ursal/i.test(textoCliente)) pedidoActual(clienteId).sucursal = 'Norte'
-    if (pagoAlRecoger) pedidoActual(clienteId).metodoPago = 'efectivo_recoger'
-    if (pagoTransferencia) pedidoActual(clienteId).metodoPago = 'transferencia'
+    // ── VENTA CERRADA manual ────────────────────────────────────
+    if (/venta\s*cerrada/i.test(textoCliente)) {
+      const venta = ventaDesdeEstado(clienteId)
+      if (venta) {
+        ventaCerradaHandler(clienteId, venta, telefono)
+      }
+    }
 
-    const notaMatch = textoCliente.match(/(?:notita|nota).*?(?:diga|decir|ponerle|poner)\s+(.+)/i)
+    // ── EXTRAER DATOS DEL PEDIDO ────────────────────────────────
+    const notaMatch = textoCliente.match(/nota[:\s]*([\s\S]{1,500})/i)
     if (notaMatch && ARREGLO_ELEGIDO.has(clienteId)) pedidoActual(clienteId).nota = notaMatch[1].trim().slice(0, 500)
 
-    const nombreMatch = textoCliente.match(/(?:a\s+nombre\s+de|nombre\s+de|a\s+)\s+([a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){0,5})/i)
-      ?? textoCliente.match(/\b([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,5})\b(?=.*\b(entregar|entrega|apart|nombre|4\s*pm|[0-9]{1,2}\s*(?:am|pm)))/)
+    const nombreMatch = textoCliente.match(/(?:a qué nombre|nombre|apartar a nombre de|para quien|para quién|ponerle|se lo aparto a nombre de)[:\s]*([a-záéíóúñ\s]+)/i)
     if (nombreMatch && ARREGLO_ELEGIDO.has(clienteId)) {
-      pedidoActual(clienteId).nombre = nombreMatch[1].trim().replace(/\b\w/g, c => c.toUpperCase())
-    }
-
-    if (KW_PAGO && intencion === 'normal') {
-      contextoExtra +=
-        `\n\n[CONTEXTO DE PAGO] El usuario está respondiendo sobre pago o confirmación. ` +
-        `Revisa el historial. Si el usuario YA CONFIRMÓ el pago (dijo "ya pague", "listo", "comprobante", "transfer"): ` +
-        `AGRADECE el pago, confirma que el pedido queda apartado y CIERRA con el token. ` +
-        `NO le pidas más confirmación ni le digas "déjame revisar". ` +
-        `El token [VENTA_CERRADA:...] debe ir AL FINAL de tu mensaje.`
-    }
-
-    if (pagoAlRecoger) {
-      contextoExtra +=
-        `\n\n[PAGO AL RECOGER] El cliente pagará en efectivo al recoger. ` +
-        `NO generes token [VENTA_CERRADA]. Solo confirma apartado, sucursal, nombre y resumen. ` +
-        `No lo reportes como venta pagada todavía.`
-    }
-
-    if (consultaPagoEnviado && ARREGLO_ELEGIDO.has(clienteId)) {
-      contextoExtra +=
-        `\n\n[CLIENTE HABLA DE PAGO YA ENVIADO/RECIBIDO] ` +
-        `No reinicies la venta, no preguntes de nuevo cuál arreglo quiere y no digas que no compartió datos. ` +
-        `Si pregunta si llegó el depósito, responde que lo reportas al equipo para verificarlo. ` +
-        `Si afirma que ya pagó o ya hizo depósito, agradece y cierra la venta con el token usando el pedido en curso.`
-    }
-
-    if (/transferencia|tranferencia|transfer/i.test(textoCliente) && /a nombre de|nombre de/i.test(textoCliente) && !KW_CONFIRMA_PAGO) {
-      contextoExtra +=
-        `\n\n[CLIENTE DIO NOMBRE Y ELIGIÓ TRANSFERENCIA] ` +
-        `INSTRUCCION: NO vuelvas a preguntar el nombre. NO digas "gracias por el pago" todavía. ` +
-        `Comparte la cuenta BBVA y pide que mande el comprobante cuando quede listo.`
-    }
-
-    const pedido = PEDIDO_EN_CURSO.get(clienteId)
-    if (pedido?.arreglo) {
-      const totalPedido = pedido.arreglo.precio + (pedido.envio?.precio ?? 0)
-      contextoExtra +=
-        `\n\n[PEDIDO EN CURSO VERIFICADO POR SISTEMA] ` +
-        `Producto elegido: "${pedido.arreglo.nombre}" — $${pedido.arreglo.precio.toFixed(2)} MXN. ` +
-        `${pedido.envio ? `Envío: ${pedido.envio.zona} — $${pedido.envio.precio.toFixed(2)} MXN. ` : ''}` +
-        `Total actual: $${totalPedido.toFixed(2)} MXN. ` +
-        `${pedido.nombre ? `Nombre: ${pedido.nombre}. ` : ''}` +
-        `NO cambies el producto por otro del historial. Si cierras venta, usa exactamente estos datos. ` +
-        `${pedido.envio ? 'Como es ENVIO A DOMICILIO, el pago debe ser por transferencia antes de preparar/enviar. NO ofrezcas efectivo al recibir ni efectivo al recoger. ' : ''}`
-    }
-
-    await chat.sendStateTyping()
-    const historialAI = await obtenerHistorial(telefono)
-    const { mensaje, ventaCerrada } = await getAIResponse(historialAI, contextoExtra)
-    await chat.clearState()
-
-    await agregarAlHistorial(telefono, 'assistant', mensaje)
-
-    const mensajeFinal = limpiarRespuestaIA(mensaje)
-    await simularEscritura(chat, calcularDelayEscritura(mensajeFinal))
-
-    let mensajeEnviado = false
-    try {
-      await message.reply(mensajeFinal)
-      mensajeEnviado = true
-    } catch (sendErr) {
-      console.warn(`[bot] ⚠️ message.reply falló, intentando chat.sendMessage:`, (sendErr as Error)?.message?.slice(0, 80))
-      try {
-        await chat.sendMessage(mensajeFinal)
-        mensajeEnviado = true
-      } catch (chatSendErr) {
-        console.warn(`[bot] ⚠️ chat.sendMessage también falló:`, (chatSendErr as Error)?.message?.slice(0, 80))
-        try {
-          await whatsappClient.sendMessage(clienteId, mensajeFinal)
-          mensajeEnviado = true
-        } catch (clientSendErr) {
-          console.error(`[bot] ❌ whatsappClient.sendMessage también falló:`, (clientSendErr as Error)?.message?.slice(0, 80))
-        }
+      const nombre = nombreMatch[1].trim().replace(/\s+/g, ' ').slice(0, 80)
+      if (!/^(ok|si|sí|vale|dale|va|de acuerdo|esta bien|está bien)$/i.test(nombre)) {
+        pedidoActual(clienteId).nombre = nombre
       }
     }
 
-    const numeroReal = await numeroRealPromise
-    if (tieneArregloVerificado(clienteId)) {
-      persistirPedido(clienteId, numeroReal, VENTAS_CERRADAS.has(clienteId) ? 'pagado' : 'cotizacion', textoCliente).catch(() => {})
+    // ── MÉTODO DE PAGO ──────────────────────────────────────────
+    const consultaPagoEnviado = /(?:ya\s*)?pag[uú]e|comprobante|transferencia|ya\s*transfer/i.test(textoCliente)
+
+    const esSucursal = /recoger|recojo|paso|pasare|sucursal|ah[ií]|all[aá]|voy/i.test(textoCliente)
+    if (esSucursal && ARREGLO_ELEGIDO.has(clienteId) && !consultaPagoEnviado) {
+      pedidoActual(clienteId).sucursal = 'Apizaco (sucursal)'
+      pedidoActual(clienteId).metodoPago = 'efectivo_recoger'
+      contextoExtra +=
+        `\n\n[CLIENTE RECOGE EN SUCURSAL] ` +
+        `INSTRUCCION: Confirma dirección: Av. Hidalgo 12, Apizaco Centro. ` +
+        `Pregunta en qué horario pasará y comparte la cuenta BBVA por si quiere adelantar el pago. ` +
+        `El equipo preparará su pedido.`
     }
 
+    // ── CIERRE DE VENTA ─────────────────────────────────────────
+    const ventaToken  = textoCliente.match(/\[VENTA_CERRADA:\s*(.+?)\|(.+?)\|(.+?)\|(.+?)\]/i)
+    let ventaCerrada = false
+
+    if (ventaToken) {
+      const [ , nombre, producto, precio, direccion ] = ventaToken
+      const venta: VentaCerrada = {
+        cliente: nombre.trim(), producto: producto.trim(),
+        total: precio.trim(), direccion: direccion.trim(),
+        rawToken: ventaToken[0],
+      }
+      ventaCerradaHandler(clienteId, venta, telefono)
+      ventaCerrada = true
+    }
+
+    if (!ventaCerrada && !VENTAS_CERRADAS.has(clienteId) && confirmaCorto && (ARREGLO_ELEGIDO.has(clienteId) || (textoCliente.length < 150 && !textoCliente.includes('?')))) {
+      const elegido = ARREGLO_ELEGIDO.get(clienteId)
+      if (elegido) {
+        const pedido = PEDIDO_EN_CURSO.get(clienteId)
+        const total = elegido.precio + (pedido?.envio?.precio ?? 0)
+        const totalTexto = pedido?.envio
+          ? `$${total.toFixed(2)} MXN (ramo $${elegido.precio.toFixed(2)} + envío $${(pedido?.envio?.precio ?? 0).toFixed(2)})`
+          : `$${total.toFixed(2)} MXN`
+        ventaCerradaHandler(clienteId, {
+          cliente: pedido?.nombre ?? 'Verificar en chat',
+          producto: elegido.nombre,
+          total: totalTexto,
+          direccion: pedido?.envio?.zona ?? 'Por confirmar',
+          rawToken: '',
+        }, telefono)
+      }
+    }
+
+    // ── ATENCIÓN HUMANA (notificación de alerta si aplica)
     if (motivoAtencionHumana && debeNotificarAtencionHumana(clienteId)) {
-      const contexto = historialCompleto
-        .slice(-5)
-        .map(m => `${m.role === 'user' ? 'Cliente' : 'Flora'}: ${m.content}`)
-        .concat(`Cliente: ${textoCliente}`)
-        .join('\n')
-      enviarAlertaAtencionHumana(numeroReal, motivoAtencionHumana, contexto)
-        .catch(err => console.error('[bot] Telegram atención humana:', err))
+      enviarAlertaAtencionHumana(telefono, textoCliente.substring(0, 300), motivoAtencionHumana).catch(() => {})
     }
 
-    // ── INTERÉS DE COMPRA: Alerta al admin ──────────────────────
-    if (esInteresCompra && !VENTAS_CERRADAS.has(clienteId)) {
-      const ultimaNotif = INTERES_COMPRA_NOTIFICADO.get(clienteId) ?? 0
-      if (Date.now() - ultimaNotif > 30 * 60_000) {
-        INTERES_COMPRA_NOTIFICADO.set(clienteId, Date.now())
-        enviarAlertaClienteInteresado(numeroReal, textoCliente)
-          .catch(err => console.error('[bot] Telegram interés:', err))
-      }
-    }
+    // ── GENERAR CONTEXTO DE IA ──────────────────────────────────
+    if (!ventaCerrada) {
+      const zonas = await obtenerZonasEnvio()
+      const zonasPrompt = formatearZonasParaPrompt(zonas)
+      if (zonasPrompt) contextoExtra += `\n\nZonas de envío disponibles:\n${zonasPrompt}`
 
-    // Alerta cotizador web
-    if (intencion === 'cotizador') {
-      enviarAlertaCotizacion(numeroReal, textoCliente)
-        .catch(err => console.error('[bot] Telegram cotizacion:', err))
-    }
+      const floresPrompt = await obtenerPreciosFlores()
+      if (floresPrompt) contextoExtra += `\n\nPrecios de flores individuales:\n${floresPrompt}`
 
-    // Frustración
-    if (esFrustrado) {
-      const veces = (FRUSTRACION_NOTIFICADA.get(clienteId) ?? 0) + 1
-      FRUSTRACION_NOTIFICADA.set(clienteId, veces)
-      if (veces <= 2) {
-        enviarAlertaClienteFrustrado(numeroReal, textoCliente)
-          .catch(err => console.error('[bot] Telegram frustración:', err))
-      }
-    }
+      contextoExtra += `\n\nForma de pago:\nBBVA | 4152314097305273 | Devi América Cerenil\n` +
+        `(Pregunta el nombre para apartarlo)`
 
-    // ── CANCELACIÓN: Alerta al admin ────────────────────────────
-    if (detectarCancelacion(textoCliente)) {
-      console.log(`[bot] 🚫 Cancelación solicitada por ${numeroReal}`)
-      enviarAlertaCancelacion(numeroReal, textoCliente)
-        .catch(err => console.error('[bot] Telegram cancelación:', err))
-    }
+      const respuestaIA = await getAIResponse(
+        historialCompleto.length > 0 ? historialCompleto : [],
+        contextoExtra,
+      )
 
-    // ── QUEJA: Alerta al admin ──────────────────────────────────
-    if (detectarQueja(textoCliente)) {
-      console.log(`[bot] ⚠️ Queja reportada por ${numeroReal}`)
-      enviarAlertaQueja(numeroReal, textoCliente)
-        .catch(err => console.error('[bot] Telegram queja:', err))
-    }
-
-    // Venta cerrada
-    if (ventaCerrada) {
-      if (VENTAS_CERRADAS.has(clienteId)) {
-        console.warn(`[bot] ⚠️ Token venta cerrada duplicado ignorado para ${clienteId}`)
+      if (!respuestaIA) {
+        await responderMensaje(msg, '🌷 Dame un momento, estoy revisando...')
         return
       }
-      if (!tieneArregloVerificado(clienteId)) {
-        console.warn(`[bot] ⚠️ Token venta cerrada ignorado: no hay arreglo verificado para ${clienteId}`)
-        return
-      }
-      const ventaVerificada = ventaDesdeEstado(clienteId, ventaCerrada) ?? ventaCerrada
-      console.log(`[bot] 🎉 VENTA CERRADA: ${ventaVerificada.cliente} | ${numeroReal}`)
-      const esPagoAlRecoger = PEDIDO_EN_CURSO.get(clienteId)?.metodoPago === 'efectivo_recoger'
-      if (!esPagoAlRecoger) {
-        const pedido = PEDIDO_EN_CURSO.get(clienteId)
-        const arreglo = pedido?.arreglo ?? ARREGLO_ELEGIDO.get(clienteId)
-        enviarAlertaVentaCerrada({
-          cliente: ventaVerificada.cliente, producto: ventaVerificada.producto,
-          total: ventaVerificada.total, direccion: ventaVerificada.direccion,
-          numeroCliente: numeroReal,
-          precioArreglo: arreglo ? `$${arreglo.precio.toFixed(2)} MXN` : undefined,
-          precioEnvio: pedido?.envio ? `$${pedido.envio.precio.toFixed(2)} MXN (${pedido.envio.zona})` : undefined,
-          metodoPago: pedido?.metodoPago ?? 'transferencia',
-        }).catch(err => console.error('[bot] Telegram venta:', err))
-        registrarVenta(ventaVerificada.cliente, numeroReal, ventaVerificada.producto, ventaVerificada.total, ventaVerificada.direccion)
-          .catch(err => console.error('[bot] Error registrando venta:', err))
-        persistirPedido(clienteId, numeroReal, 'pagado', textoCliente).catch(() => {})
+
+      const mensajeFinal       = limpiarRespuestaIA(respuestaIA.mensaje)
+      const ventaTokenEnResp   = mensajeFinal.match(/\[VENTA_CERRADA:\s*(.+?)\|(.+?)\|(.+?)\|(.+?)\]/i)
+
+      if (ventaTokenEnResp) {
+        const [ , nombre, producto, precio, direccion ] = ventaTokenEnResp
+        const venta: VentaCerrada = {
+          cliente: nombre.trim(), producto: producto.trim(),
+          total: precio.trim(), direccion: direccion.trim(),
+          rawToken: ventaTokenEnResp[0],
+        }
+
+        const msgLimpio = mensajeFinal.replace(ventaTokenEnResp[0], '').trim()
+        if (msgLimpio) {
+          await responderMensaje(msg, msgLimpio)
+          await new Promise(r => setTimeout(r, 1500))
+        }
+        ventaCerradaHandler(clienteId, venta, telefono)
       } else {
-        console.warn('[bot] Venta token ignorado como venta pagada: pago al recoger')
-        const pedido = PEDIDO_EN_CURSO.get(clienteId)
-        const arreglo = pedido?.arreglo ?? ARREGLO_ELEGIDO.get(clienteId)
-        if (arreglo) {
-          enviarAlertaPedidoApartado({
-            cliente: ventaVerificada.cliente,
-            producto: ventaVerificada.producto,
-            precioArreglo: `$${arreglo.precio.toFixed(2)} MXN`,
-            total: `$${arreglo.precio.toFixed(2)} MXN`,
-            entrega: ventaVerificada.direccion,
-            metodoPago: 'Efectivo/tarjeta al recoger',
-            numeroCliente: numeroReal,
-          }).catch(err => console.error('[bot] Telegram apartado pedido:', err))
+        const elegido = ARREGLO_ELEGIDO.get(clienteId)
+        let mensajeParaEnviar = mensajeFinal
+
+        if (!VENTAS_CERRADAS.has(clienteId) && elegido && (
+          confirmaCorto || /lo[sv]? quiero|me gusta|adelante|procedo|hagamoslo|hag[aá]moslo|d[aá]le|adelante|apartalo|aparta lo|si? (por favor|gracias)/i.test(textoCliente)
+        )) {
+          const pedido = PEDIDO_EN_CURSO.get(clienteId)
+          const total = elegido.precio + (pedido?.envio?.precio ?? 0)
+          const totalTexto = pedido?.envio
+            ? `$${total.toFixed(2)} MXN (ramo $${elegido.precio.toFixed(2)} + envío $${(pedido?.envio?.precio ?? 0).toFixed(2)})`
+            : `$${total.toFixed(2)} MXN`
+          ventaCerradaHandler(clienteId, {
+            cliente: pedido?.nombre ?? 'Verificar en chat',
+            producto: elegido.nombre,
+            total: totalTexto,
+            direccion: pedido?.envio?.zona ?? 'Por confirmar',
+            rawToken: '',
+          }, telefono)
         }
-        persistirPedido(clienteId, numeroReal, 'apartado', textoCliente).catch(() => {})
+
+        await responderMensaje(msg, mensajeParaEnviar)
+        await agregarAlHistorial(telefono, 'assistant', mensajeParaEnviar)
       }
-      VENTAS_CERRADAS.add(clienteId)
-      VENTA_ACTUAL.set(clienteId, ventaVerificada)
-    }
-
-    // Fallback: si el cliente confirmó pago pero la IA no generó el token
-    if (!ventaCerrada && !VENTAS_CERRADAS.has(clienteId) && KW_CONFIRMA_PAGO && (ARREGLO_ELEGIDO.has(clienteId) || (mensajeFinal.length < 150 && !mensajeFinal.includes('?')))) {
-      const ventaVerificada = ventaDesdeEstado(clienteId)
-      const elegido = ARREGLO_ELEGIDO.get(clienteId)
-      const nombreArreglo = ventaVerificada?.producto ?? elegido?.nombre ?? 'Pedido'
-      const totalArreglo = ventaVerificada?.total ?? `$${(elegido?.precio ?? 0).toFixed(2)} MXN`
-      const clienteVenta = ventaVerificada?.cliente ?? 'Verificar en chat'
-      const direccionVenta = ventaVerificada?.direccion ?? 'Por confirmar'
-      const pedido = PEDIDO_EN_CURSO.get(clienteId)
-      console.log(`[bot] ⚠️ Cliente confirmó pago pero IA no generó token. Notificando igual.`)
-      enviarAlertaVentaCerrada({
-        cliente: clienteVenta,
-        producto: nombreArreglo,
-        total: totalArreglo,
-        direccion: direccionVenta,
-        numeroCliente: numeroReal,
-        precioArreglo: elegido ? `$${elegido.precio.toFixed(2)} MXN` : undefined,
-        precioEnvio: pedido?.envio ? `$${pedido.envio.precio.toFixed(2)} MXN (${pedido.envio.zona})` : undefined,
-        metodoPago: pedido?.metodoPago ?? 'transferencia',
-      }).catch(err => console.error('[bot] Telegram venta fallback:', err))
-      registrarVenta(clienteVenta, numeroReal, nombreArreglo, totalArreglo, direccionVenta)
-        .catch(err => console.error('[bot] Error registrando venta fallback:', err))
-      VENTAS_CERRADAS.add(clienteId)
-      persistirPedido(clienteId, numeroReal, 'pagado', textoCliente).catch(() => {})
-      VENTA_ACTUAL.set(clienteId, {
-        cliente: clienteVenta,
-        producto: nombreArreglo,
-        total: totalArreglo,
-        direccion: direccionVenta,
-        rawToken: '',
-      })
-    }
-
-    // Detectar "venta cerrada" explícito del usuario/humano
-    if (/venta\s*cerrada|venta.*cerrada|sale.*closed|closed.*sale/i.test(textoCliente)) {
-      console.log(`[bot] 🚨 Usuario indicó venta cerrada manualmente: ${numeroReal}`)
-      const ventaVerificada = ventaDesdeEstado(clienteId)
-      const elegido = ARREGLO_ELEGIDO.get(clienteId)
-      const nombreArreglo = ventaVerificada?.producto ?? elegido?.nombre ?? 'Pedido'
-      const totalVenta = ventaVerificada?.total ?? `$${(elegido?.precio ?? 0).toFixed(2)} MXN`
-      const direccionVenta = ventaVerificada?.direccion ?? 'Verificar en chat'
-      const clienteVenta = ventaVerificada?.cliente ?? 'Manual'
-      enviarAlertaVentaCerrada({
-        cliente: clienteVenta,
-        producto: nombreArreglo,
-        total: totalVenta,
-        direccion: direccionVenta,
-        numeroCliente: numeroReal,
-      }).catch(err => console.error('[bot] Telegram venta manual:', err))
-      VENTAS_CERRADAS.add(clienteId)
-      VENTA_ACTUAL.set(clienteId, {
-        cliente: clienteVenta,
-        producto: nombreArreglo,
-        total: totalVenta,
-        direccion: direccionVenta,
-        rawToken: '',
-      })
-      registrarVenta(clienteVenta, numeroReal, nombreArreglo, totalVenta, direccionVenta)
-        .catch(err => console.error('[bot] Error registrando venta manual:', err))
-    }
-
-
-
-    if (mensajeEnviado) {
-      console.log(`[${new Date().toLocaleTimeString('es-MX')}] ✅ Listo para ${clienteId}`)
-    } else {
-      console.error(`[${new Date().toLocaleTimeString('es-MX')}] ❌ No se pudo enviar mensaje a ${clienteId} — los 3 métodos fallaron`)
-    }
-
-  } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error)
-    const esPuppeteerError =
-      errMsg.includes('Execution context was destroyed') ||
-      errMsg.includes('Protocol error') ||
-      errMsg.includes('Target closed') ||
-      errMsg.includes('Session closed') ||
-      errMsg.includes('timed out') ||
-      errMsg.includes('getChat') ||
-      errMsg.includes('evaluate')
-
-    if (esPuppeteerError) {
-      console.warn(`[bot] ⚠️ Recarga de WhatsApp. El cliente puede reenviar.`)
-      return
-    }
-
-    console.error(`[bot] Error con ${clienteId}:`, error)
-
-    const msgId = (message as any).id?._serialized
-    const esRescatado = msgId && MENSAJES_RESCATADOS.has(msgId)
-
-    if (!esRescatado) {
-      try {
-        const chat = await Promise.race([
-          message.getChat(),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000))
-        ]) as any
-        await chat.clearState().catch(() => {})
-        await message.reply('Disculpa, tuve un pequeño mareo digital 🌸. ¿Me lo puedes repetir?').catch(() => {})
-      } catch { /* ignorar */ }
-    } else {
-      MENSAJES_RESCATADOS.delete(msgId!)
-      console.warn(`[bot] ⚠️ Mensaje rescatado falló silenciosamente (sin "mareo digital")`)
-    }
-  }
-}
-
-// ════════════════════════════════════════════════════════════════
-// RESCATE DE MENSAJES HUÉRFANOS
-// FIX: espera unificada y await correcto
-// ════════════════════════════════════════════════════════════════
-
-async function recuperarMensajesPerdidos(): Promise<void> {
-  await new Promise(r => setTimeout(r, 10_000))
-
-  try {
-    const state = await whatsappClient.getState().catch(() => null)
-    if (state !== 'CONNECTED') {
-      console.log('[bot] ⚠️ No conectado. Omitiendo rescate.')
-      return
-    }
-
-    if (!whatsappClient.pupPage) {
-      console.log('[bot] ⚠️ Página de WhatsApp no disponible (pupPage undefined). Omitiendo rescate.')
-      return
-    }
-
-    // Esperar hasta 60s a que el Store de WhatsApp Web esté disponible
-    let storeListo = false
-    for (let i = 0; i < 6; i++) {
-      try {
-        const disponible = await whatsappClient.pupPage.evaluate(() => {
-          return !!(window as any).Store?.Chat?.getModels
-        })
-        if (disponible) { storeListo = true; break }
-      } catch {}
-      console.log('[bot] ⏳ Esperando Store de WhatsApp Web...')
-      await new Promise(r => setTimeout(r, 10_000))
-    }
-    if (!storeListo) {
-      console.log('[bot] ⚠️ Store de WhatsApp Web no disponible después de 60s. Omitiendo rescate.')
-      return
-    }
-
-    console.log('[bot] 🧹 Buscando mensajes no leídos...')
-    const chats = await whatsappClient.getChats()
-    const chatsPendientes = chats.filter(c => c.unreadCount > 0 && !c.isGroup)
-
-    if (chatsPendientes.length === 0) {
-      console.log('[bot] ✨ Sin mensajes atrasados.')
-      return
-    }
-
-    console.log(`[bot] 📥 Rescatando ${chatsPendientes.length} chats (lotes de 2)...`)
-    const BATCH_SIZE_RESCATE = 2
-    for (let i = 0; i < chatsPendientes.length; i += BATCH_SIZE_RESCATE) {
-      const batch = chatsPendientes.slice(i, i + BATCH_SIZE_RESCATE)
-      await Promise.all(batch.map(async (chat) => {
-        const mensajes = await chat.fetchMessages({ limit: chat.unreadCount })
-        const pendientes = mensajes
-          .filter(msg => !msg.fromMe && msg.type === 'chat' && msg.body?.trim())
-          .slice(-8)
-
-        if (pendientes.length === 0) return
-
-        const mensajeBase = pendientes[pendientes.length - 1] as any
-        const textoAgrupado = pendientes
-          .map(msg => String(msg.body).trim())
-          .filter(Boolean)
-          .join('\n')
-
-        for (const msg of pendientes) {
-          const msgId = obtenerMensajeId(msg)
-          if (!msgId) continue
-          MENSAJES_RESCATADOS.add(msgId)
-          if (msg !== mensajeBase) marcarMensajeProcesado(msgId)
-        }
-
-        mensajeBase.body = textoAgrupado
-        console.log(`[bot] ♻️ Inyectando ${pendientes.length} mensajes agrupados de ${chat.id._serialized}`)
-        await manejarMensajeEntrante(mensajeBase)
-      }))
     }
   } catch (err) {
-    console.error('[bot] Error en rescate:', err)
+    console.error('[bot] Error en procesarMensaje:', err)
+    try {
+      if (msg?.key?.remoteJid) {
+        await responderMensaje(msg, '🌷 Perdón, un pequeño mareo digital. ¿Me repites?')
+      }
+    } catch {}
   }
 }
 
 // ════════════════════════════════════════════════════════════════
-// CLIENTE DE WHATSAPP
+// VENTA CERRADA
 // ════════════════════════════════════════════════════════════════
 
-// 1. Detectamos automáticamente si estamos en el servidor Linux (Google Cloud)
-const isProduction = process.platform === 'linux';
+async function ventaCerradaHandler(clienteId: string, venta: VentaCerrada, telefono: string): Promise<void> {
+  if (VENTAS_CERRADAS.has(clienteId)) return
+  VENTAS_CERRADAS.add(clienteId)
 
-// 2. Asignamos las banderas según el sistema operativo
-const puppeteerArgs = isProduction ? [
-  // Banderas extremas para sobrevivir en Google Cloud
-  '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-  '--disable-gcm',
-  '--disk-cache-size=0', '--media-cache-size=0', '--disable-application-cache',
-  '--disable-gpu', '--disable-gpu-sandbox', '--use-gl=swiftshader',
-  '--disable-accelerated-2d-canvas',
-  '--disable-software-rasterizer', '--disable-extensions', '--disable-plugins',
-  '--disable-default-apps', '--disable-sync', '--disable-background-networking',
-  '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows',
-  '--disable-renderer-backgrounding', '--disable-ipc-flooding-protection',
-  '--disable-notifications', '--disable-speech-api', '--disable-print-preview',
-  '--mute-audio', '--disable-alsa', '--hide-scrollbars', '--disable-client-side-phishing-detection',
-  '--disable-hang-monitor', '--disable-prompt-on-repost', '--disable-breakpad',
-  '--no-first-run', '--no-default-browser-check', '--no-pings',
-  '--password-store=basic', '--use-mock-keychain', '--metrics-recording-only',
-  '--js-flags=--max-old-space-size=512',
-  '--disable-features=TranslateUI,BlinkGenPropertyTrees,AudioServiceOutOfProcess,AudioServiceSandbox,ChromeWhatsNew,ChromeWhatsNewUI,GoogleCloudMessaging',
-  '--use-fake-device-for-media-stream',
-  '--use-fake-ui-for-media-stream',
-  '--disable-component-extensions-with-background-pages',
-  '--disable-component-update',
-  '--safebrowsing-disable-auto-updates',
-  '--disable-domain-reliability',
-  '--disable-backing-store-limit',
-  '--max_old_space_size=256',
-] : [
-  // Banderas relajadas para que funcione perfecto en tu Windows local
-  '--no-sandbox', '--disable-setuid-sandbox'
-];
+  const numeroReal = telefono.startsWith('+') ? telefono : `+${telefono}`
 
-// 3. Inicializamos el cliente
-const whatsappClient = new Client({
-  authStrategy: new LocalAuth({
-    clientId: 'jardin-roce-bot',
-    dataPath: process.env.WWEBJS_DATA_PATH || './.wwebjs_auth',
-  }),
-  authTimeoutMs: 0,   // Paciencia infinita
-  qrMaxRetries:  20,
-  puppeteer: {
-    headless:        true,
-    dumpio:          false, // Desactivado: en VM chica el stderr de Chromium (dbus/ALSA/GCM) satura Node.js
-    executablePath:  process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    timeout:         120000,
-    protocolTimeout: 600000, // 10 minutos de paciencia
-    args:            puppeteerArgs, // Pasamos las banderas dinámicas
-  },
-})
+  console.log(`[bot] 💰 Venta cerrada: ${venta.cliente} — ${venta.producto} — ${venta.total}`)
+  await registrarVenta(venta.cliente, numeroReal, venta.producto, venta.total, venta.direccion)
+  await persistirPedido(clienteId, numeroReal, 'pagado')
+  resetearPedidoCliente(clienteId)
+
+  const alertaVenta = {
+    ...venta,
+    numeroCliente: numeroReal,
+  }
+  enviarAlertaVentaCerrada(alertaVenta).catch(err => console.error('[bot] Telegram venta:', err))
+}
+
+// ════════════════════════════════════════════════════════════════
+// PRECIOS DE FLORES (del system prompt)
+// ════════════════════════════════════════════════════════════════
+
+let CACHE_PRECIOS_FLORES: { prompt: string; ts: number } | null = null
+
+async function obtenerPreciosFlores(): Promise<string> {
+  const ahora = Date.now()
+  if (CACHE_PRECIOS_FLORES && ahora - CACHE_PRECIOS_FLORES.ts < 60_000) return CACHE_PRECIOS_FLORES.prompt
+  try {
+    const { data } = await supabaseAdmin
+      .from('configuracion_bot').select('valor').eq('clave', 'precios_flores').maybeSingle()
+    const texto = data?.valor ?? ''
+    CACHE_PRECIOS_FLORES = { prompt: texto, ts: ahora }
+    return texto
+  } catch { return '' }
+}
+
+// ════════════════════════════════════════════════════════════════
+// ESTADO DEL BOT (variables globales)
+// ════════════════════════════════════════════════════════════════
 
 let BOT_QR_EMITIDO = false
 let BOT_QR_ACTUAL: string | null = null
@@ -1664,13 +1442,12 @@ const QR_SCAN_GRACE_MS = 15 * 60_000
 let BOT_RECONNECTING = false
 let RECONNECT_START = 0
 let WATCHDOG_INICIADO = false
-let ULTIMA_RECARGA_WEB = 0
-let CONTADOR_RECARGAS_WEB = 0
-let PRIMERA_RECARGA_WEB = 0
-const MAX_RECARGAS_WEB = 5 // si recarga >5 veces en 2min, forzamos reconexión
 let BOT_ESTADO: 'iniciando' | 'esperando_qr' | 'conectado' | 'reconectando' | 'desconectado' | 'error' = 'iniciando'
 let BOT_ESTADO_DETALLE = 'Arrancando bot'
 let ULTIMO_COMANDO_BOT: string | null = null
+let BOT_READY = false
+let sock: ReturnType<typeof makeWASocket> | null = null
+let BOT_CONNECTION: 'connecting' | 'open' | 'close' = 'connecting'
 
 function actualizarEstadoBot(estado: typeof BOT_ESTADO, detalle: string): void {
   BOT_ESTADO = estado
@@ -1692,7 +1469,7 @@ async function guardarConfigBot(clave: string, valor: string): Promise<void> {
 
 async function publicarEstadoBot(): Promise<void> {
   const qrAgeMs = BOT_QR_GENERADO_EN ? Date.now() - BOT_QR_GENERADO_EN : null
-  const estadoReal = BOT_READY && whatsappClient?.info && !!whatsappClient.pupPage ? 'conectado' : BOT_ESTADO
+  const estadoReal = BOT_READY && sock?.user ? 'conectado' : BOT_ESTADO
   const conectado = estadoReal === 'conectado'
   const payload = {
     connected: conectado,
@@ -1727,12 +1504,6 @@ async function revisarComandoRemoto(): Promise<void> {
     ULTIMO_COMANDO_BOT = comando.id
     await guardarConfigBot('bot_command', '')
 
-    if (comando.action === 'recover') {
-      console.log('[bot] ♻️ Rescate remoto solicitado desde dashboard')
-      recuperarMensajesPerdidos().catch(err => console.error('[bot] Error en rescate remoto:', err))
-      return
-    }
-
     if (comando.action === 'reconnect') {
       reiniciarProceso('Reinicio remoto desde dashboard', false)
     }
@@ -1747,348 +1518,275 @@ function reiniciarProceso(motivo: string, contarCrash = true): never {
   process.exit(1)
 }
 
-async function reconectarWhatsapp(motivo: string): Promise<void> {
-  if (BOT_RECONNECTING) {
-    console.log(`[bot] Reconexión ya en curso (${motivo})`)
-    return
-  }
+// ════════════════════════════════════════════════════════════════
+// MANEJADOR DE MENSAJES ENTRANTES
+// ════════════════════════════════════════════════════════════════
 
-  BOT_RECONNECTING = true
-  RECONNECT_START = Date.now()
-  BOT_READY = false
-  actualizarEstadoBot('reconectando', motivo)
-  console.warn(`[bot] 🔄 Reconectando WhatsApp: ${motivo}`)
-
-  try {
-    await whatsappClient.destroy().catch(() => {})
-    await new Promise(r => setTimeout(r, 5000))
-    await Promise.race([
-      whatsappClient.initialize(),
-      new Promise((_, reject) => setTimeout(
-        () => reject(new Error('Timeout: initialize() no respondió en 90s')), 90_000
-      )),
-    ])
-  } catch (err) {
-    BOT_RECONNECTING = false
-    RECONNECT_START = 0
-    actualizarEstadoBot('error', 'Fallo reconectando WhatsApp')
-    console.error('[bot] ❌ No se pudo reconectar — forzando reinicio:', err)
-    registrarCrash()
-    process.exit(1)
-  }
-}
-
-whatsappClient.on('qr', async (qr) => {
-  BOT_QR_EMITIDO = true
-  BOT_QR_ACTUAL = qr
-  BOT_QR_GENERADO_EN = Date.now()
-  actualizarEstadoBot('esperando_qr', 'QR generado, esperando escaneo')
-  console.log('\n📱 Subiendo nuevo QR a Supabase...')
-  let qrGuardado = false
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const { data, error } = await supabaseAdmin
-        .from('configuracion_agente')
-        .update({ qr_code: qr })
-        .eq('id', 1)
-        .select('id')
-        .maybeSingle()
-      if (error) throw error
-      if (!data) {
-        const { error: insErr } = await supabaseAdmin
-          .from('configuracion_agente')
-          .insert({ id: 1, qr_code: qr, bot_pausado: false })
-        if (insErr) throw insErr
-      }
-      console.log(data ? '✅ QR guardado.' : '✅ QR guardado (INSERT).')
-      qrGuardado = true
-      break
-    } catch (err) {
-      console.error(`❌ Error QR Supabase (intento ${attempt + 1}/3):`, err)
-      if (attempt < 2) await new Promise(r => setTimeout(r, 3000))
-    }
-  }
-  if (!qrGuardado) console.warn('⚠️ No se pudo guardar el QR en Supabase; se muestra solo en consola.')
-  publicarEstadoBot().catch(err => console.warn('[bot] No se pudo publicar estado QR:', err))
-  console.log('\n⚡ ¡NUEVO QR! Escanéalo ahora:')
-  qrcode.generate(qr, { small: true })
-  enviarAlertaQr()
-})
-
-async function inicializarBot(origen: 'ready' | 'forzado'): Promise<void> {
-  if (BOT_READY) return
-  BOT_READY = true
-  BOT_RECONNECTING = false
-  RECONNECT_START = 0
-  actualizarEstadoBot('conectado', `WhatsApp conectado (${origen})`)
-  publicarEstadoBot().catch(err => console.warn('[bot] No se pudo publicar estado ready:', err))
-  console.log(`\n✅ Bot de Jardín RoCe conectado! (${origen})`)
-  console.log('🌸 Flora está escuchando...\n')
-  ultimaActividad = Date.now()
-  if (BOT_QR_EMITIDO) enviarAlertaReconectado()
-
-  if (!WATCHDOG_INICIADO) setInterval(async () => {
-    const minSinMensajes = Math.round((Date.now() - ultimaActividad) / 60_000)
-
-    if (BOT_RECONNECTING || Date.now() - ULTIMA_RECARGA_WEB < 2 * 60_000) {
-      if (BOT_RECONNECTING && RECONNECT_START > 0 && Date.now() - RECONNECT_START > 3 * 60_000) {
-        console.error(`[Watchdog] 🧟 Reconexión atorada >3 min — forzando reinicio`)
-        process.exit(1)
-        return
-      }
-      console.log('[Watchdog] ⏳ Reconexión/recarga en curso — esperando...')
-      return
-    }
-
-    try {
-      const state = await whatsappClient.getState()
-
-      if (state !== 'CONNECTED') {
-        const estadosReconectables = ['UNPAIRED', 'DISCONNECTED', 'UNKNOWN', 'PROXYBLOCK', 'DEPRECATED_VERSION']
-        if (estadosReconectables.includes(state)) {
-          console.error(`[Watchdog] ⚠️ Estado: ${state} — forzando reconexión inmediata`)
-          reconectarWhatsapp(`Estado: ${state}`).catch(console.error)
-          return
-        }
-        console.warn(`[Watchdog] ⚠️ Estado: ${state}. Esperando próximo ciclo antes de reconectar.`)
-        return
-      }
-
-      // ZOMBIE DETECTION: verificar que la página esté realmente viva
-      if (minSinMensajes >= 5) {
-        try {
-          const page = whatsappClient?.pupPage
-          if (page) {
-            const viva = await Promise.race([
-              page.evaluate(() => typeof window !== 'undefined' && !!navigator.onLine),
-              new Promise<false>((_, reject) => setTimeout(() => reject(new Error('timeout')), 10_000)),
-            ])
-            if (!viva) {
-              console.error(`[Watchdog] 🧟 Página no responde — forzando reinicio`)
-              process.exit(1)
-              return
-            }
-          }
-        } catch {
-          console.error(`[Watchdog] 🧟 Error verificando página — forzando reinicio`)
-          process.exit(1)
-          return
-        }
-      }
-
-      // ZOMBIE DETECTION: conectado pero sin mensajes por mucho tiempo en horario laboral.
-      if (minSinMensajes >= 45 && estaEnHorario()) {
-        console.error(`[Watchdog] 🧟 ESTADO ZOMBIE detectado: ${minSinMensajes} min sin mensajes en horario laboral. getState()=CONNECTED pero hooks muertos.`)
-        process.exit(1)
-        return
-      }
-
-      // Fuera de horario es normal no recibir mensajes
-      if (minSinMensajes >= 30) {
-        console.log(`[Watchdog] ℹ️ ${minSinMensajes} min sin mensajes (fuera de horario — normal)`)
-      }
-
-    } catch (err) {
-      // getState() falló — el cliente está desconectado
-      if (BOT_RECONNECTING || Date.now() - ULTIMA_RECARGA_WEB < 2 * 60_000) {
-        if (BOT_RECONNECTING && RECONNECT_START > 0 && Date.now() - RECONNECT_START > 3 * 60_000) {
-          console.error(`[Watchdog] 🧟 Reconexión atorada >3 min — forzando reinicio`)
-          process.exit(1)
-          return
-        }
-        console.warn('[Watchdog] getState falló durante recarga; no se reinicia proceso.')
-        return
-      }
-      if (minSinMensajes >= 5) {
-        console.error('[Watchdog] Error crítico en getState — forzando reinicio:', err)
-        registrarCrash()
-        process.exit(1)
-      }
-    }
-  }, 2 * 60_000)
-  WATCHDOG_INICIADO = true
-
-  BOT_QR_ACTUAL = null
-  BOT_QR_GENERADO_EN = null
-  try {
-    await supabaseAdmin.from('configuracion_agente').update({ qr_code: null }).eq('id', 1)
-  } catch (err) { console.error('[bot] Error limpiando QR:', err) }
-
-  // 👇 Keepalive: enviar presencia cada 2min para evitar que WhatsApp Web se duerma o recargue
-  setInterval(() => {
-    if (whatsappClient?.sendPresenceAvailable) {
-      whatsappClient.sendPresenceAvailable().catch(() => {})
-    }
-  }, 2 * 60_000)
-
-  // 👇 Registrar listener de recarga de página
-  try {
-    const page = whatsappClient.pupPage
-    if (page) {
-      page.removeAllListeners('framenavigated')
-      page.on('framenavigated', (frame: any) => {
-        if (frame !== page.mainFrame() || BOT_RECONNECTING) return
-        ULTIMA_RECARGA_WEB = Date.now()
-        const ahora = Date.now()
-        if (ahora - PRIMERA_RECARGA_WEB > 120_000) {
-          CONTADOR_RECARGAS_WEB = 0
-          PRIMERA_RECARGA_WEB = ahora
-        }
-        CONTADOR_RECARGAS_WEB++
-        console.warn(`[bot] 🔄 WhatsApp Web navegó/recargó (${CONTADOR_RECARGAS_WEB}/${MAX_RECARGAS_WEB})`)
-        setTimeout(async () => {
-          const viva = await verificarPaginaViva()
-          if (!viva) {
-            console.error(`[bot] Página no responde tras recarga — forzando reconexión`)
-            CONTADOR_RECARGAS_WEB = 0
-            reconectarWhatsapp('Página muerta tras recarga').catch(console.error)
-            return
-          }
-          console.log(`[bot] Página respira OK tras recarga`)
-          ultimaActividad = Date.now()
-          recuperarMensajesPerdidos().catch(() => {})
-        }, 10_000)
-        if (CONTADOR_RECARGAS_WEB >= MAX_RECARGAS_WEB) {
-          console.error(`[bot] 🔄 Demasiadas recargas (${CONTADOR_RECARGAS_WEB}) — forzando reconexión`)
-          CONTADOR_RECARGAS_WEB = 0
-          reconectarWhatsapp('Demasiadas recargas de WhatsApp Web').catch(console.error)
-        }
-      })
-    }
-  } catch (err) { console.warn('[bot] No se pudo registrar framenavigated:', err) }
-
-  // 👇 Ejecutar el rescate de mensajes justo al arrancar en limpio
-  recuperarMensajesPerdidos().catch(err => console.error('[bot] Error recuperando:', err))
-}
-
-whatsappClient.on('ready', () => inicializarBot('ready').catch(console.error))
-
-async function verificarPaginaViva(): Promise<boolean> {
-  try {
-    const page = whatsappClient?.pupPage
-    if (!page) return false
-    const resultado = await Promise.race([
-      page.evaluate(() => typeof window !== 'undefined' && !!navigator.onLine),
-      new Promise<false>((_, reject) => setTimeout(() => reject(new Error('timeout')), 15_000)),
-    ])
-    return resultado === true
-  } catch {
-    return false
-  }
-}
-
-whatsappClient.on('auth_failure', (msg) => { console.error('❌ Auth:', msg); registrarCrash(); process.exit(1) })
-
-whatsappClient.on('disconnected', (reason) => {
-  console.warn('⚠️ Desconectado:', reason)
-  BOT_READY = false
-  actualizarEstadoBot('desconectado', String(reason || 'WhatsApp desconectado'))
-  publicarEstadoBot().catch(err => console.warn('[bot] No se pudo publicar estado disconnected:', err))
-  if (String(reason).toLowerCase().includes('max qrcode retries reached')) {
-    reiniciarProceso('WhatsApp agotó los intentos de QR sin escaneo')
-  }
-  setTimeout(() => { reconectarWhatsapp(`evento disconnected: ${reason}`).catch(console.error) }, 5000)
-})
-
-async function manejarMensajeEntrante(message: any): Promise<void> {
+async function manejarMensajeEntrante(msg: any): Promise<void> {
   registrarActividad()
-  console.log(`[DIAG] from: ${message.from} | type: ${message.type} | fromMe: ${message.fromMe}`)
 
-  if (message.isGroupMsg) return
-  if (!message.from || message.from === 'status@broadcast') return
-  if (message.from.includes('@lid') && !message.body?.trim()) return
-  if (!message.fromMe && yaProcesadoRecientemente(message)) {
-    console.log(`[bot] ↩️ Mensaje duplicado ignorado: ${obtenerMensajeId(message)}`)
+  const remoteJid = msg.key?.remoteJid as string
+  if (!remoteJid) return
+
+  const msgType = getMessageType(msg)
+  const body = getMessageBody(msg) || ''
+
+  console.log(`[DIAG] from: ${remoteJid} | type: ${msgType} | fromMe: ${msg.key?.fromMe}`)
+
+  if (isJidGroup(remoteJid)) return
+  if (remoteJid === 'status@broadcast') return
+  if (!msg.key?.fromMe && yaProcesadoRecientemente(msg)) {
+    console.log(`[bot] ↩️ Mensaje duplicado ignorado: ${obtenerMensajeId(msg)}`)
     return
   }
 
-  // Ignorar números silenciados (repartidor, admin, etc.)
+  // Ignorar números silenciados
   const ignorados = await cargarIgnorados()
-  const numeroParaIgnorar = message.from.includes('@lid')
-    ? await obtenerNumeroReal(message)
-    : message.from.replace(/@[^\s]*/g, '')
+  const numeroParaIgnorar = remoteJid.replace(/@[^\s]*/g, '')
   const variantesMensaje = variantesTelefono(numeroParaIgnorar)
-  if (!message.fromMe && variantesMensaje.some(n => ignorados.includes(n))) {
+  if (!msg.key?.fromMe && variantesMensaje.some(n => ignorados.includes(n))) {
     console.log(`[bot] 🔇 Número ignorado: ${numeroParaIgnorar}`)
     return
   }
 
-  // Guardar mensajes enviados desde la cuenta (agente humano) al historial para contexto
-  if (message.fromMe) {
-    const telefonoDestino = message.to
-      ? (message.to as string).replace(/@[^\s]*/g, '').trim()
-      : null
-    if (telefonoDestino && message.body?.trim()) {
+  // Guardar mensajes enviados desde la cuenta (agente humano) al historial
+  if (msg.key?.fromMe) {
+    const telefonoDestino = remoteJid.replace(/@[^\s]*/g, '').trim()
+    if (telefonoDestino && body) {
       const num = telefonoDestino.startsWith('52') ? `+${telefonoDestino}` : telefonoDestino
-      agregarAlHistorial(num, 'assistant', `[Agente: ${message.body.trim()}]`)
+      agregarAlHistorial(num, 'assistant', `[Agente: ${body.trim()}]`)
     }
     return
   }
 
-  const clienteId = message.from as string
+  const clienteId = remoteJid
 
-  if (message.type && message.type !== 'chat') {
-    if (TIPOS_MEDIA_NO_SOPORTADOS.has(message.type)) {
-      // Si el cliente está en proceso de compra y envía imagen (comprobante), cerrar venta
-      if (message.type === 'image' && (ARREGLO_ELEGIDO.has(clienteId) || PEDIDO_EN_CURSO.has(clienteId))) {
-        message.reply('¡Gracias! He recibido tu comprobante 🌸 Lo estoy registrando y notificando al equipo para que preparen tu pedido.').catch(() => {})
-        try {
-          const media = await message.downloadMedia()
-          if (media) {
-            const caption = `📸 *Comprobante de pago* — ${clienteId.replace(/@.*$/, '')}`
-            enviarFotoTelegram(media.data, caption, media.mimetype).catch(() => {})
-          }
-        } catch (e) {
-          console.warn('[bot] Error descargando media para Telegram:', e)
+  if (msgType !== 'chat' && TIPOS_MEDIA_NO_SOPORTADOS.has(msgType)) {
+    if (msgType === 'image' && (ARREGLO_ELEGIDO.has(clienteId) || PEDIDO_EN_CURSO.has(clienteId))) {
+      await responderMensaje(msg, '¡Gracias! He recibido tu comprobante 🌸 Lo estoy registrando y notificando al equipo para que preparen tu pedido.')
+      try {
+        const stream = await downloadContentFromMessage(msg.message, 'image')
+        const chunks: Buffer[] = []
+        for await (const chunk of stream) chunks.push(chunk)
+        const buffer = Buffer.concat(chunks)
+        if (buffer.length > 0) {
+          const caption = `📸 *Comprobante de pago* — ${clienteId.replace(/@.*$/, '')}`
+          enviarFotoTelegram(buffer.toString('base64'), caption, 'image/jpeg').catch(() => {})
         }
-        // Marcar venta como cerrada
-        const elegido = ARREGLO_ELEGIDO.get(clienteId) ?? PEDIDO_EN_CURSO.get(clienteId)?.arreglo
-        if (elegido && !VENTAS_CERRADAS.has(clienteId)) {
-          const numeroReal = await obtenerNumeroReal(message).catch(() => null)
-          const pedido = PEDIDO_EN_CURSO.get(clienteId)
-          const total = elegido.precio + (pedido?.envio?.precio ?? 0)
-          const totalTexto = pedido?.envio
-            ? `$${total.toFixed(2)} MXN (ramo $${elegido.precio.toFixed(2)} + envío $${pedido.envio.precio.toFixed(2)})`
-            : `$${total.toFixed(2)} MXN`
-          enviarAlertaVentaCerrada({
-            cliente: pedido?.nombre ?? 'Verificar en chat',
-            producto: elegido.nombre,
-            total: totalTexto,
-            direccion: pedido?.envio?.zona ?? 'Por confirmar',
-            numeroCliente: numeroReal ?? 'desconocido',
-            precioArreglo: `$${elegido.precio.toFixed(2)} MXN`,
-            precioEnvio: pedido?.envio
-              ? `$${pedido.envio.precio.toFixed(2)} MXN (${pedido.envio.zona})`
-              : undefined,
-            metodoPago: 'transferencia',
-          }).catch(err => console.error('[bot] Telegram venta img:', err))
-          VENTAS_CERRADAS.add(clienteId)
-        }
-      } else {
-        message.reply('Por ahora solo puedo leer mensajes de *texto* 🌸. ¿Qué necesitas?').catch(() => {})
+      } catch (e) {
+        console.warn('[bot] Error descargando media para Telegram:', e)
       }
+      const elegido = ARREGLO_ELEGIDO.get(clienteId) ?? PEDIDO_EN_CURSO.get(clienteId)?.arreglo
+      if (elegido && !VENTAS_CERRADAS.has(clienteId)) {
+        const numeroReal = await obtenerNumeroReal(msg).catch(() => null)
+        const pedido = PEDIDO_EN_CURSO.get(clienteId)
+        const total = elegido.precio + (pedido?.envio?.precio ?? 0)
+        const totalTexto = pedido?.envio
+          ? `$${total.toFixed(2)} MXN (ramo $${elegido.precio.toFixed(2)} + envío $${pedido.envio.precio.toFixed(2)})`
+          : `$${total.toFixed(2)} MXN`
+        enviarAlertaVentaCerrada({
+          cliente: pedido?.nombre ?? 'Verificar en chat',
+          producto: elegido.nombre,
+          total: totalTexto,
+          direccion: pedido?.envio?.zona ?? 'Por confirmar',
+          numeroCliente: numeroReal ?? 'desconocido',
+          precioArreglo: `$${elegido.precio.toFixed(2)} MXN`,
+          precioEnvio: pedido?.envio
+            ? `$${pedido.envio.precio.toFixed(2)} MXN (${pedido.envio.zona})`
+            : undefined,
+          metodoPago: 'transferencia',
+        }).catch(err => console.error('[bot] Telegram venta img:', err))
+        VENTAS_CERRADAS.add(clienteId)
+      }
+    } else {
+      await responderMensaje(msg, 'Por ahora solo puedo leer mensajes de *texto* 🌸. ¿Qué necesitas?')
     }
     return
   }
 
-  if (!message.body?.trim()) return
-  if (estaRateLimited(clienteId)) { avisarRateLimitUnaVez(message, clienteId); return }
+  if (!body.trim()) return
+  if (estaRateLimited(clienteId)) { avisarRateLimitUnaVez(msg, clienteId); return }
 
   verificarSiBotPausado().then(pausado => {
     if (pausado) { console.log(`[bot] ⏸️ Pausado — ${clienteId} ignorado`); return }
-    encolarMensajeAgrupado(clienteId, message)
-  }).catch(() => encolarMensajeAgrupado(clienteId, message))
+    encolarMensajeAgrupado(clienteId, msg)
+  }).catch(() => encolarMensajeAgrupado(clienteId, msg))
 }
 
-whatsappClient.on('message_create', manejarMensajeEntrante)
+// ════════════════════════════════════════════════════════════════
+// INICIALIZACIÓN BAILEYS
+// ════════════════════════════════════════════════════════════════
+
+async function iniciarBaileys(): Promise<void> {
+  const { state, saveCreds } = await useMultiFileAuthState(
+    process.env.BAILEYS_DATA_PATH || './.baileys_auth'
+  )
+
+  // Verificar versión más reciente de Baileys para alerta de API
+  verificarVersionBaileys().catch(() => {})
+
+  sock = makeWASocket({
+    auth: state,
+    logger: pino({ level: 'silent' }),
+    printQRInTerminal: false,
+    browser: Browsers.windows('Jardin RoCe'),
+    syncFullHistory: false,
+    generateHighQualityLinkPreview: false,
+    // shouldSyncHistory no disponible en v7
+    markOnlineOnConnect: true,
+    emitOwnEvents: false,
+  })
+
+  sock.ev.on('creds.update', saveCreds)
+
+  sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
+    if (qr) {
+      BOT_QR_EMITIDO = true
+      BOT_QR_ACTUAL = qr
+      BOT_QR_GENERADO_EN = Date.now()
+      actualizarEstadoBot('esperando_qr', 'QR generado, esperando escaneo')
+      console.log('\n📱 Subiendo nuevo QR a Supabase...')
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const { data, error } = await supabaseAdmin
+            .from('configuracion_agente')
+            .update({ qr_code: qr })
+            .eq('id', 1)
+            .select('id')
+            .maybeSingle()
+          if (error) throw error
+          if (!data) {
+            const { error: insErr } = await supabaseAdmin
+              .from('configuracion_agente')
+              .insert({ id: 1, qr_code: qr, bot_pausado: false })
+            if (insErr) throw insErr
+          }
+          console.log(data ? '✅ QR guardado.' : '✅ QR guardado (INSERT).')
+          break
+        } catch (err) {
+          console.error(`❌ Error QR Supabase (intento ${attempt + 1}/3):`, err)
+          if (attempt < 2) await new Promise(r => setTimeout(r, 3000))
+        }
+      }
+      publicarEstadoBot().catch(() => {})
+      console.log('\n⚡ ¡NUEVO QR! Escanéalo ahora:')
+      qrcode.generate(qr, { small: true })
+      enviarAlertaQr()
+    }
+
+    if (connection === 'open') {
+      BOT_CONNECTION = 'open'
+      BOT_RECONNECTING = false
+      RECONNECT_START = 0
+      BOT_READY = true
+      actualizarEstadoBot('conectado', 'WhatsApp conectado')
+      publicarEstadoBot().catch(() => {})
+      console.log('\n✅ Bot de Jardín RoCe conectado!')
+      console.log('🌸 Flora está escuchando...\n')
+      ultimaActividad = Date.now()
+      if (BOT_QR_EMITIDO) enviarAlertaReconectado()
+      BOT_QR_ACTUAL = null
+      BOT_QR_GENERADO_EN = null
+      try {
+        await supabaseAdmin.from('configuracion_agente').update({ qr_code: null }).eq('id', 1)
+      } catch {}
+    }
+
+    if (connection === 'close') {
+      BOT_CONNECTION = 'close'
+      BOT_READY = false
+      const reason = (lastDisconnect?.error as Boom)?.output?.statusCode
+      const isLoggedOut = reason === DisconnectReason.loggedOut
+      const isBadSession = reason === DisconnectReason.badSession
+      const isForbidden = reason === DisconnectReason.forbidden
+      const isRestart = reason === DisconnectReason.restartRequired
+
+      console.warn(`⚠️ Conexión cerrada: ${reason || 'desconocido'}`)
+
+      if (isRestart) {
+        actualizarEstadoBot('conectado', 'Reconectando...')
+        return
+      }
+
+      actualizarEstadoBot('desconectado', `Conexión cerrada (${reason})`)
+      publicarEstadoBot().catch(() => {})
+
+      if (isLoggedOut || isBadSession || isForbidden) {
+        reiniciarProceso(`Sesión inválida (${reason})`)
+      } else {
+        BOT_RECONNECTING = true
+        RECONNECT_START = Date.now()
+        setTimeout(() => {
+          iniciarBaileys().catch(err => {
+            console.error('[bot] ❌ Error reconectando:', err)
+            registrarCrash()
+            process.exit(1)
+          })
+        }, 5_000)
+      }
+    }
+  })
+
+  sock.ev.on('messages.upsert', async ({ messages }) => {
+    for (const msg of messages) {
+      try {
+        await manejarMensajeEntrante(msg)
+      } catch (err) {
+        console.error('[bot] Error en messages.upsert:', err)
+      }
+    }
+  })
+
+  // Mantener presencia activa cada 2 minutos
+  setInterval(() => {
+    if (sock) {
+      sock.sendPresenceUpdate('available').catch(() => {})
+    }
+  }, 2 * 60_000)
+}
+
+// ════════════════════════════════════════════════════════════════
+// VERIFICACIÓN DE VERSIÓN DE BAILEYS
+// ════════════════════════════════════════════════════════════════
+
+const BAILEYS_VERSION = '7.0.0-rc13'
+let ULTIMA_VERIF_BAILEYS = 0
+
+async function verificarVersionBaileys(): Promise<void> {
+  try {
+    const res = await fetch('https://registry.npmjs.org/@whiskeysockets/baileys/latest')
+    const data = await res.json() as { version?: string }
+    const latest = data?.version
+    if (latest && latest !== BAILEYS_VERSION) {
+      console.warn(`[bot] ⚠️ Nueva versión de Baileys disponible: ${latest} (instalada: ${BAILEYS_VERSION})`)
+      console.warn('[bot] ⚠️ Revisa breaking changes antes de actualizar: https://github.com/WhiskeySockets/Baileys/releases')
+      await guardarConfigBot('baileys_version_alerta', JSON.stringify({
+        instalada: BAILEYS_VERSION,
+        disponible: latest,
+        detectada: new Date().toISOString(),
+      })).catch(() => {})
+    }
+  } catch {
+    // Si no hay internet, ignorar
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// PUBLICACIÓN DE ESTADO Y COMANDOS REMOTOS
+// ════════════════════════════════════════════════════════════════
 
 setInterval(() => {
-  publicarEstadoBot().catch(err => console.warn('[bot] No se pudo publicar estado remoto:', err))
+  publicarEstadoBot().catch(() => {})
 }, 15_000).unref()
 
 setInterval(() => {
-  revisarComandoRemoto().catch(err => console.warn('[bot] Error revisando comando remoto:', err))
+  revisarComandoRemoto().catch(() => {})
 }, 5_000).unref()
+
+// Verificar versión de Baileys cada 24h
+setInterval(() => {
+  verificarVersionBaileys().catch(() => {})
+}, 24 * 60 * 60_000).unref()
 
 // ════════════════════════════════════════════════════════════════
 // ARRANQUE
@@ -2096,19 +1794,15 @@ setInterval(() => {
 
 console.log('🌸 Iniciando bot de Jardín RoCe...')
 
-// ── Startup Watchdog: en VM chica Chrome/WhatsApp puede tardar varios minutos ──
-// Si hay QR, damos margen para escanear; si expira, reiniciamos para generar uno fresco.
 const BOT_START_TIME = Date.now()
 const STARTUP_WARN_SECONDS = 180
 const STARTUP_RESTART_SECONDS = 600
-const STARTUP_FORCE_READY_SECONDS = 120
-let BOT_READY = false
+const QR_SCAN_TIMEOUT_SECONDS = 300
 
 const startupWatchdog = setInterval(() => {
   const elapsed = Math.round((Date.now() - BOT_START_TIME) / 1000)
   if (BOT_READY) { clearInterval(startupWatchdog); return }
 
-  // Si ya salió QR, esperamos un tiempo razonable a que el usuario escanee.
   if (BOT_QR_EMITIDO) {
     const qrAgeMs = BOT_QR_GENERADO_EN ? Date.now() - BOT_QR_GENERADO_EN : Date.now() - BOT_START_TIME
     if (elapsed % 120 < 31) console.log(`[Startup] ⏳ Esperando escaneo QR... (${Math.round(elapsed / 60)} min)`)
@@ -2119,34 +1813,17 @@ const startupWatchdog = setInterval(() => {
   }
 
   if (elapsed > STARTUP_WARN_SECONDS && elapsed % 60 < 31) {
-    console.warn(`[Startup] ⏰ ${elapsed}s sin "ready". Verificando estado...`)
-    whatsappClient.getState()
-      .then(state => console.warn(`[Startup] Estado: ${state}`))
-      .catch(err => console.warn(`[Startup] Error getState:`, err))
-  }
-
-  // FIX: si la sesión ya está CONNECTED pero ready no ha llegado, forzar inicialización
-  if (elapsed > STARTUP_FORCE_READY_SECONDS && !BOT_READY && !BOT_QR_EMITIDO) {
-    whatsappClient.getState()
-      .then(async (state) => {
-        if (state === 'CONNECTED' && !BOT_READY) {
-          console.warn(`[Startup] ⚡ ${elapsed}s CONNECTED sin "ready" — forzando init...`)
-          clearInterval(startupWatchdog)
-          await inicializarBot('forzado')
-        }
-      })
-      .catch(() => {})
+    console.warn(`[Startup] ⏰ ${elapsed}s sin conexión. Estado: ${BOT_CONNECTION}`)
   }
 
   if (elapsed > STARTUP_RESTART_SECONDS && !BOT_READY) {
-    // Forzar reconexión completa
     clearInterval(startupWatchdog)
-    reiniciarProceso(`${elapsed}s sin "ready" ni QR`)
+    reiniciarProceso(`${elapsed}s sin conexión`)
   }
 }, 30_000)
 startupWatchdog.unref()
 
-whatsappClient.initialize().catch((err) => { console.error('❌ Error:', err); registrarCrash(); process.exit(1) })
+iniciarBaileys().catch((err) => { console.error('❌ Error:', err); registrarCrash(); process.exit(1) })
 
 async function gracefulShutdown(signal: string): Promise<void> {
   console.log(`\n⚠️ ${signal} recibido — cerrando graceful...`)
@@ -2157,9 +1834,9 @@ async function gracefulShutdown(signal: string): Promise<void> {
   timer.unref()
 
   try {
-    await whatsappClient.destroy()
+    if (sock) sock.end(undefined)
   } catch (e) {
-    console.error('[shutdown] Error al destruir:', e)
+    console.error('[shutdown] Error al cerrar:', e)
   }
   clearTimeout(timer)
   process.exit(0)
@@ -2169,6 +1846,10 @@ process.on('SIGINT',  () => gracefulShutdown('SIGINT'))
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
 process.on('uncaughtException',  (err) => console.error('❌ Excepción:', err))
 process.on('unhandledRejection', (r)   => console.error('❌ Rechazo:', r))
+
+// ════════════════════════════════════════════════════════════════
+// SERVIDOR WEB (Express)
+// ════════════════════════════════════════════════════════════════
 
 import express from 'express'
 const app  = express()
@@ -2183,7 +1864,7 @@ app.use((_req, res, next) => {
 })
 app.use(express.json())
 
-app.get('/', (_req, res) => res.send('🌸 Jardín RoCe Bot — en línea.'))
+app.get('/', (_req, res) => res.send('🌸 Jardín RoCe Bot (Baileys) — en línea.'))
 
 app.post('/pause', (_req, res) => {
   BOT_PAUSADO = true
@@ -2203,14 +1884,6 @@ app.post('/reconnect', (_req, res) => {
   console.warn('[bot] 🔄 Reinicio manual solicitado vía API')
   res.json({ ok: true, mensaje: 'Reinicio solicitado. El proceso volverá a levantar con systemd.' })
   setTimeout(() => reiniciarProceso('Reinicio manual desde dashboard', false), 500)
-})
-
-app.post('/recover', (_req, res) => {
-  console.log('[bot] ♻️ Rescate manual solicitado vía API')
-  recuperarMensajesPerdidos()
-    .then(() => console.log('[bot] ✅ Rescate manual terminado'))
-    .catch(err => console.error('[bot] Error en rescate manual:', err))
-  res.json({ ok: true, mensaje: 'Rescate de mensajes iniciado' })
 })
 
 app.get('/qr', (_req, res) => {
@@ -2233,7 +1906,7 @@ app.get('/status', async (_req, res) => {
     const qrAgeMs = BOT_QR_GENERADO_EN ? Date.now() - BOT_QR_GENERADO_EN : null
     res.json({
       pausado: BOT_PAUSADO,
-      connected: BOT_READY && whatsappClient?.info ? true : false,
+      connected: BOT_READY && !!sock?.user,
       estado: BOT_ESTADO,
       estadoDetalle: BOT_ESTADO_DETALLE,
       reconnecting: BOT_RECONNECTING,
@@ -2247,13 +1920,15 @@ app.get('/status', async (_req, res) => {
       ventasHoy: ventas.cantidad,
       totalVentasHoy: ventas.total,
       clientesAtendidosHoy: clientes,
-      version: '2.0.0',
+      libreria: 'baileys',
+      baileysVersion: BAILEYS_VERSION,
+      version: '3.0.0',
       uptime: Math.round(process.uptime() / 60) + ' min',
     })
   } catch {
     res.json({
       pausado: BOT_PAUSADO,
-      connected: BOT_READY && whatsappClient?.info ? true : false,
+      connected: BOT_READY && !!sock?.user,
       estado: BOT_ESTADO,
       estadoDetalle: BOT_ESTADO_DETALLE,
     })
@@ -2262,8 +1937,3 @@ app.get('/status', async (_req, res) => {
 
 app.listen(port, () => console.log(`🌐 Servidor web en puerto ${port}`))
 console.log(`⚠️ Bot escuchando en :${port}. Next.js debe usar otro puerto (default 3000).`)
-
-
-
-
-
