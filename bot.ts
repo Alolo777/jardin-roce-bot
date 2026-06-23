@@ -715,6 +715,8 @@ async function obtenerClientesAtendidosHoy(): Promise<number> {
 const COLA_POR_CLIENTE = new Map<string, Promise<void>>()
 const MENSAJES_POR_AGRUPAR = new Map<string, { mensajes: any[]; timer: NodeJS.Timeout }>()
 const AGRUPAR_MENSAJES_MS = 2500
+const AGRUPAR_INICIAL_MS = 120_000 // 2 minutos para el primer batch de una conversación nueva
+const PRIMER_BATCH_PROCESADO = new Map<string, boolean>()
 
 function encolarPorCliente(id: string, tarea: () => Promise<void>): void {
   const previa    = COLA_POR_CLIENTE.get(id) ?? Promise.resolve()
@@ -728,25 +730,35 @@ function encolarMensajeAgrupado(clienteId: string, msg: any): void {
   if (actual) clearTimeout(actual.timer)
 
   const mensajes = [...(actual?.mensajes ?? []), msg]
+  // Usar ventana larga (2 min) para el primer batch de la conversación,
+  // ventana corta (2.5s) para respuestas posteriores
+  const esPrimerBatch = !PRIMER_BATCH_PROCESADO.get(clienteId)
+  const ventana = esPrimerBatch ? AGRUPAR_INICIAL_MS : AGRUPAR_MENSAJES_MS
+
   const timer = setTimeout(() => {
     MENSAJES_POR_AGRUPAR.delete(clienteId)
+    PRIMER_BATCH_PROCESADO.set(clienteId, true)
     const textos = mensajes.map(m => getMessageBody(m)).filter(Boolean)
     if (textos.length === 0) return
 
     const base = mensajes.find(m => hasQuotedMsg(m)) ?? mensajes[mensajes.length - 1]
-    base.body = textos.join('\n')
+    base.body = textos.join('\n---\n')
     for (const m of mensajes) {
       const id = obtenerMensajeId(m)
       if (id && m !== base) marcarMensajeProcesado(id)
     }
 
-    console.log(`[bot] 🧵 Agrupando ${mensajes.length} mensajes de ${clienteId}`)
+    if (esPrimerBatch) {
+      console.log(`[bot] 🧵 Primer batch (${ventana/1000}s): ${mensajes.length} mensajes de ${clienteId}`)
+    } else {
+      console.log(`[bot] 🧵 Agrupando ${mensajes.length} mensajes de ${clienteId}`)
+    }
     if (esPedidoCotizador(base.body)) {
       encolarPorCliente(clienteId, () => procesarPedidoWeb(base))
     } else {
       encolarPorCliente(clienteId, () => procesarMensaje(base))
     }
-  }, AGRUPAR_MENSAJES_MS)
+  }, ventana)
   timer.unref()
 
   MENSAJES_POR_AGRUPAR.set(clienteId, { mensajes, timer })
@@ -1190,6 +1202,15 @@ async function procesarMensaje(msg: any): Promise<void> {
       contextoExtra +=
         `\n\n[CLIENTE QUIERE EMPEZAR DESDE CERO] ` +
         `Ignora el pedido anterior de esta conversación. No cierres venta ni uses datos previos.`
+    }
+
+    // ── Múltiples mensajes agrupados ─────────────────────────────
+    if (textoCliente.includes('\n---\n')) {
+      const partes = textoCliente.split('\n---\n').filter(Boolean)
+      contextoExtra +=
+        `\n\n[CLIENTE ENVIÓ VARIOS MENSAJES SEGUIDOS] El cliente escribió ${partes.length} mensajes ` +
+        `en poco tiempo. Léelos TODOS antes de responder para entender el contexto completo. ` +
+        `Responde considerando el último mensaje como lo más reciente, pero usa los anteriores como contexto.`
     }
 
     // ── Detección de reply (quote) ────────────────────────────────
