@@ -112,27 +112,6 @@ export interface MensajeChat {
   content: string
 }
 
-// ─── Cargar precios de flores desde Supabase ────────────────────────────────
-let cachePreciosFlores: { data: string; ts: number } | null = null
-
-async function obtenerPreciosFlores(): Promise<string | null> {
-  const ahora = Date.now()
-  if (cachePreciosFlores && ahora - cachePreciosFlores.ts < 120_000) return cachePreciosFlores.data
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('configuracion_bot')
-      .select('valor')
-      .eq('clave', 'precios_flores')
-      .maybeSingle()
-    if (error) throw error
-    if (!data?.valor) return null
-    cachePreciosFlores = { data: data.valor, ts: ahora }
-    return data.valor
-  } catch {
-    return null
-  }
-}
-
 // ─── Función principal del agente ────────────────────────────────────────────
 export async function getAIResponse(
   historial: MensajeChat[],
@@ -140,20 +119,11 @@ export async function getAIResponse(
 ): Promise<AIResponse> {
   try {
     const systemPromptBase = await obtenerSystemPrompt()
-    const preciosFlores = await obtenerPreciosFlores()
 
     let systemPromptFinal = systemPromptBase
 
     if (contextoExtra) {
       systemPromptFinal += `\n\n--- CONTEXTO EXTRA ---\n${contextoExtra}\n--- FIN DEL CONTEXTO EXTRA ---`
-    }
-
-    if (preciosFlores) {
-      systemPromptFinal += `\n\n--- PRECIOS DE FLORES DISPONIBLES ---\n${preciosFlores}\n--- FIN DE PRECIOS ---\n\n` +
-        `INSTRUCCION: Usa estos precios para calcular cotizaciones cuando el cliente pregunte por un arreglo personalizado. ` +
-        `Suma los precios de las flores según la cantidad que pida el cliente. ` +
-        `Pregunta por tipo de arreglo (ramo, bouquet, centro de mesa), tamaño y cuántas flores de cada tipo quiere. ` +
-        `Da un estimado basado en los precios de las flores individuales. Si te falta información para calcular, pide los datos que necesites.`
     }
 
     console.time('[ai.ts] LLM call')

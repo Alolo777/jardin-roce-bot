@@ -282,6 +282,12 @@ async function obtenerNumeroReal(msg: any): Promise<string> {
   if (CACHE_NUMEROS.has(jid)) return CACHE_NUMEROS.get(jid)!
   if (CACHE_NUMEROS.size > 500) CACHE_NUMEROS.clear()
 
+  // Si es @lid, no podemos extraer número real — el LID es el identificador
+  if (jid.endsWith('@lid')) {
+    CACHE_NUMEROS.set(jid, jid)
+    return jid
+  }
+
   const limpio = jid.replace(/@[^\s]*/g, '').trim()
   const numero = limpio.startsWith('52') ? `+${limpio}` : limpio
   CACHE_NUMEROS.set(jid, numero)
@@ -405,6 +411,8 @@ const FRUSTRACION_NOTIFICADA = new Map<string, number>()
 const ATENCION_HUMANA_NOTIFICADA = new Map<string, number>()
 const INTERES_COMPRA_NOTIFICADO = new Map<string, number>()
 const RECLAMACION_NOTIFICADA = new Map<string, number>()
+const ENVIO_NOTIFICADO = new Map<string, number>()
+const FOTOS_NOTIFICADO = new Map<string, number>()
 
 function detectarFrustracion(texto: string): boolean {
   const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -413,6 +421,8 @@ function detectarFrustracion(texto: string): boolean {
 
 function detectarAtencionHumana(texto: string): string | null {
   const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  // Si el texto contiene un link de maps y dirección, el cliente está compartiendo su ubicación, no preguntando por la sucursal
+  if (detectarLinkMaps(texto) && /\b(direccion|ubicacion|colonia|calle)\b/i.test(n)) return null
   const reglas: Array<[RegExp, string]> = [
     [/\b(recoger|recojo|pasar por|paso por|recogi|recog[ií]|voy por|vengo por)\b.*\b(ramo|pedido|arreglo|flores?)\b|\b(ramo|pedido|arreglo|flores?)\b.*\b(recoger|recojo|pasar por|paso por|recogi|recog[ií]|voy por|vengo por)\b/i, 'Cliente quiere recoger un pedido'],
     [/\b(sucursal|local|ubicacion|ubicación|direccion|dirección|atah)\b/i, 'Cliente pide información de sucursal/local'],
@@ -1250,25 +1260,37 @@ async function procesarMensaje(msg: any): Promise<void> {
 
     const resultadoEnvio = pareceEnvio ? await buscarPrecioEnvio(textoCliente).catch(() => null) : null
 
+    const envioCooldown = ENVIO_NOTIFICADO.get(clienteId) ?? 0
+    const puedeNotificarEnvio = Date.now() - envioCooldown > 30 * 60_000
+
     if (resultadoEnvio && !('ambiguo' in resultadoEnvio)) {
       const telefonoReal = await numeroRealPromise
       console.log(`[bot] 📬 Envío match: ${resultadoEnvio.zona} — $${resultadoEnvio.precio}`)
-      notificarEmpleadosWhatsApp(
-        `🚚 *Cliente necesita cotización de envío:* ${telefonoReal}\n\nZona detectada: ${resultadoEnvio.zona} — $${resultadoEnvio.precio}\n\nPor favor confírmale el precio exacto de envío.`
-      ).catch(() => {})
+      if (puedeNotificarEnvio) {
+        ENVIO_NOTIFICADO.set(clienteId, Date.now())
+        notificarEmpleadosWhatsApp(
+          `🚚 *Cliente necesita cotización de envío:* ${telefonoReal}\n\nZona detectada: ${resultadoEnvio.zona} — $${resultadoEnvio.precio}\n\nPor favor confírmale el precio exacto de envío.`
+        ).catch(() => {})
+      }
     } else if (resultadoEnvio && 'ambiguo' in resultadoEnvio && resultadoEnvio.ambiguo) {
       const telefonoReal = await numeroRealPromise
       registrarZonaAmbigua(textoCliente, telefonoReal, resultadoEnvio.candidatos).catch(() => {})
-      notificarEmpleadosWhatsApp(
-        `🚚 *Cliente necesita cotización de envío:* ${telefonoReal}\n\nUbicación: ${textoCliente.slice(0, 100)}\n\nPor favor confírmale el precio exacto de envío.`
-      ).catch(() => {})
-      enviarAlertaEmpleadoEnvio(clienteId, textoCliente).catch(() => {})
+      if (puedeNotificarEnvio) {
+        ENVIO_NOTIFICADO.set(clienteId, Date.now())
+        notificarEmpleadosWhatsApp(
+          `🚚 *Cliente necesita cotización de envío:* ${telefonoReal}\n\nUbicación: ${textoCliente.slice(0, 100)}\n\nPor favor confírmale el precio exacto de envío.`
+        ).catch(() => {})
+        enviarAlertaEmpleadoEnvio(clienteId, textoCliente).catch(() => {})
+      }
     } else if (pareceEnvio && !resultadoEnvio) {
       const telefonoReal = await numeroRealPromise
-      notificarEmpleadosWhatsApp(
-        `🚚 *Cliente necesita cotización de envío:* ${telefonoReal}\n\nUbicación: ${textoCliente.slice(0, 100)}\n\nPor favor confírmale el precio exacto de envío.`
-      ).catch(() => {})
-      enviarAlertaEmpleadoEnvio(clienteId, textoCliente).catch(() => {})
+      if (puedeNotificarEnvio) {
+        ENVIO_NOTIFICADO.set(clienteId, Date.now())
+        notificarEmpleadosWhatsApp(
+          `🚚 *Cliente necesita cotización de envío:* ${telefonoReal}\n\nUbicación: ${textoCliente.slice(0, 100)}\n\nPor favor confírmale el precio exacto de envío.`
+        ).catch(() => {})
+        enviarAlertaEmpleadoEnvio(clienteId, textoCliente).catch(() => {})
+      }
     }
 
     // ── Contexto genérico de reply ──────────────────────────────
@@ -1340,6 +1362,19 @@ async function procesarMensaje(msg: any): Promise<void> {
         const telefonoReal = await numeroRealPromise
         console.log(`[bot] 💰 Interés de compra de ${telefonoReal}: ${textoCliente.substring(0, 80)}`)
         enviarAlertaClienteInteresado(telefonoReal, textoCliente.substring(0, 300)).catch(() => {})
+      }
+    }
+
+    // ── DETECCIÓN DE PETICIÓN DE FOTOS ──────────────────────────
+    const pideFotos = /fotos|ver.*arreglo|muestra|enseña|manda.*foto|averlos|verlos|que.*tiene|hay.*foto|puedo.*ver/i.test(textoCliente) &&
+      !(/\b(pague|comprobante|transfer)\b/i.test(textoCliente))
+    if (pideFotos && esInteresCompra) {
+      const ahoraFotos = FOTOS_NOTIFICADO.get(clienteId) ?? 0
+      if (Date.now() - ahoraFotos > 60 * 60_000) {
+        FOTOS_NOTIFICADO.set(clienteId, Date.now())
+        const telefonoReal = await numeroRealPromise
+        enviarAlertaEmpleadoFotos(telefonoReal, 'Cliente pide fotos').catch(() => {})
+        console.log(`[bot] 📸 Alerta de fotos enviada para ${telefonoReal}`)
       }
     }
 
@@ -1420,9 +1455,6 @@ async function procesarMensaje(msg: any): Promise<void> {
       const zonas = await obtenerZonasEnvio()
       const zonasPrompt = formatearZonasParaPrompt(zonas)
       if (zonasPrompt) contextoExtra += `\n\nZonas de envío disponibles:\n${zonasPrompt}`
-
-      const floresPrompt = await obtenerPreciosFlores()
-      if (floresPrompt) contextoExtra += `\n\nPrecios de flores individuales:\n${floresPrompt}`
 
       contextoExtra += `\n\nForma de pago:\nBBVA | 4152314097305273 | Devi América Cerenil\n` +
         `(Pregunta el nombre para apartarlo)`
@@ -1514,20 +1546,6 @@ async function ventaCerradaHandler(clienteId: string, venta: VentaCerrada, telef
 // ════════════════════════════════════════════════════════════════
 // PRECIOS DE FLORES (del system prompt)
 // ════════════════════════════════════════════════════════════════
-
-let CACHE_PRECIOS_FLORES: { prompt: string; ts: number } | null = null
-
-async function obtenerPreciosFlores(): Promise<string> {
-  const ahora = Date.now()
-  if (CACHE_PRECIOS_FLORES && ahora - CACHE_PRECIOS_FLORES.ts < 60_000) return CACHE_PRECIOS_FLORES.prompt
-  try {
-    const { data } = await supabaseAdmin
-      .from('configuracion_bot').select('valor').eq('clave', 'precios_flores').maybeSingle()
-    const texto = data?.valor ?? ''
-    CACHE_PRECIOS_FLORES = { prompt: texto, ts: ahora }
-    return texto
-  } catch { return '' }
-}
 
 // ════════════════════════════════════════════════════════════════
 // ESTADO DEL BOT (variables globales)
