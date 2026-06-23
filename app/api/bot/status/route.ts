@@ -13,11 +13,11 @@ export async function GET() {
     if (configError) throw configError
 
     // Obtener ventas de hoy
-    const hoy = new Date().toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' })
-    const inicio = new Date(hoy)
-    inicio.setHours(0, 0, 0, 0)
-    const fin = new Date(hoy)
-    fin.setHours(23, 59, 59, 999)
+    const ahora = new Date()
+    const cdmxStr = ahora.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })
+    const cdmx = new Date(cdmxStr)
+    const inicio = new Date(Date.UTC(cdmx.getFullYear(), cdmx.getMonth(), cdmx.getDate()))
+    const fin = new Date(Date.UTC(cdmx.getFullYear(), cdmx.getMonth(), cdmx.getDate(), 23, 59, 59, 999))
 
     const { data: ventas, error: ventasError } = await supabaseAdmin
       .from('reporte_ventas')
@@ -98,8 +98,8 @@ export async function GET() {
       if (!data?.valor) return
 
       const remoto = JSON.parse(data.valor)
-      const updatedAt = remoto.updatedAt ? new Date(remoto.updatedAt).getTime() : 0
-      const fresco = Date.now() - updatedAt < FRESCURA_MS
+      const heartbeat = remoto.heartbeat ? new Date(remoto.heartbeat).getTime() : (remoto.updatedAt ? new Date(remoto.updatedAt).getTime() : 0)
+      const fresco = Date.now() - heartbeat < FRESCURA_MS
       botConnected = fresco ? remoto.connected ?? false : false
       estado = fresco ? remoto.estado || estado : 'desconectado'
       estadoDetalle = fresco ? remoto.estadoDetalle || estadoDetalle : 'Sin pulso reciente de la VM'

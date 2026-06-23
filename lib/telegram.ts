@@ -390,6 +390,62 @@ export async function enviarAlertaVentaDelDia(
 }
 
 // ════════════════════════════════════════════════════════════════
+// 10. CLIENTE QUIERE COMPRAR/INTERESADO EN FLORES
+// ════════════════════════════════════════════════════════════════
+
+export async function enviarAlertaClienteInteresado(
+  numeroCliente: string,
+  descripcion: string
+): Promise<void> {
+  const msg = [
+    '💐 *CLIENTE QUIERE COMPRAR*',
+    '',
+    `📱 *Teléfono:* ${ultimos4(numeroCliente)}`,
+    `💬 *Dice:* ${esc(descripcion.slice(0, 300))}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '_Cliente está preguntando por flores/arreglos — dar seguimiento_',
+  ].join('\n')
+  await enviar(msg)
+}
+
+// ════════════════════════════════════════════════════════════════
+// 11. AVISO A EMPLEADOS POR WHATSAPP (FOTOS / ENVÍO)
+// ════════════════════════════════════════════════════════════════
+
+export async function enviarAlertaEmpleadoFotos(
+  numeroCliente: string,
+  nombreCliente: string
+): Promise<void> {
+  const msg = [
+    '📸 *CLIENTE PIDE FOTOS*',
+    '',
+    `📱 *Cliente:* ${ultimos4(numeroCliente)} ${nombreCliente ? `(${esc(nombreCliente)})` : ''}`,
+    `💬 Quiere ver fotos de los arreglos disponibles.`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '_Envíale las fotos actuales de lo que tenemos disponible directamente por WhatsApp_',
+  ].join('\n')
+  await enviar(msg)
+}
+
+export async function enviarAlertaEmpleadoEnvio(
+  numeroCliente: string,
+  ubicacion: string
+): Promise<void> {
+  const msg = [
+    '🚚 *CLIENTE PIDE COTIZACIÓN DE ENVÍO*',
+    '',
+    `📱 *Cliente:* ${ultimos4(numeroCliente)}`,
+    `📍 *Ubicación:* ${esc(ubicacion.slice(0, 300))}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '_Cotiza el precio exacto de envío y confírmalo al cliente_',
+  ].join('\n')
+  await enviar(msg)
+}
+
+// ════════════════════════════════════════════════════════════════
 // 15. ENVIAR FOTO (BASE64) A TELEGRAM
 // ════════════════════════════════════════════════════════════════
 

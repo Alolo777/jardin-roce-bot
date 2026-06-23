@@ -22,14 +22,6 @@ const FEATURES = [
     shadow: 'shadow-emerald-200/40',
   },
   {
-    href: '/admin/municipios',
-    icon: '🏘️',
-    title: 'Municipios de Envío',
-    desc: 'Gestiona las zonas de envío, precios y colonias. Importa o exporta datos fácilmente.',
-    gradient: 'from-cyan-400 to-blue-400',
-    shadow: 'shadow-cyan-200/40',
-  },
-  {
     href: '/admin/ignorados',
     icon: '🔇',
     title: 'Números Silenciados',
@@ -404,8 +396,8 @@ export default function AdminDashboard() {
           <div>
             <p className="text-sm text-amber-800 font-medium">Tip del día</p>
             <p className="text-sm text-amber-700/80 mt-1">
-              Recuerda subir los arreglos del día temprano para que Flora pueda mostrarlos
-              a los clientes desde que abren.
+              Cuando un cliente pida fotos o cotización de envío, el sistema avisará
+              al equipo por WhatsApp y Telegram para que le respondan directamente.
             </p>
           </div>
         </div>

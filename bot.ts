@@ -22,6 +22,9 @@ import {
   enviarAlertaAtencionHumana,
   enviarAlertaPedidoApartado,
   enviarAlertaZonaAmbigua,
+  enviarAlertaClienteInteresado,
+  enviarAlertaEmpleadoFotos,
+  enviarAlertaEmpleadoEnvio,
   enviarFotoTelegram,
 } from './lib/telegram'
 import { supabaseAdmin } from './lib/supabase'
@@ -302,6 +305,65 @@ function detectarEvento(texto: string): string | null {
 }
 
 // ════════════════════════════════════════════════════════════════
+// DETECCIÓN DE INTERÉS DE COMPRA
+// ════════════════════════════════════════════════════════════════
+
+const KW_INTERES_COMPRA = [
+  'necesito', 'necesito un', 'busco', 'busco un', 'quiero un', 'quisiera',
+  'me gustaría', 'me gustaria', 'anda tener', 'se ocupa',
+  'qué flores', 'que flores', 'flores tiene', 'tienes disponibles',
+  'flores disponibles', 'qué ramos', 'que ramos', 'qué arreglos',
+  'me puede', 'pueden hacer', 'hacen arreglos', 'armar un',
+  'ramo para', 'arreglo para', 'flor para',
+  'cotización de', 'cotizacion de',
+]
+
+function detectarInteresCompra(texto: string): boolean {
+  const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  return KW_INTERES_COMPRA.some(k => n.includes(k))
+}
+
+// ════════════════════════════════════════════════════════════════
+// EMPLEADOS A NOTIFICAR (guardados en Supabase configuracion_bot)
+// ════════════════════════════════════════════════════════════════
+
+let CACHE_EMPLEADOS: { numeros: string[]; ts: number } | null = null
+
+async function obtenerEmpleadosANotificar(): Promise<string[]> {
+  const ahora = Date.now()
+  if (CACHE_EMPLEADOS && ahora - CACHE_EMPLEADOS.ts < 120_000) return CACHE_EMPLEADOS.numeros
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('configuracion_bot')
+      .select('valor')
+      .eq('clave', 'empleados_notificar')
+      .maybeSingle()
+    if (error) throw error
+    const numeros = (data?.valor ?? '')
+      .split(',')
+      .map((n: string) => n.trim().replace(/\s/g, ''))
+      .filter(Boolean)
+    CACHE_EMPLEADOS = { numeros, ts: ahora }
+    return numeros
+  } catch {
+    return []
+  }
+}
+
+async function notificarEmpleadosWhatsApp(mensaje: string): Promise<void> {
+  const numeros = await obtenerEmpleadosANotificar()
+  if (numeros.length === 0 || !whatsappClient?.info) return
+  for (const num of numeros) {
+    try {
+      const chatId = num.includes('@c.us') ? num : `${num}@c.us`
+      await whatsappClient.sendMessage(chatId, mensaje)
+    } catch (err) {
+      console.warn(`[bot] Error notificando a empleado ${num}:`, err)
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
 // VALIDACIÓN POST-AI DE PRECIOS
 // ════════════════════════════════════════════════════════════════
 
@@ -350,6 +412,7 @@ const KW_FRUSTRACION = [
 
 const FRUSTRACION_NOTIFICADA = new Map<string, number>()
 const ATENCION_HUMANA_NOTIFICADA = new Map<string, number>()
+const INTERES_COMPRA_NOTIFICADO = new Map<string, number>()
 
 function detectarFrustracion(texto: string): boolean {
   const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -588,13 +651,18 @@ async function registrarVenta(clienteNombre: string, telefono: string, producto:
   } catch (err) { console.error('[bot] Error en registrarVenta:', err) }
 }
 
+function fechaInicioFinCDMX(): { inicio: Date; fin: Date } {
+  const ahora = new Date()
+  const cdmxStr = ahora.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })
+  const cdmx = new Date(cdmxStr)
+  const inicio = new Date(Date.UTC(cdmx.getFullYear(), cdmx.getMonth(), cdmx.getDate()))
+  const fin = new Date(Date.UTC(cdmx.getFullYear(), cdmx.getMonth(), cdmx.getDate(), 23, 59, 59, 999))
+  return { inicio, fin }
+}
+
 async function obtenerVentasHoy(): Promise<{ total: number; cantidad: number }> {
   try {
-    const hoy = new Date().toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' })
-    const inicio = new Date(hoy)
-    inicio.setHours(0, 0, 0, 0)
-    const fin = new Date(hoy)
-    fin.setHours(23, 59, 59, 999)
+    const { inicio, fin } = fechaInicioFinCDMX()
 
     const { data, error } = await supabaseAdmin
       .from('reporte_ventas')
@@ -614,11 +682,7 @@ async function obtenerVentasHoy(): Promise<{ total: number; cantidad: number }> 
 
 async function obtenerClientesAtendidosHoy(): Promise<number> {
   try {
-    const hoy = new Date().toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' })
-    const inicio = new Date(hoy)
-    inicio.setHours(0, 0, 0, 0)
-    const fin = new Date(hoy)
-    fin.setHours(23, 59, 59, 999)
+    const { inicio, fin } = fechaInicioFinCDMX()
 
     const { count, error } = await supabaseAdmin
       .from('historial_chat')
@@ -1236,6 +1300,7 @@ async function procesarMensaje(message: any): Promise<void> {
 
   const numeroRealPromise = obtenerNumeroReal(message)
   const esFrustrado       = detectarFrustracion(textoCliente)
+  const esInteresCompra   = detectarInteresCompra(textoCliente)
 
   try {
     const chat = await message.getChat()
@@ -1315,43 +1380,26 @@ async function procesarMensaje(message: any): Promise<void> {
     let   enviarFotos   = false
 
     if (intencion === 'inventario') {
+      FOTOS_PENDIENTES.delete(clienteId)
       const arreglos = await obtenerArreglosConFotos()
       if (arreglos.length > 0) {
-        if (!puedeEnviarFotos(clienteId)) {
-          const avisoLimite = 'Ya te reenvié las fotos varias veces hoy 🌸. Dime cuál arreglo quieres ver o cuál te gustó y te confirmo precio.'
-          await agregarAlHistorial(telefono, 'assistant', avisoLimite)
-          await message.reply(avisoLimite)
-          return
-        }
+        contextoExtra +=
+          `\n\n[FOTOS SOLICITADAS] El cliente pidió ver fotos de los arreglos disponibles. ` +
+          `INSTRUCCION: Responde amablemente que le pedirás a una compañera que le mande las fotos actuales. ` +
+          `No digas que las enviarás tú. Di algo como "Déjame pedirle a una compañera que te mande las fotos actuales de lo que tenemos 🌸" ` +
+          `o similar. El sistema notificará al equipo para que le envíen las fotos directamente.`
 
-        const respuestaFotos = '¡Claro! Ahorita te mando las fotos de lo que tenemos disponible hoy 🌸'
-        await agregarAlHistorial(telefono, 'assistant', respuestaFotos)
-        await simularEscritura(chat, 900)
-        await message.reply(respuestaFotos)
+        notificarEmpleadosWhatsApp(
+          `📸 *Cliente pide fotos:* ${telefono}\n\nEl cliente está preguntando por los arreglos disponibles. Por favor envíale las fotos actuales directamente por WhatsApp.`
+        ).catch(() => {})
 
-        FOTOS_CANCELADAS.delete(clienteId)
-        FOTOS_ENVIANDO.add(clienteId)
-        const fotosEnviadas = await enviarFotosArreglos(whatsappClient, clienteId, arreglos)
-          .finally(() => FOTOS_ENVIANDO.delete(clienteId))
-        if (fotosEnviadas > 0) {
-          marcarFotosEnviadas(clienteId)
-          ULTIMOS_ARREGLOS.set(clienteId, arreglos)
+        const numeroRealTmp = await numeroRealPromise.catch(() => null)
+        if (numeroRealTmp) {
+          enviarAlertaEmpleadoFotos(numeroRealTmp, telefono).catch(() => {})
         }
-        FOTOS_PENDIENTES.delete(clienteId)
-
-        const resumenFotos = arreglos.map((a, i) => `Foto ${i + 1}: ${a.nombre} ($${a.precio} MXN)`).join(', ')
-        if (fotosEnviadas > 0) {
-          await agregarAlHistorial(telefono, 'assistant', `[Sistema] Fotos enviadas: ${resumenFotos}`)
-        }
-        const cta = fotosEnviadas > 0
-          ? '¿Alguno te llamó la atención? 🌸\nSolo dime cuál y lo aparto para ti. 🌹'
-          : 'Perdón, se me atoraron las fotos ahorita 😅 Dime si quieres que intentemos de nuevo o te paso nombres y precios.'
-        await whatsappClient.sendMessage(clienteId, cta)
-        await agregarAlHistorial(telefono, 'assistant', cta)
-        return
+      } else {
+        contextoExtra += `\n\nHoy NO hay arreglos listos. Ofrece pedido personalizado 24-48h. Máximo 2 líneas.`
       }
-
-      contextoExtra += `\n\nHoy NO hay arreglos listos. Ofrece pedido personalizado 24-48h. Máximo 2 líneas.`
     }
 
     else if (intencion === 'catalogo') {
@@ -1390,37 +1438,28 @@ async function procesarMensaje(message: any): Promise<void> {
     }
 
     // ── GOOGLE MAPS / ZONAS DE ENVÍO ──────────────────────────────
-    if (detectarLinkMaps(textoCliente)) {
-      const zonas = await obtenerZonasEnvio()
-      const hayMunicipios = cacheMunicipios && cacheMunicipios.data.length > 0
-      if (zonas.length > 0 || hayMunicipios) {
-        contextoExtra +=
-          `\n\n[CLIENTE COMPARTIÓ LINK DE GOOGLE MAPS]\n` +
-          `ZONAS DE ENVÍO DISPONIBLES:\n${formatearZonasParaPrompt(zonas)}\n\n` +
-          `INSTRUCCION: Pregunta amablemente el nombre de su colonia o municipio para asignar la zona correcta. ` +
-          `NUNCA inventes el precio del envío, solo di lo que está en las zonas. Cuando el cliente responda con un municipio o colonia, el sistema lo reconocerá automáticamente.`
-      } else {
-        contextoExtra +=
-          `\n\n[CLIENTE COMPARTIÓ LINK DE GOOGLE MAPS]\n` +
-          `INSTRUCCION: No hay zonas de envío configuradas. Di: "Déjame verificarlo y te confirmo el costo 🌸"`
+    const mencionaEnvio = /\b(env[ií]o|env[ií]ar|domicilio|entrega|mandar|llevar|reparto)\b/i.test(textoCliente)
+    const mencionaDireccion = /\b(calle|av\.?|avenida|col\.?|colonia|cp\s*\d{5}|codigo\s*postal|#|num\.?|n[uú]mero|\d{2,})\b/i.test(textoCliente)
+    const pareceEnvio = mencionaEnvio || mencionaDireccion || detectarLinkMaps(textoCliente)
+
+    if (pareceEnvio) {
+      if (mencionaDireccion && ARREGLO_ELEGIDO.has(clienteId)) {
+        pedidoActual(clienteId).direccion = limpiarDireccionCliente(textoCliente)
       }
-    } else {
-      const envioMatch = await buscarPrecioEnvio(textoCliente)
-      const pareceDireccion = /\b(calle|av\.?|avenida|col\.?|colonia|num\.?|n[uú]mero|#|cp\s*\d{5}|\d{2,})\b/i.test(textoCliente)
-      if (pareceDireccion && ARREGLO_ELEGIDO.has(clienteId)) pedidoActual(clienteId).direccion = limpiarDireccionCliente(textoCliente)
-      if (envioMatch && 'ambiguo' in envioMatch) {
-        const numeroRealTmp = await numeroRealPromise.catch(() => null)
-        const candidatosTxt = envioMatch.candidatos.map(c => `${c.zona} ($${c.precio})`).join(', ')
-        registrarZonaAmbigua(textoCliente, numeroRealTmp, envioMatch.candidatos).catch(() => {})
-        if (numeroRealTmp) enviarAlertaZonaAmbigua(numeroRealTmp, textoCliente, candidatosTxt).catch(err => console.error('[bot] Telegram zona ambigua:', err))
-        contextoExtra +=
-          `\n\n[ZONA DE ENVIO AMBIGUA] El texto "${textoCliente}" coincide con varias zonas o no es suficiente. ` +
-          `INSTRUCCION: NO des precio. Pide colonia, municipio completo, codigo postal o direccion completa.`
-      } else if (envioMatch) {
-        pedidoActual(clienteId).envio = { zona: envioMatch.zona, precio: envioMatch.precio }
-        contextoExtra +=
-          `\n\n[CLIENTE MENCIONÓ UNA ZONA: "${envioMatch.zona}" — $${envioMatch.precio.toFixed(2)} MXN (${envioMatch.fuente})]\n` +
-          `INSTRUCCION: Usa este precio de envío exacto. Confirma: "El envío a esa zona cuesta $${envioMatch.precio.toFixed(2)} MXN, ¿te parece bien?" NUNCA inventes precios.`
+      contextoExtra +=
+        `\n\n[CLIENTE PREGUNTA POR ENVÍO] El cliente quiere saber sobre envío a domicilio. ` +
+        `INSTRUCCION: Responde que el costo exacto de envío depende de la ubicación, ` +
+        `y que una compañera del equipo le confirmará el precio exacto. ` +
+        `Di algo como "Déjame consultar con mi equipo y te confirmamos el costo de envío exacto 🌸" ` +
+        `NO des un precio de envío por tu cuenta. El sistema notificará al equipo.`
+
+      const numeroRealTmp = await numeroRealPromise.catch(() => null)
+      if (numeroRealTmp) {
+        const ubicacionTexto = detectarLinkMaps(textoCliente) ? 'Compartió link de Google Maps' : textoCliente.slice(0, 200)
+        notificarEmpleadosWhatsApp(
+          `🚚 *Cliente necesita cotización de envío:* ${telefono}\n\nUbicación: ${ubicacionTexto}\n\nPor favor confírmale el precio exacto de envío.`
+        ).catch(() => {})
+        enviarAlertaEmpleadoEnvio(numeroRealTmp, ubicacionTexto).catch(() => {})
       }
     }
 
@@ -1663,13 +1702,18 @@ async function procesarMensaje(message: any): Promise<void> {
         .catch(err => console.error('[bot] Telegram atención humana:', err))
     }
 
-    // Alerta cotización de envío
-    if (mensajeFinal.toLowerCase().includes('verificar el costo') && /\b(calle|av\.?|avenida|col\.?|colonia|cp\s*\d{5}|\d{2,})\b/i.test(textoCliente)) {
-      enviarAlertaCotizacion(numeroReal, `📍 Cotización de envío solicitada.\nDirección/colonia: ${textoCliente}`)
-        .catch(err => console.error('[bot] Telegram envío:', err))
+    // ── INTERÉS DE COMPRA: Alerta al admin ──────────────────────
+    if (esInteresCompra && !VENTAS_CERRADAS.has(clienteId)) {
+      const ultimaNotif = INTERES_COMPRA_NOTIFICADO.get(clienteId) ?? 0
+      if (Date.now() - ultimaNotif > 30 * 60_000) {
+        INTERES_COMPRA_NOTIFICADO.set(clienteId, Date.now())
+        enviarAlertaClienteInteresado(numeroReal, textoCliente)
+          .catch(err => console.error('[bot] Telegram interés:', err))
+      }
     }
+
     // Alerta cotizador web
-    else if (intencion === 'cotizador') {
+    if (intencion === 'cotizador') {
       enviarAlertaCotizacion(numeroReal, textoCliente)
         .catch(err => console.error('[bot] Telegram cotizacion:', err))
     }
@@ -1817,42 +1861,12 @@ async function procesarMensaje(message: any): Promise<void> {
         .catch(err => console.error('[bot] Error registrando venta manual:', err))
     }
 
-    // Fotos — desde intent detection o desde FOTOS_PENDIENTES
-    const fotosPendientes = VENTAS_CERRADAS.has(clienteId) ? undefined : FOTOS_PENDIENTES.get(clienteId)
-    const arreglosFinales = arreglosParaEnviar.length > 0 ? arreglosParaEnviar : (fotosPendientes?.arreglos ?? [])
-
-    if (enviarFotos || (intencion === 'inventario' && fotosPendientes)) {
-      if (!puedeEnviarFotos(clienteId)) {
-        FOTOS_PENDIENTES.delete(clienteId)
-        const avisoLimite = 'Ya te reenvié las fotos varias veces hoy 🌸. Dime cuál te interesa y te ayudo con el apartado.'
-        await agregarAlHistorial(telefono, 'assistant', avisoLimite)
-        await message.reply(avisoLimite)
-        return
-      }
+    // Ya no se envían fotos automáticamente — el equipo las envía directamente.
+    // Limpiar estado pendiente si el inventario ya fue atendido
+    if (intencion === 'inventario') {
+      FOTOS_CANCELADAS.delete(clienteId)
+      FOTOS_ENVIANDO.delete(clienteId)
       FOTOS_PENDIENTES.delete(clienteId)
-
-      if (arreglosFinales.length > 0) {
-        await new Promise(r => setTimeout(r, 500))
-        FOTOS_CANCELADAS.delete(clienteId)
-        FOTOS_ENVIANDO.add(clienteId)
-        const fotosEnviadas = await enviarFotosArreglos(whatsappClient, clienteId, arreglosFinales)
-          .finally(() => FOTOS_ENVIANDO.delete(clienteId))
-        if (fotosEnviadas > 0) marcarFotosEnviadas(clienteId)
-
-        const resumenFotos = arreglosFinales.map((a, i) => `Foto ${i + 1}: ${a.nombre} ($${a.precio} MXN)`).join(', ')
-        await agregarAlHistorial(telefono, 'assistant', `[Sistema] Fotos enviadas: ${resumenFotos}`)
-        // Guardar lista para matching en próximos mensajes
-        if (fotosEnviadas > 0) ULTIMOS_ARREGLOS.set(clienteId, arreglosFinales)
-
-        await new Promise(r => setTimeout(r, 600))
-        await simularEscritura(chat, 800)
-        await whatsappClient.sendMessage(
-          clienteId,
-          fotosEnviadas > 0
-            ? '¿Alguno te llamó la atención? 🌸\nSolo dime cuál y lo aparto para ti. 🌹'
-            : 'Perdón, se me atoraron las fotos ahorita 😅 Dime si quieres que intentemos de nuevo o te paso nombres y precios.'
-        )
-      }
     }
 
     if (mensajeEnviado) {
@@ -2070,6 +2084,7 @@ async function publicarEstadoBot(): Promise<void> {
     qrScanGraceSeconds: qrAgeMs === null ? null : Math.max(0, Math.ceil((QR_SCAN_GRACE_MS - qrAgeMs) / 1000)),
     qrVencido: qrAgeMs === null ? false : qrAgeMs > BOT_QR_TTL_MS,
     ultimaActividad: `${Math.round((Date.now() - ultimaActividad) / 60_000)} min`,
+    heartbeat: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
 

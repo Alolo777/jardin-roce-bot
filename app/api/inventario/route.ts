@@ -30,52 +30,26 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/inventario — Crear nuevo arreglo
-// Body: multipart/form-data con campos: nombre, descripcion, precio, foto (File)
+// POST /api/inventario — Crear nuevo arreglo (sin foto)
+// Body: JSON con nombre, descripcion, precio
 export async function POST(request: NextRequest) {
   try {
-    const formData = await request.formData()
+    const body = await request.json()
+    const { nombre, descripcion, precio } = body
 
-    const nombre = formData.get('nombre') as string
-    const descripcion = formData.get('descripcion') as string
-    const precio = parseFloat(formData.get('precio') as string)
-    const foto = formData.get('foto') as File
-
-    if (!nombre || !precio || !foto) {
+    if (!nombre || precio == null) {
       return NextResponse.json(
-        { error: 'Faltan campos obligatorios: nombre, precio, foto' },
+        { error: 'Faltan campos obligatorios: nombre, precio' },
         { status: 400 }
       )
     }
 
-    // 1. Subir foto a Supabase Storage
-    const extension = foto.name.split('.').pop() || 'jpg'
-    const nombreArchivo = `arreglo_${Date.now()}.${extension}`
-    const arrayBuffer = await foto.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
-
-    const { error: uploadError } = await supabaseAdmin.storage
-      .from('arreglos-fotos')
-      .upload(nombreArchivo, buffer, {
-        contentType: foto.type,
-        upsert: false,
-      })
-
-    if (uploadError) throw uploadError
-
-    // 2. Obtener URL pública
-    const { data: urlData } = supabaseAdmin.storage
-      .from('arreglos-fotos')
-      .getPublicUrl(nombreArchivo)
-
-    // 3. Insertar registro en BD
     const { data, error: insertError } = await supabaseAdmin
       .from('arreglos_diarios')
       .insert({
         nombre,
         descripcion: descripcion || null,
-        precio,
-        foto_url: urlData.publicUrl,
+        precio: parseFloat(precio),
       })
       .select()
       .single()
