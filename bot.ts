@@ -387,7 +387,7 @@ async function notificarEmpleadosWhatsApp(mensaje: string): Promise<void> {
   if (numeros.length === 0 || !sock?.user) return
   for (const num of numeros) {
     try {
-      const jid = num.includes('@') ? num : `${num}@s.whatsapp.net`
+      const jid = (num.includes('@') ? num : `${num}@s.whatsapp.net`).replace(/@c\.us$/, '@s.whatsapp.net')
       await sock.sendMessage(jid, { text: mensaje })
     } catch (err) {
       console.warn(`[bot] Error notificando a empleado ${num}:`, err)
@@ -1376,14 +1376,18 @@ async function procesarMensaje(msg: any): Promise<void> {
     }
 
     // ── DETECCIÓN DE PETICIÓN DE FOTOS ──────────────────────────
-    const pideFotos = /fotos|ver.*arreglo|muestra|enseña|manda.*foto|averlos|verlos|que.*tiene|hay.*foto|puedo.*ver/i.test(textoCliente) &&
-      !(/\b(pague|comprobante|transfer)\b/i.test(textoCliente))
-    if (pideFotos && esInteresCompra) {
+    const pideFotos = /fotos|ver.*arregl|muestra|enseña|manda.*foto|averlos|verlos|que.*tiene|hay.*foto|puedo.*ver|quisiera.*ver|me.*muestra|me.*enseña|tienes.*foto/i.test(textoCliente) &&
+      !(/\b(pague|comprobante|transfer|ya\s*envi[eé])\b/i.test(textoCliente)) &&
+      !VENTAS_CERRADAS.has(clienteId)
+    if (pideFotos) {
       const ahoraFotos = FOTOS_NOTIFICADO.get(clienteId) ?? 0
       if (Date.now() - ahoraFotos > 60 * 60_000) {
         FOTOS_NOTIFICADO.set(clienteId, Date.now())
         const telefonoReal = await numeroRealPromise
-        enviarAlertaEmpleadoFotos(telefonoReal, 'Cliente pide fotos').catch(() => {})
+        notificarEmpleadosWhatsApp(
+          `📸 *Cliente pide fotos de arreglos:* ${telefonoReal}\n\nContáctalo directamente por WhatsApp y envíale fotos de lo que tenemos disponible.`
+        ).catch(() => {})
+        enviarAlertaEmpleadoFotos(telefonoReal, '').catch(() => {})
         console.log(`[bot] 📸 Alerta de fotos enviada para ${telefonoReal}`)
       }
     }
