@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 
 const env = {
   ...process.env,
-  NODE_OPTIONS: [process.env.NODE_OPTIONS, '--max-old-space-size=2048']
+  NODE_OPTIONS: [process.env.NODE_OPTIONS, '--max-old-space-size=4096']
     .filter(Boolean)
     .join(' '),
 }

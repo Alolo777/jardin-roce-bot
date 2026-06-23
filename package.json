@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/build-local.mjs",
     "build:local": "node scripts/build-local.mjs",
     "test:flows": "node tests/conversation-flows.test.mjs",
     "start": "next start",

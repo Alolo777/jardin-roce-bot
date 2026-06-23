@@ -15,6 +15,7 @@ import type { Boom } from '@hapi/boom'
 import pino from 'pino'
 import qrcode from 'qrcode-terminal'
 import dotenv from 'dotenv'
+import fs from 'node:fs'
 
 dotenv.config({ path: '.env.local' })
 
@@ -201,6 +202,10 @@ function getMessageBody(msg: any): string {
   if (type === 'buttonsResponseMessage') return full.buttonsResponseMessage?.selectedButtonId || ''
   if (type === 'listResponseMessage') return full.listResponseMessage?.singleSelectReply?.selectedRowId || ''
   return ''
+}
+
+function getMensajeTexto(msg: any): string {
+  return typeof msg?.body === 'string' ? msg.body : getMessageBody(msg)
 }
 
 function getMessageType(msg: any): string {
@@ -399,6 +404,7 @@ const KW_FRUSTRACION = [
 const FRUSTRACION_NOTIFICADA = new Map<string, number>()
 const ATENCION_HUMANA_NOTIFICADA = new Map<string, number>()
 const INTERES_COMPRA_NOTIFICADO = new Map<string, number>()
+const RECLAMACION_NOTIFICADA = new Map<string, number>()
 
 function detectarFrustracion(texto: string): boolean {
   const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -423,6 +429,15 @@ function debeNotificarAtencionHumana(clienteId: string): boolean {
   const ultima = ATENCION_HUMANA_NOTIFICADA.get(clienteId) ?? 0
   if (ahora - ultima < 20 * 60_000) return false
   ATENCION_HUMANA_NOTIFICADA.set(clienteId, ahora)
+  return true
+}
+
+function debeNotificarReclamacion(clienteId: string, tipo: 'cancelacion' | 'queja'): boolean {
+  const ahora = Date.now()
+  const key = `${tipo}:${clienteId}`
+  const ultima = RECLAMACION_NOTIFICADA.get(key) ?? 0
+  if (ahora - ultima < 20 * 60_000) return false
+  RECLAMACION_NOTIFICADA.set(key, ahora)
   return true
 }
 
@@ -467,22 +482,60 @@ let crashWindowStart = Date.now()
 const MAX_CRASHES    = 3
 const CRASH_WINDOW_MS = 10 * 60 * 1000
 
+function getSessionPath(): string {
+  return process.env.BAILEYS_DATA_PATH || './.baileys_auth'
+}
+
+function getCrashStatePath(): string {
+  return process.env.BOT_CRASH_STATE_PATH || './.bot_crash_state.json'
+}
+
+function cargarEstadoCrash(): void {
+  try {
+    const raw = fs.readFileSync(getCrashStatePath(), 'utf8')
+    const parsed = JSON.parse(raw) as { count?: number; windowStart?: number }
+    crashCount = parsed.count ?? crashCount
+    crashWindowStart = parsed.windowStart ?? crashWindowStart
+  } catch {
+    // Sin estado previo: se empieza una ventana nueva.
+  }
+}
+
+function guardarEstadoCrash(): void {
+  try {
+    fs.writeFileSync(getCrashStatePath(), JSON.stringify({ count: crashCount, windowStart: crashWindowStart }))
+  } catch (err) {
+    console.warn('[Crash] No se pudo guardar estado:', err)
+  }
+}
+
+function resetearEstadoCrash(): void {
+  crashCount = 0
+  crashWindowStart = Date.now()
+  try { fs.rmSync(getCrashStatePath(), { force: true }) } catch {}
+}
+
 function registrarCrash(): void {
+  cargarEstadoCrash()
   const ahora = Date.now()
   if (ahora - crashWindowStart > CRASH_WINDOW_MS) {
     crashCount = 0
     crashWindowStart = ahora
   }
   crashCount++
+  guardarEstadoCrash()
   console.warn(`[Crash] ${crashCount}/${MAX_CRASHES} reinicios en ventana de 10 min`)
 
   if (crashCount >= MAX_CRASHES) {
-    const sessionPath = process.env.BAILEYS_DATA_PATH || './.baileys_auth'
+    const sessionPath = getSessionPath()
     console.warn(`[Crash] 🧹 Demasiados reinicios — limpiando sesión en ${sessionPath}...`)
-    import('fs').then(fs => {
+    try {
       fs.rmSync(sessionPath, { recursive: true, force: true })
+      resetearEstadoCrash()
       console.warn('[Crash] ✅ Sesión eliminada. Se generará QR fresco al reiniciar.')
-    }).catch(err => console.error('[Crash] Error limpiando sesión:', err))
+    } catch (err) {
+      console.error('[Crash] Error limpiando sesión:', err)
+    }
   }
 }
 
@@ -570,7 +623,7 @@ function avisarRateLimitUnaVez(msg: any, id: string): void {
 
 async function registrarVenta(clienteNombre: string, telefono: string, producto: string, total: string, direccion: string): Promise<void> {
   try {
-    const precioNumerico = parseFloat(total.replace(/[^0-9.]/g, '')) || 0
+    const precioNumerico = extraerTotalNumerico(total)
     const { error } = await supabaseAdmin.from('reporte_ventas').insert({
       cliente_telefono: telefono,
       cliente_nombre: clienteNombre,
@@ -582,6 +635,24 @@ async function registrarVenta(clienteNombre: string, telefono: string, producto:
     })
     if (error) console.error('[bot] Error registrando venta:', error)
   } catch (err) { console.error('[bot] Error en registrarVenta:', err) }
+}
+
+function extraerTotalNumerico(total: string): number {
+  const montos = String(total ?? '').match(/\d{1,6}(?:[,.]\d{2})?/g) ?? []
+  if (montos.length === 0) return 0
+
+  const normalizar = (monto: string) => Number(monto.replace(/,/g, '')) || 0
+  const primero = normalizar(montos[0]!)
+
+  // Los totales generados por el bot empiezan con el total y luego incluyen desglose.
+  if (/^\s*\$?\s*\d/.test(total)) return primero
+
+  // Si solo hay desglose tipo "ramo $500 + envio $80", registrar la suma.
+  if (/[+]/.test(total) && montos.length > 1) {
+    return montos.reduce((sum, monto) => sum + normalizar(monto), 0)
+  }
+
+  return primero
 }
 
 function fechaInicioFinCDMX(): { inicio: Date; fin: Date } {
@@ -775,6 +846,21 @@ async function persistirPedido(clienteId: string, telefono: string | null, estad
     if (error) throw error
   } catch (err) {
     console.warn('[pedidos_bot] No se pudo persistir pedido:', err)
+  }
+}
+
+async function registrarReclamacion(telefono: string, tipo: 'cancelacion' | 'queja', descripcion: string, arregloReferencia?: string | null): Promise<void> {
+  try {
+    const { error } = await supabaseAdmin.from('reclamaciones').insert({
+      cliente_telefono: telefono,
+      tipo,
+      descripcion: descripcion.slice(0, 1000),
+      arreglo_referencia: arregloReferencia ?? null,
+      estado: 'pendiente',
+    })
+    if (error) throw error
+  } catch (err) {
+    console.warn('[reclamaciones] No se pudo registrar:', err)
   }
 }
 
@@ -1031,7 +1117,7 @@ function getFechaActual(): string {
 
 async function procesarPedidoWeb(msg: any): Promise<void> {
   const clienteId        = msg.key?.remoteJid as string
-  const texto            = getMessageBody(msg) || msg.body || ''
+  const texto            = getMensajeTexto(msg) || ''
   const pedido           = parsearPedidoCotizador(texto)
   const numeroRealPromise = obtenerNumeroReal(msg)
   const jid = msg.key?.remoteJid
@@ -1067,7 +1153,7 @@ async function procesarMensaje(msg: any): Promise<void> {
   const clienteId    = msg.key?.remoteJid as string
   if (!clienteId) return
   const telefono     = extraerTelefono(msg)
-  let   textoCliente = (getMessageBody(msg) || '').trim()
+  let   textoCliente = (getMensajeTexto(msg) || '').trim()
 
   if (!textoCliente) return
   if (textoCliente.length > MAX_LONGITUD_MENSAJE) textoCliente = textoCliente.slice(0, MAX_LONGITUD_MENSAJE)
@@ -1198,6 +1284,13 @@ async function procesarMensaje(msg: any): Promise<void> {
         `\n\n[CLIENTE QUIERE CANCELAR UN PEDIDO]` +
         `\nINSTRUCCION: Responde con empatía. Di que notificarás al equipo. ` +
         `NO prometas reembolsos ni descuentos. El sistema notificará automáticamente al administrador.`
+      if (debeNotificarReclamacion(clienteId, 'cancelacion')) {
+        const telefonoReal = await numeroRealPromise
+        const referencia = PEDIDO_EN_CURSO.get(clienteId)?.arreglo?.nombre ?? ARREGLO_ELEGIDO.get(clienteId)?.nombre ?? null
+        enviarAlertaCancelacion(telefonoReal, textoCliente.substring(0, 300)).catch(() => {})
+        registrarReclamacion(telefonoReal, 'cancelacion', textoCliente, referencia).catch(() => {})
+        persistirPedido(clienteId, telefonoReal, 'cancelado', textoCliente).catch(() => {})
+      }
     }
 
     // ── QUEJA ────────────────────────────────────────────────────
@@ -1206,6 +1299,12 @@ async function procesarMensaje(msg: any): Promise<void> {
         `\n\n[CLIENTE TIENE UNA QUEJA O RECLAMO]` +
         `\nINSTRUCCION: Responde con empatía. Pide disculpas y di que lo reportas al equipo. ` +
         `NO ofrezcas compensaciones ni descuentos. El sistema notificará automáticamente.`
+      if (debeNotificarReclamacion(clienteId, 'queja')) {
+        const telefonoReal = await numeroRealPromise
+        const referencia = PEDIDO_EN_CURSO.get(clienteId)?.arreglo?.nombre ?? ARREGLO_ELEGIDO.get(clienteId)?.nombre ?? null
+        enviarAlertaQueja(telefonoReal, textoCliente.substring(0, 300)).catch(() => {})
+        registrarReclamacion(telefonoReal, 'queja', textoCliente, referencia).catch(() => {})
+      }
     }
 
     // ── EVENTOS ESPECIALES ──────────────────────────────────────
@@ -1448,6 +1547,8 @@ let ULTIMO_COMANDO_BOT: string | null = null
 let BOT_READY = false
 let sock: ReturnType<typeof makeWASocket> | null = null
 let BOT_CONNECTION: 'connecting' | 'open' | 'close' = 'connecting'
+let PRESENCE_INTERVAL: NodeJS.Timeout | null = null
+let RECONNECT_TIMER: NodeJS.Timeout | null = null
 
 function actualizarEstadoBot(estado: typeof BOT_ESTADO, detalle: string): void {
   BOT_ESTADO = estado
@@ -1506,6 +1607,8 @@ async function revisarComandoRemoto(): Promise<void> {
 
     if (comando.action === 'reconnect') {
       reiniciarProceso('Reinicio remoto desde dashboard', false)
+    } else if (comando.action === 'recover') {
+      reiniciarProceso('Rescate remoto desde dashboard', false)
     }
   } catch (err) {
     console.warn('[bot] No se pudo revisar comando remoto:', err)
@@ -1516,6 +1619,40 @@ function reiniciarProceso(motivo: string, contarCrash = true): never {
   console.error(`[bot] 🔄 Reinicio forzado: ${motivo}`)
   if (contarCrash) registrarCrash()
   process.exit(1)
+}
+
+function limpiarSocketActual(): void {
+  if (PRESENCE_INTERVAL) {
+    clearInterval(PRESENCE_INTERVAL)
+    PRESENCE_INTERVAL = null
+  }
+
+  const actual = sock
+  sock = null
+  if (!actual) return
+
+  try { (actual.ev as any)?.removeAllListeners?.() } catch {}
+  try { actual.end(undefined) } catch {}
+}
+
+function programarReinicioBaileys(motivo: string, delayMs = 5_000): void {
+  if (RECONNECT_TIMER) return
+
+  BOT_RECONNECTING = true
+  RECONNECT_START = Date.now()
+  actualizarEstadoBot('reconectando', motivo)
+  publicarEstadoBot().catch(() => {})
+
+  RECONNECT_TIMER = setTimeout(() => {
+    RECONNECT_TIMER = null
+    limpiarSocketActual()
+    iniciarBaileys().catch(err => {
+      console.error('[bot] ❌ Error reconectando:', err)
+      registrarCrash()
+      process.exit(1)
+    })
+  }, delayMs)
+  RECONNECT_TIMER.unref()
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1618,6 +1755,9 @@ async function manejarMensajeEntrante(msg: any): Promise<void> {
 // ════════════════════════════════════════════════════════════════
 
 async function iniciarBaileys(): Promise<void> {
+  BOT_CONNECTION = 'connecting'
+  actualizarEstadoBot(BOT_RECONNECTING ? 'reconectando' : 'iniciando', BOT_RECONNECTING ? 'Reconectando WhatsApp' : 'Arrancando bot')
+
   const { state, saveCreds } = await useMultiFileAuthState(
     process.env.BAILEYS_DATA_PATH || './.baileys_auth'
   )
@@ -1684,6 +1824,7 @@ async function iniciarBaileys(): Promise<void> {
       console.log('\n✅ Bot de Jardín RoCe conectado!')
       console.log('🌸 Flora está escuchando...\n')
       ultimaActividad = Date.now()
+      resetearEstadoCrash()
       if (BOT_QR_EMITIDO) enviarAlertaReconectado()
       BOT_QR_ACTUAL = null
       BOT_QR_GENERADO_EN = null
@@ -1704,7 +1845,7 @@ async function iniciarBaileys(): Promise<void> {
       console.warn(`⚠️ Conexión cerrada: ${reason || 'desconocido'}`)
 
       if (isRestart) {
-        actualizarEstadoBot('conectado', 'Reconectando...')
+        programarReinicioBaileys('WhatsApp solicitó reinicio de conexión', 1_500)
         return
       }
 
@@ -1714,15 +1855,7 @@ async function iniciarBaileys(): Promise<void> {
       if (isLoggedOut || isBadSession || isForbidden) {
         reiniciarProceso(`Sesión inválida (${reason})`)
       } else {
-        BOT_RECONNECTING = true
-        RECONNECT_START = Date.now()
-        setTimeout(() => {
-          iniciarBaileys().catch(err => {
-            console.error('[bot] ❌ Error reconectando:', err)
-            registrarCrash()
-            process.exit(1)
-          })
-        }, 5_000)
+        programarReinicioBaileys(`Reconectando tras cierre (${reason || 'desconocido'})`, 5_000)
       }
     }
   })
@@ -1738,11 +1871,13 @@ async function iniciarBaileys(): Promise<void> {
   })
 
   // Mantener presencia activa cada 2 minutos
-  setInterval(() => {
+  if (PRESENCE_INTERVAL) clearInterval(PRESENCE_INTERVAL)
+  PRESENCE_INTERVAL = setInterval(() => {
     if (sock) {
       sock.sendPresenceUpdate('available').catch(() => {})
     }
   }, 2 * 60_000)
+  PRESENCE_INTERVAL.unref()
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1884,6 +2019,12 @@ app.post('/reconnect', (_req, res) => {
   console.warn('[bot] 🔄 Reinicio manual solicitado vía API')
   res.json({ ok: true, mensaje: 'Reinicio solicitado. El proceso volverá a levantar con systemd.' })
   setTimeout(() => reiniciarProceso('Reinicio manual desde dashboard', false), 500)
+})
+
+app.post('/recover', (_req, res) => {
+  console.warn('[bot] 🛟 Rescate manual solicitado vía API')
+  res.json({ ok: true, mensaje: 'Rescate iniciado. Se reiniciará la conexión para forzar sincronización.' })
+  setTimeout(() => reiniciarProceso('Rescate manual desde dashboard', false), 500)
 })
 
 app.get('/qr', (_req, res) => {
