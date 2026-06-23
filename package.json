@@ -28,6 +28,9 @@
     "react-dom": "19.2.4",
     "tsx": "^4.22.3"
   },
+  "overrides": {
+    "whatsapp-rust-bridge": "0.5.5"
+  },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/express": "^5.0.6",
