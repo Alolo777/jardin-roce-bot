@@ -1524,7 +1524,6 @@ async function procesarMensaje(message: any): Promise<void> {
 // ════════════════════════════════════════════════════════════════
 
 async function recuperarMensajesPerdidos(): Promise<void> {
-  // FIX: espera unificada de 10s (antes eran 8s en ready + 8s dentro = 16s)
   await new Promise(r => setTimeout(r, 10_000))
 
   try {
@@ -1534,9 +1533,25 @@ async function recuperarMensajesPerdidos(): Promise<void> {
       return
     }
 
-    // FIX: Verificar que pupPage exista antes de getChats()
     if (!whatsappClient.pupPage) {
       console.log('[bot] ⚠️ Página de WhatsApp no disponible (pupPage undefined). Omitiendo rescate.')
+      return
+    }
+
+    // Esperar hasta 60s a que el Store de WhatsApp Web esté disponible
+    let storeListo = false
+    for (let i = 0; i < 6; i++) {
+      try {
+        const disponible = await whatsappClient.pupPage.evaluate(() => {
+          return !!(window as any).Store?.Chat?.getModels
+        })
+        if (disponible) { storeListo = true; break }
+      } catch {}
+      console.log('[bot] ⏳ Esperando Store de WhatsApp Web...')
+      await new Promise(r => setTimeout(r, 10_000))
+    }
+    if (!storeListo) {
+      console.log('[bot] ⚠️ Store de WhatsApp Web no disponible después de 60s. Omitiendo rescate.')
       return
     }
 
