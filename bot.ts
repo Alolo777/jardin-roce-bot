@@ -714,9 +714,7 @@ async function obtenerClientesAtendidosHoy(): Promise<number> {
 
 const COLA_POR_CLIENTE = new Map<string, Promise<void>>()
 const MENSAJES_POR_AGRUPAR = new Map<string, { mensajes: any[]; timer: NodeJS.Timeout }>()
-const AGRUPAR_MENSAJES_MS = 2500
-const AGRUPAR_INICIAL_MS = 120_000 // 2 minutos para el primer batch de una conversación nueva
-const PRIMER_BATCH_PROCESADO = new Map<string, boolean>()
+const AGRUPAR_MENSAJES_MS = 120_000 // 2 minutos: siempre agrupa mensajes antes de responder
 
 function encolarPorCliente(id: string, tarea: () => Promise<void>): void {
   const previa    = COLA_POR_CLIENTE.get(id) ?? Promise.resolve()
@@ -730,14 +728,9 @@ function encolarMensajeAgrupado(clienteId: string, msg: any): void {
   if (actual) clearTimeout(actual.timer)
 
   const mensajes = [...(actual?.mensajes ?? []), msg]
-  // Usar ventana larga (2 min) para el primer batch de la conversación,
-  // ventana corta (2.5s) para respuestas posteriores
-  const esPrimerBatch = !PRIMER_BATCH_PROCESADO.get(clienteId)
-  const ventana = esPrimerBatch ? AGRUPAR_INICIAL_MS : AGRUPAR_MENSAJES_MS
 
   const timer = setTimeout(() => {
     MENSAJES_POR_AGRUPAR.delete(clienteId)
-    PRIMER_BATCH_PROCESADO.set(clienteId, true)
     const textos = mensajes.map(m => getMessageBody(m)).filter(Boolean)
     if (textos.length === 0) return
 
@@ -748,17 +741,13 @@ function encolarMensajeAgrupado(clienteId: string, msg: any): void {
       if (id && m !== base) marcarMensajeProcesado(id)
     }
 
-    if (esPrimerBatch) {
-      console.log(`[bot] 🧵 Primer batch (${ventana/1000}s): ${mensajes.length} mensajes de ${clienteId}`)
-    } else {
-      console.log(`[bot] 🧵 Agrupando ${mensajes.length} mensajes de ${clienteId}`)
-    }
+    console.log(`[bot] 🧵 Batch ${mensajes.length} mensajes de ${clienteId} (${AGRUPAR_MENSAJES_MS/1000}s)`)
     if (esPedidoCotizador(base.body)) {
       encolarPorCliente(clienteId, () => procesarPedidoWeb(base))
     } else {
       encolarPorCliente(clienteId, () => procesarMensaje(base))
     }
-  }, ventana)
+  }, AGRUPAR_MENSAJES_MS)
   timer.unref()
 
   MENSAJES_POR_AGRUPAR.set(clienteId, { mensajes, timer })
