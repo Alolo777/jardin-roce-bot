@@ -9,7 +9,23 @@ function esc(text: string): string {
 
 function ultimos4(numero: string): string {
   const limpio = String(numero ?? '').replace(/\D/g, '')
+  // Si el número es muy largo (>13 dígitos), probablemente es un LID (Linked ID)
+  // — no podemos extraer el teléfono real; mostramos los últimos 4 del LID
   return 'xxx' + limpio.slice(-4)
+}
+
+function esLid(numero: string): boolean {
+  return numero.includes('@lid') || (String(numero ?? '').replace(/[^0-9]/g, '').length > 13)
+}
+
+function formatearNumero(numero: string, nombre?: string): string {
+  const nombreParte = nombre ? ` (${esc(nombre)})` : ''
+  if (esLid(numero)) {
+    const lid = String(numero ?? '').replace(/@.*$/, '')
+    const last4 = lid.replace(/\D/g, '').slice(-4)
+    return `Cuenta vinculada — xxx${last4}${nombreParte}`
+  }
+  return `${ultimos4(numero)}${nombreParte}`
 }
 
 function horaActual(): string {
@@ -74,7 +90,7 @@ export async function enviarAlertaVentaCerrada(datos: DatosVentaCerrada): Promis
     '🌸 *¡VENTA CERRADA!* 🌸',
     '',
     `👤 *Cliente:* ${esc(datos.cliente)}`,
-    `📱 *Teléfono:* ${ultimos4(datos.numeroCliente)}`,
+    `📱 *Teléfono:* ${formatearNumero(datos.numeroCliente)}`,
     `💐 *Producto:* ${esc(datos.producto)}`,
     ...(datos.precioArreglo ? [`🌷 *Ramo:* ${esc(datos.precioArreglo)}`] : []),
     ...(datos.precioEnvio ? [`🚚 *Envío:* ${esc(datos.precioEnvio)}`] : []),
@@ -102,7 +118,7 @@ export async function enviarAlertaArregloApartado(
     '',
       `💐 *Arreglo:* ${esc(nombreArreglo)}`,
       `💰 *Precio:* $${precio.toFixed(2)} MXN`,
-      `📱 *Teléfono:* ${ultimos4(numeroCliente)}`,
+      `📱 *Teléfono:* ${formatearNumero(numeroCliente)}`,
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
     '⚠️ _Marcar como APARTADO en la tienda para no venderlo_',
@@ -151,7 +167,7 @@ export async function enviarAlertaCotizacion(
   const msg = [
     '🌷 *CLIENTE QUIERE COTIZACIÓN*',
     '',
-    `📱 *Teléfono:* ${ultimos4(numeroCliente)}`,
+    `📱 *Teléfono:* ${formatearNumero(numeroCliente)}`,
     `💬 *Busca:* ${esc(descripcion.slice(0, 300))}`,
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
@@ -171,7 +187,7 @@ export async function enviarAlertaClienteFrustrado(
   const msg = [
     '⚠️ *CLIENTE NECESITA ATENCIÓN HUMANA*',
     '',
-    `📱 *Teléfono:* ${ultimos4(numeroCliente)}`,
+    `📱 *Teléfono:* ${formatearNumero(numeroCliente)}`,
     `💬 *Mensaje:* ${esc(ultimoMensaje.slice(0, 200))}`,
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
@@ -214,7 +230,7 @@ export async function enviarAlertaZonaAmbigua(numeroCliente: string, texto: stri
   const msg = [
     '🧭 *ZONA DE ENVÍO AMBIGUA*',
     '',
-    `📱 *Teléfono:* ${ultimos4(numeroCliente)}`,
+    `📱 *Teléfono:* ${formatearNumero(numeroCliente)}`,
     `💬 *Cliente escribió:* ${esc(texto.slice(0, 300))}`,
     candidatos ? `📍 *Posibles zonas:* ${esc(candidatos.slice(0, 500))}` : '',
     `⏰ *Hora:* ${esc(horaActual())}`,
@@ -226,19 +242,20 @@ export async function enviarAlertaZonaAmbigua(numeroCliente: string, texto: stri
 
 export async function enviarAlertaAtencionHumana(
   numeroCliente: string,
-  motivo: string,
-  contexto: string
+  nombreCliente?: string,
+  motivo?: string,
+  contexto?: string
 ): Promise<void> {
   const msg = [
     '🙋 *ATENCIÓN HUMANA REQUERIDA*',
     '',
-    `📱 *Teléfono:* ${ultimos4(numeroCliente)}`,
-    `🧭 *Motivo:* ${esc(motivo.slice(0, 180))}`,
-    `💬 *Contexto:* ${esc(contexto.slice(0, 700))}`,
+    `📱 *Teléfono:* ${formatearNumero(numeroCliente, nombreCliente)}`,
+    motivo ? `🧭 *Motivo:* ${esc(motivo.slice(0, 180))}` : '',
+    contexto ? `💬 *Contexto:* ${esc(contexto.slice(0, 700))}` : '',
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
     '_Revisar WhatsApp y responder directamente si hace falta_',
-  ].join('\n')
+  ].filter(Boolean).join('\n')
   await enviar(msg)
 }
 
@@ -344,7 +361,7 @@ export async function enviarAlertaCancelacion(
   const msg = [
     '🚫 *SOLICITUD DE CANCELACIÓN*',
     '',
-    `📱 *Teléfono:* ${ultimos4(numeroCliente)}`,
+    `📱 *Teléfono:* ${formatearNumero(numeroCliente)}`,
     `💬 *Motivo:* ${esc(descripcion.slice(0, 300))}`,
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
@@ -364,7 +381,7 @@ export async function enviarAlertaQueja(
   const msg = [
     '⚠️ *QUEJA DEL CLIENTE*',
     '',
-    `📱 *Teléfono:* ${ultimos4(numeroCliente)}`,
+    `📱 *Teléfono:* ${formatearNumero(numeroCliente)}`,
     `💬 *Reporta:* ${esc(descripcion.slice(0, 300))}`,
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
@@ -402,7 +419,7 @@ export async function enviarAlertaClienteInteresado(
   const msg = [
     '💐 *CLIENTE QUIERE COMPRAR*',
     '',
-    `📱 *Teléfono:* ${ultimos4(numeroCliente)}`,
+    `📱 *Teléfono:* ${formatearNumero(numeroCliente)}`,
     `💬 *Dice:* ${esc(descripcion.slice(0, 300))}`,
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
@@ -422,7 +439,7 @@ export async function enviarAlertaEmpleadoFotos(
   const msg = [
     '📸 *CLIENTE PIDE FOTOS*',
     '',
-    `📱 *Cliente:* ${ultimos4(numeroCliente)} ${nombreCliente ? `(${esc(nombreCliente)})` : ''}`,
+    `📱 *Cliente:* ${formatearNumero(numeroCliente, nombreCliente || undefined)}`,
     `💬 Quiere ver fotos de los arreglos disponibles.`,
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
@@ -438,7 +455,7 @@ export async function enviarAlertaEmpleadoEnvio(
   const msg = [
     '🚚 *CLIENTE PIDE COTIZACIÓN DE ENVÍO*',
     '',
-    `📱 *Cliente:* ${ultimos4(numeroCliente)}`,
+    `📱 *Cliente:* ${formatearNumero(numeroCliente)}`,
     `📍 *Ubicación:* ${esc(ubicacion.slice(0, 300))}`,
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',

@@ -384,13 +384,23 @@ async function obtenerEmpleadosANotificar(): Promise<string[]> {
 
 async function notificarEmpleadosWhatsApp(mensaje: string): Promise<void> {
   const numeros = await obtenerEmpleadosANotificar()
-  if (numeros.length === 0 || !sock?.user) return
+  if (numeros.length === 0) {
+    console.warn('[bot] No hay empleados configurados para notificar vía WhatsApp (empleados_notificar vacío)')
+    return
+  }
+  if (!sock?.user) {
+    console.warn('[bot] sock.user no disponible — no se puede notificar a empleados por WhatsApp')
+    return
+  }
+  console.log(`[bot] Notificando a ${numeros.length} empleado(s) vía WhatsApp...`)
   for (const num of numeros) {
+    let jid: string
     try {
-      const jid = (num.includes('@') ? num : `${num}@s.whatsapp.net`).replace(/@c\.us$/, '@s.whatsapp.net')
+      jid = (num.includes('@') ? num : `${num}@s.whatsapp.net`).replace(/@c\.us$/, '@s.whatsapp.net')
+      console.log(`[bot] → Enviando WhatsApp a ${jid}`)
       await sock.sendMessage(jid, { text: mensaje })
     } catch (err) {
-      console.warn(`[bot] Error notificando a empleado ${num}:`, err)
+      console.warn(`[bot] Error notificando a empleado ${num} (JID: ${jid}):`, err)
     }
   }
 }
@@ -715,7 +725,7 @@ async function obtenerClientesAtendidosHoy(): Promise<number> {
 const COLA_POR_CLIENTE = new Map<string, Promise<void>>()
 const MENSAJES_POR_AGRUPAR = new Map<string, { mensajes: any[]; timer: NodeJS.Timeout }>()
 const MEDIA_POR_CLIENTE = new Map<string, { base64: string; mimetype: string; caption: string }[]>()
-const AGRUPAR_MENSAJES_MS = 120_000 // 2 minutos: siempre agrupa mensajes antes de responder
+const AGRUPAR_MENSAJES_MS = 35_000 // 35 segundoss: siempre agrupa mensajes antes de responder
 
 function encolarPorCliente(id: string, tarea: () => Promise<void>): void {
   const previa    = COLA_POR_CLIENTE.get(id) ?? Promise.resolve()
@@ -1473,7 +1483,7 @@ async function procesarMensaje(msg: any): Promise<void> {
 
     // ── ATENCIÓN HUMANA (notificación de alerta si aplica)
     if (motivoAtencionHumana && debeNotificarAtencionHumana(clienteId)) {
-      enviarAlertaAtencionHumana(telefono, textoCliente.substring(0, 300), motivoAtencionHumana).catch(() => {})
+      enviarAlertaAtencionHumana(await numeroRealPromise, msg.pushName || '', textoCliente.substring(0, 300), motivoAtencionHumana).catch(() => {})
     }
 
     // ── GENERAR CONTEXTO DE IA ──────────────────────────────────
@@ -1578,9 +1588,9 @@ async function procesarMensaje(msg: any): Promise<void> {
             numeroCliente: telefono,
           }).catch(() => {})
         } else if (esReferencia) {
-          enviarAlertaCotizacion(telefono, mediaAcumulado.map(m => m.caption).filter(Boolean).join(' | ') || 'Envió foto(s) de referencia').catch(() => {})
+          enviarAlertaCotizacion(await numeroRealPromise, mediaAcumulado.map(m => m.caption).filter(Boolean).join(' | ') || 'Envió foto(s) de referencia').catch(() => {})
         } else {
-          enviarAlertaAtencionHumana(telefono, 'Envió imagen sin contexto claro', 'Imagen sin contexto').catch(() => {})
+          enviarAlertaAtencionHumana(await numeroRealPromise, msg.pushName || '', 'Envió imagen sin contexto claro', 'Imagen sin contexto').catch(() => {})
         }
       }
     }
