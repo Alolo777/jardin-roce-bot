@@ -1,7 +1,7 @@
 // lib/telegram.ts — Jardín RoCe 🌸
 
 const API_BASE = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
-const CHAT_ID  = process.env.TELEGRAM_CHAT_ID ?? ''
+const CHAT_IDS  = (process.env.TELEGRAM_CHAT_ID ?? '').split(',').map(s => s.trim()).filter(Boolean)
 
 function esc(text: string): string {
   return String(text ?? '').replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&')
@@ -21,38 +21,40 @@ function horaActual(): string {
 }
 
 async function enviar(texto: string, intentos = 3): Promise<void> {
-  if (!process.env.TELEGRAM_BOT_TOKEN || !CHAT_ID) {
+  if (!process.env.TELEGRAM_BOT_TOKEN || CHAT_IDS.length === 0) {
     console.warn('[Telegram] Variables no configuradas.')
     return
   }
 
   const textoCortado = texto.length > 4000 ? texto.slice(0, 4000) + '\n…_(recortado)_' : texto
 
-  for (let intento = 1; intento <= intentos; intento++) {
-    try {
-      const controller = new AbortController()
-      const timeout    = setTimeout(() => controller.abort(), 10_000)
+  for (const chatId of CHAT_IDS) {
+    for (let intento = 1; intento <= intentos; intento++) {
+      try {
+        const controller = new AbortController()
+        const timeout    = setTimeout(() => controller.abort(), 10_000)
 
-      const res = await fetch(`${API_BASE}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          chat_id: CHAT_ID, text: textoCortado, parse_mode: 'Markdown',
-        }),
-      })
-      clearTimeout(timeout)
+        const res = await fetch(`${API_BASE}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            chat_id: chatId, text: textoCortado, parse_mode: 'Markdown',
+          }),
+        })
+        clearTimeout(timeout)
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(`Telegram ${res.status}: ${JSON.stringify(err)}`)
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(`Telegram ${res.status}: ${JSON.stringify(err)}`)
+        }
+        break
+
+      } catch (err) {
+        console.warn(`[Telegram] Intento ${intento}/${intentos} fallido:`, (err as Error).message)
+        if (intento === intentos) { console.error('[Telegram] Todos los intentos fallaron.'); return }
+        await new Promise(r => setTimeout(r, 2000 * intento))
       }
-      return
-
-    } catch (err) {
-      console.warn(`[Telegram] Intento ${intento}/${intentos} fallido:`, (err as Error).message)
-      if (intento === intentos) { console.error('[Telegram] Todos los intentos fallaron.'); return }
-      await new Promise(r => setTimeout(r, 2000 * intento))
     }
   }
 }
@@ -454,7 +456,7 @@ export async function enviarFotoTelegram(
   caption: string,
   mimetype = 'image/png'
 ): Promise<void> {
-  if (!process.env.TELEGRAM_BOT_TOKEN || !CHAT_ID) {
+  if (!process.env.TELEGRAM_BOT_TOKEN || CHAT_IDS.length === 0) {
     console.warn('[Telegram] Variables no configuradas para foto.')
     return
   }
@@ -462,25 +464,29 @@ export async function enviarFotoTelegram(
   try {
     const buf = Buffer.from(base64, 'base64')
     const blob = new Blob([buf], { type: mimetype })
-    const form = new FormData()
-    form.append('chat_id', CHAT_ID)
-    form.append('photo', blob, `comprobante.${mimetype.includes('png') ? 'png' : 'jpg'}`)
-    form.append('caption', caption)
-    form.append('parse_mode', 'Markdown')
+    const ext = mimetype.includes('png') ? 'png' : 'jpg'
 
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 15_000)
+    for (const chatId of CHAT_IDS) {
+      const form = new FormData()
+      form.append('chat_id', chatId)
+      form.append('photo', blob, `comprobante.${ext}`)
+      form.append('caption', caption)
+      form.append('parse_mode', 'Markdown')
 
-    const res = await fetch(`${API_BASE}/sendPhoto`, {
-      method: 'POST',
-      body: form as any,
-      signal: controller.signal,
-    })
-    clearTimeout(timeout)
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 15_000)
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      console.warn('[Telegram] Error sendPhoto:', JSON.stringify(err))
+      const res = await fetch(`${API_BASE}/sendPhoto`, {
+        method: 'POST',
+        body: form as any,
+        signal: controller.signal,
+      })
+      clearTimeout(timeout)
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        console.warn(`[Telegram] Error sendPhoto a ${chatId}:`, JSON.stringify(err))
+      }
     }
   } catch (err) {
     console.warn('[Telegram] Error enviando foto:', (err as Error).message)
