@@ -245,26 +245,46 @@ function getQuotedText(msg: any): string {
 // HORARIO DE ATENCIÓN
 // ════════════════════════════════════════════════════════════════
 
+function ahoraCdmx(): { dia: number; hora: number; minuto: number; etiqueta: string } {
+  const partes = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Mexico_City',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date())
+  const valor = (tipo: string) => partes.find(p => p.type === tipo)?.value || ''
+  const dias: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+  const hora = Number(valor('hour'))
+  const minuto = Number(valor('minute'))
+  return {
+    dia: dias[valor('weekday')] ?? 0,
+    hora: Number.isFinite(hora) ? hora : 0,
+    minuto: Number.isFinite(minuto) ? minuto : 0,
+    etiqueta: `${String(Number.isFinite(hora) ? hora : 0).padStart(2, '0')}:${String(Number.isFinite(minuto) ? minuto : 0).padStart(2, '0')}`,
+  }
+}
+
 function estaEnHorario(): boolean {
-  const ahora = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' }))
-  const hora  = ahora.getHours() * 60 + ahora.getMinutes()
-  const dia   = ahora.getDay()
+  const ahora = ahoraCdmx()
+  const hora  = ahora.hora * 60 + ahora.minuto
+  const dia   = ahora.dia
   const esFinDeSemana = dia === 0 || dia === 6
   return hora >= 10 * 60 && hora < (esFinDeSemana ? 17 * 60 : 19 * 60)
 }
 
 function getContextoHorario(): string {
-  if (estaEnHorario()) return '';
+  const ahora = ahoraCdmx()
+  if (estaEnHorario()) {
+    return `\n\n[CONTEXTO: Horario de atención] Hora actual CDMX: ${ahora.etiqueta}. Estamos ABIERTOS en este momento. No digas que estamos cerrados ni que se atenderá mañana.`
+  }
   
-  const ahora = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
-  const hora = ahora.getHours();
-  
-  const estadoHorario = hora < 10 
+  const estadoHorario = ahora.hora < 10 
     ? 'Aún no abrimos (abrimos a las 10:00 am).' 
     : 'Ya cerramos por hoy (abrimos mañana a las 10:00 am).';
 
   return (
-    `\n\n[CONTEXTO: Fuera de Horario] ${estadoHorario} ` +
+    `\n\n[CONTEXTO: Fuera de Horario] Hora actual CDMX: ${ahora.etiqueta}. ${estadoHorario} ` +
     `REGLA DE ORO: NUNCA le digas al cliente "mañana te muestro" o "mañana te atiendo". ` +
     `SÍ PUEDES y DEBES enviarle el link del catálogo o el cotizador web (https://floreria-app-mauve.vercel.app/) en este momento para que adelante su pedido y quede agendado para nuestra apertura. ` +
     `Para cotizaciones de envío complejas que no estén en la web, dile amablemente que a las 10 am le confirmas el costo exacto.`
@@ -276,20 +296,56 @@ function getContextoHorario(): string {
 // ════════════════════════════════════════════════════════════════
 
 const CACHE_NUMEROS = new Map<string, string>()
+let BAILEYS_KEYS: any = null
+
+function jidANumero(jid: string): string {
+  const limpio = (jid || '')
+    .replace(/@[^\s]*/g, '')
+    .replace(/:\d+$/, '')
+    .trim()
+  return limpio.startsWith('52') ? `+${limpio}` : limpio
+}
 
 async function obtenerNumeroReal(msg: any): Promise<string> {
   const jid = msg.key?.remoteJid || ''
   if (CACHE_NUMEROS.has(jid)) return CACHE_NUMEROS.get(jid)!
   if (CACHE_NUMEROS.size > 500) CACHE_NUMEROS.clear()
 
-  // Si es @lid, no podemos extraer número real — el LID es el identificador
+  const candidatos = [
+    msg.key?.remoteJid,
+    msg.key?.participant,
+    msg.key?.remoteJidAlt,
+    msg.key?.participantAlt,
+    msg.key?.senderPn,
+    msg.senderPn,
+    msg.participant,
+  ].filter(Boolean) as string[]
+
+  const pnJid = candidatos.find(c => c.endsWith('@s.whatsapp.net') || c.endsWith('@c.us'))
+  if (pnJid) {
+    const numero = jidANumero(pnJid)
+    CACHE_NUMEROS.set(jid, numero)
+    return numero
+  }
+
   if (jid.endsWith('@lid')) {
-    CACHE_NUMEROS.set(jid, jid)
+    try {
+      const lidUser = jid.replace(/@lid$/, '').replace(/:\d+$/, '')
+      const stored = await BAILEYS_KEYS?.get?.('lid-mapping', [`${lidUser}_reverse`])
+      const pnUser = stored?.[`${lidUser}_reverse`]
+      if (pnUser) {
+        const numero = jidANumero(`${pnUser}@s.whatsapp.net`)
+        CACHE_NUMEROS.set(jid, numero)
+        return numero
+      }
+    } catch (err) {
+      console.warn(`[bot] No se pudo resolver LID a teléfono (${jid}):`, err)
+    }
+
     return jid
   }
 
-  const limpio = jid.replace(/@[^\s]*/g, '').trim()
-  const numero = limpio.startsWith('52') ? `+${limpio}` : limpio
+  const numero = jidANumero(jid)
   CACHE_NUMEROS.set(jid, numero)
   return numero
 }
@@ -396,9 +452,28 @@ async function notificarEmpleadosWhatsApp(mensaje: string): Promise<void> {
   for (const num of numeros) {
     let jid = ''
     try {
-      jid = (num.includes('@') ? num : `${num}@s.whatsapp.net`).replace(/@c\.us$/, '@s.whatsapp.net')
+      const telefono = num.replace(/^\+/, '').replace(/\D/g, '')
+      jid = (num.includes('@') ? num : `${telefono}@s.whatsapp.net`).replace(/@c\.us$/, '@s.whatsapp.net')
+      if (telefono && sock.onWhatsApp) {
+        const resultado = await sock.onWhatsApp(telefono).catch(err => {
+          console.warn(`[bot] No se pudo validar empleado ${telefono} en WhatsApp:`, err)
+          return undefined
+        })
+        const contacto = resultado?.find(r => r.exists && r.jid)
+        if (contacto?.jid) jid = contacto.jid.replace(/@c\.us$/, '@s.whatsapp.net')
+        if (resultado && !contacto) {
+          console.warn(`[bot] Empleado ${telefono} no aparece como usuario válido de WhatsApp`)
+          continue
+        }
+      }
+      const empleadoUser = jidANumero(jid).replace(/^\+/, '')
+      const botUser = jidANumero(sock.user.id || '').replace(/^\+/, '')
+      if (empleadoUser && botUser && empleadoUser === botUser) {
+        console.warn(`[bot] El empleado ${jid} es el mismo número conectado al bot; WhatsApp puede no mostrar una notificación separada.`)
+      }
       console.log(`[bot] → Enviando WhatsApp a ${jid}`)
-      await sock.sendMessage(jid, { text: mensaje })
+      const enviado = await sock.sendMessage(jid, { text: mensaje })
+      console.log(`[bot] ✅ WhatsApp empleado enviado a ${jid}${enviado?.key?.id ? ` (${enviado.key.id})` : ''}`)
     } catch (err) {
       console.warn(`[bot] Error notificando a empleado ${num} (JID: ${jid}):`, err)
     }
@@ -725,7 +800,7 @@ async function obtenerClientesAtendidosHoy(): Promise<number> {
 const COLA_POR_CLIENTE = new Map<string, Promise<void>>()
 const MENSAJES_POR_AGRUPAR = new Map<string, { mensajes: any[]; timer: NodeJS.Timeout }>()
 const MEDIA_POR_CLIENTE = new Map<string, { base64: string; mimetype: string; caption: string }[]>()
-const AGRUPAR_MENSAJES_MS = 35_000 // 35 segundoss: siempre agrupa mensajes antes de responder
+const AGRUPAR_MENSAJES_MS = 70_000 // 1 min 10 s: agrupa mensajes antes de responder
 
 function encolarPorCliente(id: string, tarea: () => Promise<void>): void {
   const previa    = COLA_POR_CLIENTE.get(id) ?? Promise.resolve()
@@ -754,10 +829,11 @@ function encolarMensajeAgrupado(clienteId: string, msg: any): void {
   const timer = setTimeout(() => {
     MENSAJES_POR_AGRUPAR.delete(clienteId)
     const textos = mensajes.map(m => getMessageBody(m)).filter(Boolean)
-    if (textos.length === 0) return
+    const tieneMedia = mensajes.some(m => (m as any)._mediaBuffer)
+    if (textos.length === 0 && !tieneMedia) return
 
     const base = mensajes.find(m => hasQuotedMsg(m)) ?? mensajes[mensajes.length - 1]
-    base.body = textos.join('\n---\n')
+    base.body = textos.length > 0 ? textos.join('\n---\n') : '[Imagen sin texto]'
     for (const m of mensajes) {
       const id = obtenerMensajeId(m)
       if (id && m !== base) marcarMensajeProcesado(id)
@@ -1302,7 +1378,7 @@ async function procesarMensaje(msg: any): Promise<void> {
         ENVIO_NOTIFICADO.set(clienteId, Date.now())
         notificarEmpleadosWhatsApp(
           `🚚 *Cliente necesita cotización de envío:* ${telefonoReal}\n\nZona detectada: ${resultadoEnvio.zona} — $${resultadoEnvio.precio}\n\nPor favor confírmale el precio exacto de envío.`
-        ).catch(() => {})
+        ).catch(err => console.error('[bot] WhatsApp empleados envío:', err))
       }
     } else if (resultadoEnvio && 'ambiguo' in resultadoEnvio && resultadoEnvio.ambiguo) {
       const telefonoReal = await numeroRealPromise
@@ -1311,8 +1387,8 @@ async function procesarMensaje(msg: any): Promise<void> {
         ENVIO_NOTIFICADO.set(clienteId, Date.now())
         notificarEmpleadosWhatsApp(
           `🚚 *Cliente necesita cotización de envío:* ${telefonoReal}\n\nUbicación: ${textoCliente.slice(0, 100)}\n\nPor favor confírmale el precio exacto de envío.`
-        ).catch(() => {})
-        enviarAlertaEmpleadoEnvio(clienteId, textoCliente).catch(() => {})
+        ).catch(err => console.error('[bot] WhatsApp empleados envío:', err))
+        enviarAlertaEmpleadoEnvio(telefonoReal, textoCliente).catch(() => {})
       }
     } else if (pareceEnvio && !resultadoEnvio) {
       const telefonoReal = await numeroRealPromise
@@ -1320,8 +1396,8 @@ async function procesarMensaje(msg: any): Promise<void> {
         ENVIO_NOTIFICADO.set(clienteId, Date.now())
         notificarEmpleadosWhatsApp(
           `🚚 *Cliente necesita cotización de envío:* ${telefonoReal}\n\nUbicación: ${textoCliente.slice(0, 100)}\n\nPor favor confírmale el precio exacto de envío.`
-        ).catch(() => {})
-        enviarAlertaEmpleadoEnvio(clienteId, textoCliente).catch(() => {})
+        ).catch(err => console.error('[bot] WhatsApp empleados envío:', err))
+        enviarAlertaEmpleadoEnvio(telefonoReal, textoCliente).catch(() => {})
       }
     }
 
@@ -1380,8 +1456,9 @@ async function procesarMensaje(msg: any): Promise<void> {
       const ahoraFrustracion = FRUSTRACION_NOTIFICADA.get(clienteId) ?? 0
       if (Date.now() - ahoraFrustracion > 30 * 60_000) {
         FRUSTRACION_NOTIFICADA.set(clienteId, Date.now())
+        const telefonoReal = await numeroRealPromise
         enviarAlertaClienteFrustrado(
-          telefono, textoCliente.substring(0, 200)
+          telefonoReal, textoCliente.substring(0, 200)
         ).catch(() => {})
       }
     }
@@ -1408,7 +1485,7 @@ async function procesarMensaje(msg: any): Promise<void> {
         const telefonoReal = await numeroRealPromise
         notificarEmpleadosWhatsApp(
           `📸 *Cliente pide fotos de arreglos:* ${telefonoReal}\n\nContáctalo directamente por WhatsApp y envíale fotos de lo que tenemos disponible.`
-        ).catch(() => {})
+        ).catch(err => console.error('[bot] WhatsApp empleados fotos:', err))
         enviarAlertaEmpleadoFotos(telefonoReal, '').catch(() => {})
         console.log(`[bot] 📸 Alerta de fotos enviada para ${telefonoReal}`)
       }
@@ -1418,7 +1495,7 @@ async function procesarMensaje(msg: any): Promise<void> {
     if (/venta\s*cerrada/i.test(textoCliente)) {
       const venta = ventaDesdeEstado(clienteId)
       if (venta) {
-        ventaCerradaHandler(clienteId, venta, telefono)
+        ventaCerradaHandler(clienteId, venta, await numeroRealPromise)
       }
     }
 
@@ -1459,7 +1536,7 @@ async function procesarMensaje(msg: any): Promise<void> {
         total: precio.trim(), direccion: direccion.trim(),
         rawToken: ventaToken[0],
       }
-      ventaCerradaHandler(clienteId, venta, telefono)
+      ventaCerradaHandler(clienteId, venta, await numeroRealPromise)
       ventaCerrada = true
     }
 
@@ -1477,7 +1554,7 @@ async function procesarMensaje(msg: any): Promise<void> {
           total: totalTexto,
           direccion: pedido?.envio?.zona ?? 'Por confirmar',
           rawToken: '',
-        }, telefono)
+        }, await numeroRealPromise)
       }
     }
 
@@ -1521,7 +1598,7 @@ async function procesarMensaje(msg: any): Promise<void> {
           await responderMensaje(msg, msgLimpio)
           await new Promise(r => setTimeout(r, 1500))
         }
-        ventaCerradaHandler(clienteId, venta, telefono)
+        ventaCerradaHandler(clienteId, venta, await numeroRealPromise)
       } else {
         const elegido = ARREGLO_ELEGIDO.get(clienteId)
         let mensajeParaEnviar = mensajeFinal
@@ -1540,7 +1617,7 @@ async function procesarMensaje(msg: any): Promise<void> {
             total: totalTexto,
             direccion: pedido?.envio?.zona ?? 'Por confirmar',
             rawToken: '',
-          }, telefono)
+          }, await numeroRealPromise)
         }
 
         await responderMensaje(msg, mensajeParaEnviar)
@@ -1551,6 +1628,7 @@ async function procesarMensaje(msg: any): Promise<void> {
       const mediaAcumulado = MEDIA_POR_CLIENTE.get(clienteId)
       if (mediaAcumulado && mediaAcumulado.length > 0) {
         MEDIA_POR_CLIENTE.delete(clienteId)
+        const telefonoReal = await numeroRealPromise
         const historial = await obtenerHistorial(telefono)
         const historialTexto = historial.map(m => m.content).join(' ').toLowerCase()
         const primeraCaption = mediaAcumulado[0].caption.toLowerCase()
@@ -1568,13 +1646,13 @@ async function procesarMensaje(msg: any): Promise<void> {
 
         for (const media of mediaAcumulado) {
           if (esComprobante) {
-            const captionTelegram = `📸 *Comprobante de pago* — ${clienteId.replace(/@.*$/, '')}${media.caption ? `\n\n${media.caption}` : ''}`
+            const captionTelegram = `📸 *Comprobante de pago* — ${telefonoReal}${media.caption ? `\n\n${media.caption}` : ''}`
             enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
           } else if (esReferencia) {
-            const captionTelegram = `📷 *Foto de referencia* — ${clienteId.replace(/@.*$/, '')}${media.caption ? `\n\nCliente dice: ${media.caption}` : '\n\nCliente envió una foto de referencia.'}`
+            const captionTelegram = `📷 *Foto de referencia* — ${telefonoReal}${media.caption ? `\n\nCliente dice: ${media.caption}` : '\n\nCliente envió una foto de referencia.'}`
             enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
           } else {
-            const captionTelegram = `📸 *Imagen del cliente* — ${clienteId.replace(/@.*$/, '')}${media.caption ? `\n\nDice: ${media.caption}` : '\n\n_Sin mensaje de texto_'}`
+            const captionTelegram = `📸 *Imagen del cliente* — ${telefonoReal}${media.caption ? `\n\nDice: ${media.caption}` : '\n\n_Sin mensaje de texto_'}`
             enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
           }
         }
@@ -1585,12 +1663,16 @@ async function procesarMensaje(msg: any): Promise<void> {
             producto: 'Verificar en conversación',
             total: 'Verificar en conversación',
             direccion: 'Por confirmar',
-            numeroCliente: telefono,
+            numeroCliente: telefonoReal,
           }).catch(() => {})
         } else if (esReferencia) {
-          enviarAlertaCotizacion(await numeroRealPromise, mediaAcumulado.map(m => m.caption).filter(Boolean).join(' | ') || 'Envió foto(s) de referencia').catch(() => {})
+          const descripcion = mediaAcumulado.map(m => m.caption).filter(Boolean).join(' | ') || 'Envió foto(s) de referencia'
+          enviarAlertaCotizacion(telefonoReal, descripcion).catch(() => {})
+          notificarEmpleadosWhatsApp(
+            `🌷 *Cliente necesita cotización:* ${telefonoReal}\n\n${descripcion}\n\nRevisa la foto de referencia y cotízale por WhatsApp.`
+          ).catch(err => console.error('[bot] WhatsApp empleados cotización:', err))
         } else {
-          enviarAlertaAtencionHumana(await numeroRealPromise, msg.pushName || '', 'Envió imagen sin contexto claro', 'Imagen sin contexto').catch(() => {})
+          enviarAlertaAtencionHumana(telefonoReal, msg.pushName || '', 'Envió imagen sin contexto claro', 'Imagen sin contexto').catch(() => {})
         }
       }
     }
@@ -1762,7 +1844,9 @@ function programarReinicioBaileys(motivo: string, delayMs = 5_000): void {
 
 async function descargarMedia(msg: any, type: 'image' | 'document'): Promise<Buffer | null> {
   try {
-    const stream = await downloadContentFromMessage(msg.message, type === 'document' ? 'document' : 'image')
+    const contenido = type === 'document' ? msg.message?.documentMessage : msg.message?.imageMessage
+    if (!contenido) return null
+    const stream = await downloadContentFromMessage(contenido, type === 'document' ? 'document' : 'image')
     const chunks: Buffer[] = []
     for await (const chunk of stream) chunks.push(chunk)
     return Buffer.concat(chunks)
@@ -1788,6 +1872,7 @@ async function manejarMensajeEntrante(msg: any): Promise<void> {
   console.log(`[DIAG] from: ${remoteJid} | type: ${msgType} | fromMe: ${msg.key?.fromMe}`)
 
   if (isJidGroup(remoteJid)) return
+  if (remoteJid.endsWith('@newsletter')) return
   if (remoteJid === 'status@broadcast') return
   if (!msg.key?.fromMe && yaProcesadoRecientemente(msg)) {
     console.log(`[bot] ↩️ Mensaje duplicado ignorado: ${obtenerMensajeId(msg)}`)
@@ -1849,6 +1934,53 @@ async function manejarMensajeEntrante(msg: any): Promise<void> {
   }).catch(() => encolarMensajeAgrupado(clienteId, msg))
 }
 
+function timestampMensajeMs(msg: any): number {
+  const ts = msg?.messageTimestamp
+  const segundos = Number(ts?.toNumber?.() ?? ts ?? 0)
+  return Number.isFinite(segundos) ? segundos * 1000 : 0
+}
+
+async function rescatarMensajesNoLeidos(chats: any[], messages: any[]): Promise<void> {
+  const noLeidos = new Map<string, number>()
+  for (const chat of chats || []) {
+    const jid = chat?.id
+    const unread = Number(chat?.unreadCount || 0)
+    if (!jid || unread <= 0) continue
+    if (isJidGroup(jid) || jid.endsWith('@newsletter') || jid === 'status@broadcast') continue
+    noLeidos.set(jid, unread)
+  }
+  if (noLeidos.size === 0) return
+
+  const hace48h = Date.now() - 48 * 60 * 60_000
+  const porChat = new Map<string, any[]>()
+  for (const msg of messages || []) {
+    const jid = msg?.key?.remoteJid
+    if (!jid || !noLeidos.has(jid) || msg?.key?.fromMe) continue
+    const id = obtenerMensajeId(msg)
+    if (!id || MENSAJES_RESCATADOS.has(id)) continue
+    const ts = timestampMensajeMs(msg)
+    if (ts && ts < hace48h) continue
+    const lista = porChat.get(jid) || []
+    lista.push(msg)
+    porChat.set(jid, lista)
+  }
+
+  for (const [jid, lista] of porChat) {
+    const limite = noLeidos.get(jid) || 1
+    const pendientes = lista
+      .sort((a, b) => timestampMensajeMs(b) - timestampMensajeMs(a))
+      .slice(0, limite)
+      .sort((a, b) => timestampMensajeMs(a) - timestampMensajeMs(b))
+    if (pendientes.length === 0) continue
+    console.log(`[bot] 🛟 Rescatando ${pendientes.length} mensaje(s) no leído(s) de ${jid}`)
+    for (const msg of pendientes) {
+      const id = obtenerMensajeId(msg)
+      if (id) MENSAJES_RESCATADOS.add(id)
+      await manejarMensajeEntrante(msg)
+    }
+  }
+}
+
 // ════════════════════════════════════════════════════════════════
 // INICIALIZACIÓN BAILEYS
 // ════════════════════════════════════════════════════════════════
@@ -1860,6 +1992,7 @@ async function iniciarBaileys(): Promise<void> {
   const { state, saveCreds } = await useMultiFileAuthState(
     process.env.BAILEYS_DATA_PATH || './.baileys_auth'
   )
+  BAILEYS_KEYS = state.keys
 
   // Verificar versión más reciente de Baileys para alerta de API
   verificarVersionBaileys().catch(() => {})
@@ -1966,6 +2099,15 @@ async function iniciarBaileys(): Promise<void> {
       } catch (err) {
         console.error('[bot] Error en messages.upsert:', err)
       }
+    }
+  })
+
+  sock.ev.on('messaging-history.set', async ({ chats, messages, isLatest }) => {
+    if (!isLatest) return
+    try {
+      await rescatarMensajesNoLeidos(chats, messages)
+    } catch (err) {
+      console.error('[bot] Error rescatando mensajes no leídos:', err)
     }
   })
 
