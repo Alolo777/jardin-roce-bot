@@ -714,7 +714,8 @@ async function obtenerClientesAtendidosHoy(): Promise<number> {
 
 const COLA_POR_CLIENTE = new Map<string, Promise<void>>()
 const MENSAJES_POR_AGRUPAR = new Map<string, { mensajes: any[]; timer: NodeJS.Timeout }>()
-const AGRUPAR_MENSAJES_MS = 35_000 // 2 minutos: siempre agrupa mensajes antes de responder
+const MEDIA_POR_CLIENTE = new Map<string, { base64: string; mimetype: string; caption: string }[]>()
+const AGRUPAR_MENSAJES_MS = 120_000 // 2 minutos: siempre agrupa mensajes antes de responder
 
 function encolarPorCliente(id: string, tarea: () => Promise<void>): void {
   const previa    = COLA_POR_CLIENTE.get(id) ?? Promise.resolve()
@@ -728,6 +729,17 @@ function encolarMensajeAgrupado(clienteId: string, msg: any): void {
   if (actual) clearTimeout(actual.timer)
 
   const mensajes = [...(actual?.mensajes ?? []), msg]
+
+  // Acumular media (imágenes) para enviarlas juntas
+  if ((msg as any)._mediaBuffer) {
+    const mediaActual = MEDIA_POR_CLIENTE.get(clienteId) || []
+    mediaActual.push({
+      base64: (msg as any)._mediaBuffer,
+      mimetype: (msg as any)._mediaMime || 'image/jpeg',
+      caption: getMensajeTexto(msg) || '',
+    })
+    MEDIA_POR_CLIENTE.set(clienteId, mediaActual)
+  }
 
   const timer = setTimeout(() => {
     MENSAJES_POR_AGRUPAR.delete(clienteId)
@@ -1524,6 +1536,53 @@ async function procesarMensaje(msg: any): Promise<void> {
         await responderMensaje(msg, mensajeParaEnviar)
         await agregarAlHistorial(telefono, 'assistant', mensajeParaEnviar)
       }
+
+      // ── PROCESAR MEDIA ACUMULADO (imágenes) ─────────────────
+      const mediaAcumulado = MEDIA_POR_CLIENTE.get(clienteId)
+      if (mediaAcumulado && mediaAcumulado.length > 0) {
+        MEDIA_POR_CLIENTE.delete(clienteId)
+        const historial = await obtenerHistorial(telefono)
+        const historialTexto = historial.map(m => m.content).join(' ').toLowerCase()
+        const primeraCaption = mediaAcumulado[0].caption.toLowerCase()
+        const textoCompleto = `${historialTexto} ${primeraCaption}`
+
+        const esComprobante =
+          ARREGLO_ELEGIDO.has(clienteId) ||
+          PEDIDO_EN_CURSO.has(clienteId) ||
+          VENTA_ACTUAL.has(clienteId) ||
+          /\b(bbva|transfer|pague|comprobante|cuenta|4152|pago|total\s*\$|pagar|comprobante)\b/i.test(textoCompleto)
+
+        const esReferencia =
+          !esComprobante &&
+          /\b(como.*este|asi|parecido|quiero.*asi|cuanto.*cuesta|precio|cotiza|armar|ramo|arreglo|flor|referencia|modelo)\b/i.test(textoCompleto)
+
+        for (const media of mediaAcumulado) {
+          if (esComprobante) {
+            const captionTelegram = `📸 *Comprobante de pago* — ${clienteId.replace(/@.*$/, '')}${media.caption ? `\n\n${media.caption}` : ''}`
+            enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
+          } else if (esReferencia) {
+            const captionTelegram = `📷 *Foto de referencia* — ${clienteId.replace(/@.*$/, '')}${media.caption ? `\n\nCliente dice: ${media.caption}` : '\n\nCliente envió una foto de referencia.'}`
+            enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
+          } else {
+            const captionTelegram = `📸 *Imagen del cliente* — ${clienteId.replace(/@.*$/, '')}${media.caption ? `\n\nDice: ${media.caption}` : '\n\n_Sin mensaje de texto_'}`
+            enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
+          }
+        }
+
+        if (esComprobante) {
+          enviarAlertaVentaCerrada({
+            cliente: 'Verificar en chat',
+            producto: 'Verificar en conversación',
+            total: 'Verificar en conversación',
+            direccion: 'Por confirmar',
+            numeroCliente: telefono,
+          }).catch(() => {})
+        } else if (esReferencia) {
+          enviarAlertaCotizacion(telefono, mediaAcumulado.map(m => m.caption).filter(Boolean).join(' | ') || 'Envió foto(s) de referencia').catch(() => {})
+        } else {
+          enviarAlertaAtencionHumana(telefono, 'Envió imagen sin contexto claro', 'Imagen sin contexto').catch(() => {})
+        }
+      }
     }
   } catch (err) {
     console.error('[bot] Error en procesarMensaje:', err)
@@ -1688,6 +1747,22 @@ function programarReinicioBaileys(motivo: string, delayMs = 5_000): void {
 }
 
 // ════════════════════════════════════════════════════════════════
+// DESCARGA DE MEDIA
+// ════════════════════════════════════════════════════════════════
+
+async function descargarMedia(msg: any, type: 'image' | 'document'): Promise<Buffer | null> {
+  try {
+    const stream = await downloadContentFromMessage(msg.message, type === 'document' ? 'document' : 'image')
+    const chunks: Buffer[] = []
+    for await (const chunk of stream) chunks.push(chunk)
+    return Buffer.concat(chunks)
+  } catch (e) {
+    console.warn('[bot] Error descargando media:', e)
+    return null
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
 // MANEJADOR DE MENSAJES ENTRANTES
 // ════════════════════════════════════════════════════════════════
 
@@ -1730,88 +1805,26 @@ async function manejarMensajeEntrante(msg: any): Promise<void> {
 
   const clienteId = remoteJid
 
+  // ── STICKERS: ignorar completamente ────────────────────────────
+  if (msgType === 'sticker') {
+    marcarMensajeProcesado(obtenerMensajeId(msg))
+    return
+  }
+
   if (msgType !== 'chat' && TIPOS_MEDIA_NO_SOPORTADOS.has(msgType)) {
     if (msgType === 'image' || msgType === 'document') {
-      // Descargar la imagen
-      let buffer: Buffer | null = null
-      try {
-        const mediaType = msgType === 'document' ? 'document' : 'image'
-        const stream = await downloadContentFromMessage(msg.message, mediaType as any)
-        const chunks: Buffer[] = []
-        for await (const chunk of stream) chunks.push(chunk)
-        buffer = Buffer.concat(chunks)
-      } catch (e) {
-        console.warn('[bot] Error descargando imagen:', e)
+      // Descargar la imagen y agregarla al batch junto con mensajes de texto
+      const buffer = await descargarMedia(msg, msgType as 'image' | 'document')
+      if (buffer) {
+        (msg as any)._mediaBuffer = buffer.toString('base64')
+        (msg as any)._mediaMime = msgType === 'document'
+          ? msg?.message?.documentMessage?.mimetype || 'application/octet-stream'
+          : 'image/jpeg'
       }
-
-      const caption = (getMensajeTexto(msg) || '').trim()
-      const numeroReal = await obtenerNumeroReal(msg).catch(() => telefono)
-      const historial = await obtenerHistorial(numeroReal)
-      const historialTexto = historial.map(m => m.content).join(' ').toLowerCase()
-      const textoCompleto = `${historialTexto} ${caption.toLowerCase()}`
-
-      // ── DETECTAR CONTEXTO DE PAGO ──────────────────────────
-      const contextoPago =
-        ARREGLO_ELEGIDO.has(clienteId) ||
-        PEDIDO_EN_CURSO.has(clienteId) ||
-        /\b(bbva|transfer|pague|comprobante|cuenta|4152|pago|total\s*\$|pagar)\b/i.test(textoCompleto) ||
-        VENTA_ACTUAL.has(clienteId)
-
-      // ── DETECTAR CONTEXTO DE COTIZACIÓN / REFERENCIA ────────
-      const contextoReferencia =
-        !contextoPago && (
-          /\b(como.*este|asi|parecido|quiero.*asi|cuanto.*cuesta|cuanto.*vale|precio|cotiza|armar|ramo|arreglo|flor|quiero.*foto|referencia|modelo)\b/i.test(textoCompleto) ||
-          !VENTAS_CERRADAS.has(clienteId) && caption.length > 0
-        )
-
-      if (contextoPago && buffer) {
-        // ── COMPROBANTE DE PAGO ──────────────────────────────
-        await responderMensaje(msg, '¡Gracias! He recibido tu comprobante 🌸 Lo estoy registrando y notificando al equipo para que preparen tu pedido.')
-        const captionTelegram = `📸 *Comprobante de pago* — ${clienteId.replace(/@.*$/, '')}${caption ? `\n\n${caption}` : ''}`
-        enviarFotoTelegram(buffer.toString('base64'), captionTelegram, 'image/jpeg').catch(() => {})
-        const elegido = ARREGLO_ELEGIDO.get(clienteId) ?? PEDIDO_EN_CURSO.get(clienteId)?.arreglo
-        if (elegido && !VENTAS_CERRADAS.has(clienteId)) {
-          const numeroReal = await obtenerNumeroReal(msg).catch(() => null)
-          const pedido = PEDIDO_EN_CURSO.get(clienteId)
-          const total = elegido.precio + (pedido?.envio?.precio ?? 0)
-          const totalTexto = pedido?.envio
-            ? `$${total.toFixed(2)} MXN (ramo $${elegido.precio.toFixed(2)} + envío $${pedido.envio.precio.toFixed(2)})`
-            : `$${total.toFixed(2)} MXN`
-          enviarAlertaVentaCerrada({
-            cliente: pedido?.nombre ?? 'Verificar en chat',
-            producto: elegido.nombre,
-            total: totalTexto,
-            direccion: pedido?.envio?.zona ?? 'Por confirmar',
-            numeroCliente: numeroReal ?? 'desconocido',
-            precioArreglo: `$${elegido.precio.toFixed(2)} MXN`,
-            precioEnvio: pedido?.envio
-              ? `$${pedido.envio.precio.toFixed(2)} MXN (${pedido.envio.zona})`
-              : undefined,
-            metodoPago: 'transferencia',
-          }).catch(err => console.error('[bot] Telegram venta img:', err))
-          VENTAS_CERRADAS.add(clienteId)
-        }
-      } else if (contextoReferencia && buffer) {
-        // ── FOTO DE REFERENCIA PARA COTIZACIÓN ────────────────
-        const captionTelegram = `📷 *Foto de referencia* — ${clienteId.replace(/@.*$/, '')}${caption ? `\n\nCliente dice: ${caption}` : '\n\nCliente envió una foto de referencia para cotización.'}`
-        enviarFotoTelegram(buffer.toString('base64'), captionTelegram, 'image/jpeg').catch(() => {})
-        enviarAlertaCotizacion(clienteId.replace(/@.*$/, ''), caption || 'Envió foto de referencia').catch(() => {})
-        await responderMensaje(msg, '¡Qué bonita referencia! 🌸 Le pido a una compañera que te cotice algo similar y te confirme el precio.')
-      } else {
-        // ── IMAGEN SIN CONTEXTO CLARO → ATENCIÓN HUMANA ──────
-        if (buffer) {
-          const captionTelegram = `📸 *Imagen del cliente* — ${clienteId.replace(/@.*$/, '')}${caption ? `\n\nDice: ${caption}` : '\n\n_Sin mensaje de texto_'}`
-          enviarFotoTelegram(buffer.toString('base64'), captionTelegram, 'image/jpeg').catch(() => {})
-        }
-        enviarAlertaAtencionHumana(clienteId.replace(/@.*$/, ''), caption || 'Envió imagen sin contexto claro', 'Imagen sin contexto').catch(() => {})
-        if (caption) {
-          await responderMensaje(msg, '¡Gracias! Recibí tu imagen 🌸 Permíteme revisarlo con el equipo.')
-        } else {
-          await responderMensaje(msg, '¡Gracias por la imagen! 🌸 La estoy revisando.')
-        }
-      }
+      encolarMensajeAgrupado(clienteId, msg)
     } else {
-      await responderMensaje(msg, 'Por ahora solo puedo leer mensajes de *texto* 🌸. ¿Qué necesitas?')
+      // Video, audio, ptt — no soportados
+      responderMensaje(msg, 'Por ahora solo puedo leer mensajes de *texto* 🌸. ¿Qué necesitas?').catch(() => {})
     }
     return
   }
