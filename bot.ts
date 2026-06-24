@@ -394,7 +394,7 @@ async function notificarEmpleadosWhatsApp(mensaje: string): Promise<void> {
   }
   console.log(`[bot] Notificando a ${numeros.length} empleado(s) vía WhatsApp...`)
   for (const num of numeros) {
-    let jid: string
+    let jid = ''
     try {
       jid = (num.includes('@') ? num : `${num}@s.whatsapp.net`).replace(/@c\.us$/, '@s.whatsapp.net')
       console.log(`[bot] → Enviando WhatsApp a ${jid}`)
@@ -1817,7 +1817,8 @@ async function manejarMensajeEntrante(msg: any): Promise<void> {
 
   // ── STICKERS: ignorar completamente ────────────────────────────
   if (msgType === 'sticker') {
-    marcarMensajeProcesado(obtenerMensajeId(msg))
+    const stickerId = obtenerMensajeId(msg)
+    if (stickerId) marcarMensajeProcesado(stickerId)
     return
   }
 
@@ -1826,7 +1827,7 @@ async function manejarMensajeEntrante(msg: any): Promise<void> {
       // Descargar la imagen y agregarla al batch junto con mensajes de texto
       const buffer = await descargarMedia(msg, msgType as 'image' | 'document')
       if (buffer) {
-        (msg as any)._mediaBuffer = buffer.toString('base64')
+        ;(msg as any)._mediaBuffer = (buffer as any).toString('base64')
         (msg as any)._mediaMime = msgType === 'document'
           ? msg?.message?.documentMessage?.mimetype || 'application/octet-stream'
           : 'image/jpeg'
