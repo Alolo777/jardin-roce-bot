@@ -48,7 +48,7 @@ import type { VentaCerrada } from './lib/types'
 // HISTORIAL DE CONVERSACIONES
 // ════════════════════════════════════════════════════════════════
 
-const MAX_TURNOS_HISTORIAL  = 10
+const MAX_TURNOS_HISTORIAL  = 30
 const CACHE_CLIENTE_UUID = new Map<string, string>()
 let IGNORADOS_CACHE: string[] = []
 let IGNORADOS_ULTIMA = 0
@@ -810,6 +810,14 @@ function mediaToBase64(media: Buffer | Uint8Array | ArrayBuffer): string {
   return Buffer.from(media as any).toString('base64' as BufferEncoding)
 }
 
+function esTextoComprobante(texto: string): boolean {
+  return /\b(comprobante|ya\s*pag[uú]e|pagado|pago\s*hecho|ya\s*qued[oó]|ya\s*transfer[ií]|transfer[ií]|transferencia|dep[oó]sito|recibo|ticket|bbva|devi\s+america|devi\s+américa|4152)\b/i.test(texto)
+}
+
+function esTextoReferenciaOCotizacion(texto: string): boolean {
+  return /\b(cotiz|cotizar|cotizaci[oó]n|cu[aá]nto|cuanto|precio|saldr[ií]a|costar[ií]a|ramo\s+as[ií]|como\s+(este|esta|la\s+foto|imagen)|referencia|foto\s+de\s+referencia|imagen\s+de\s+referencia|hacer\s+un\s+ramo|podr[ií]an\s+hacer|hortensias?|lilis?|rosas?|flores?\s+de\s+la\s+imagen)\b/i.test(texto)
+}
+
 function fechaInicioFinCDMX(): { inicio: Date; fin: Date } {
   const ahora = new Date()
   const cdmxStr = ahora.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })
@@ -1053,6 +1061,12 @@ function resetearPedidoCliente(clienteId: string): void {
   VENTA_ACTUAL.delete(clienteId)
 }
 
+function resetearPedidoActivo(clienteId: string): void {
+  PEDIDO_EN_CURSO.delete(clienteId)
+  ARREGLO_ELEGIDO.delete(clienteId)
+  VENTA_ACTUAL.delete(clienteId)
+}
+
 function ventaDesdeEstado(clienteId: string, fallback?: VentaCerrada): VentaCerrada | null {
   const pedido = PEDIDO_EN_CURSO.get(clienteId)
   const elegido = pedido?.arreglo ?? ARREGLO_ELEGIDO.get(clienteId)
@@ -1082,6 +1096,12 @@ function ventaDesdeEstado(clienteId: string, fallback?: VentaCerrada): VentaCerr
 function tieneArregloVerificado(clienteId: string): boolean {
   const pedido = PEDIDO_EN_CURSO.get(clienteId)
   return Boolean(pedido?.arreglo || pedido?.productoPersonalizado || ARREGLO_ELEGIDO.get(clienteId))
+}
+
+function precioArregloTexto(clienteId: string): string {
+  const pedido = PEDIDO_EN_CURSO.get(clienteId)
+  const precio = pedido?.arreglo?.precio ?? ARREGLO_ELEGIDO.get(clienteId)?.precio ?? pedido?.precioPersonalizado ?? 0
+  return `$${precio.toFixed(2)} MXN`
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1340,8 +1360,8 @@ async function procesarMensaje(msg: any): Promise<void> {
 
     await agregarAlHistorial(telefono, 'user', textoCliente)
 
-    const pideEmpezarDesdeCero = /empecemos\s+desde\s+cero|desde\s+cero|borr[oó]n\s+y\s+cuenta\s+nueva|nuevo\s+pedido/i.test(textoCliente)
-    if (pideEmpezarDesdeCero) resetearPedidoCliente(clienteId)
+    const pideEmpezarDesdeCero = /empecemos\s+desde\s+cero|desde\s+cero|borr[oó]n\s+y\s+cuenta\s+nueva|nuevo\s+pedido|otro\s+pedido|otro\s+ramo|es\s+aparte|aparte\s+ese|ya\s+hab[ií]a\s+finalizado|ya\s+se\s+finaliz[oó]|ese\s+ya\s+qued[oó]/i.test(textoCliente)
+    if (pideEmpezarDesdeCero) resetearPedidoActivo(clienteId)
 
     const intencion     = detectarIntencion(textoCliente, clienteId)
     const horario       = getContextoHorario()
@@ -1350,7 +1370,7 @@ async function procesarMensaje(msg: any): Promise<void> {
     if (pideEmpezarDesdeCero) {
       contextoExtra +=
         `\n\n[CLIENTE QUIERE EMPEZAR DESDE CERO] ` +
-        `Ignora el pedido anterior de esta conversación. No cierres venta ni uses datos previos.`
+        `El pedido anterior ya no debe mezclarse con este. Usa SOLO la última solicitud del cliente para el pedido nuevo. No reutilices flores, precio, sucursal, pago ni nombre del pedido anterior.`
     }
 
     // ── Múltiples mensajes agrupados ─────────────────────────────
@@ -1580,6 +1600,8 @@ async function procesarMensaje(msg: any): Promise<void> {
       }
     }
 
+    let ventaCerrada = false
+
     // ── MÉTODO DE PAGO ──────────────────────────────────────────
     const consultaPagoEnviado = /(?:ya\s*)?pag[uú]e|comprobante|transferencia|ya\s*transfer|transfer[ií]|transfiero|le\s+transfiero|devi\s+america|devi\s+américa/i.test(textoCliente)
     if (consultaPagoEnviado && tieneArregloVerificado(clienteId)) {
@@ -1598,11 +1620,30 @@ async function procesarMensaje(msg: any): Promise<void> {
         `El equipo preparará su pedido.`
     }
 
+    const pagoEfectivoAlRecoger = /\b(efectivo|tarjeta)\b/i.test(textoCliente) && /\b(recoger|pasar[ií]a|pasaria|paso|sucursal|norte|centro)\b/i.test(textoCliente)
+    const pedidoParaCierre = PEDIDO_EN_CURSO.get(clienteId)
+    const ventaParaCierre = ventaDesdeEstado(clienteId)
+    if (!VENTAS_CERRADAS.has(clienteId) && ventaParaCierre && pagoEfectivoAlRecoger && (pedidoParaCierre?.sucursal || /\b(norte|centro)\b/i.test(textoCliente))) {
+      const confirmacion = `¡Listo, ${ventaParaCierre.cliente}! 🌷 Tu pedido queda apartado para ${ventaParaCierre.direccion}. Total: ${ventaParaCierre.total}. Pagas al recoger.`
+      await responderMensaje(msg, confirmacion)
+      await agregarAlHistorial(telefono, 'assistant', confirmacion)
+      await pedidoApartadoHandler(clienteId, ventaParaCierre, await numeroRealPromise, 'Efectivo al recoger')
+      ventaCerrada = true
+    }
+
+    const cierrePagoTransferencia = /\b(listo|ya\s+qued[oó]|ya\s+pag[uú]e|ya\s+transfer[ií]|comprobante)\b/i.test(textoCliente) && (consultaPagoEnviado || /\b(bbva|devi\s+america|devi\s+américa|cuenta|transferencia)\b/i.test(historialTexto))
+    if (!ventaCerrada && !VENTAS_CERRADAS.has(clienteId) && ventaParaCierre && cierrePagoTransferencia) {
+      const confirmacion = `¡Gracias, ${ventaParaCierre.cliente}! 🌸 Tu pedido queda registrado. Total: ${ventaParaCierre.total}.`
+      await responderMensaje(msg, confirmacion)
+      await agregarAlHistorial(telefono, 'assistant', confirmacion)
+      await ventaCerradaHandler(clienteId, ventaParaCierre, await numeroRealPromise)
+      ventaCerrada = true
+    }
+
     // ── CIERRE DE VENTA ─────────────────────────────────────────
     const ventaToken  = textoCliente.match(/\[VENTA_CERRADA:\s*(.+?)\|(.+?)\|(.+?)\|(.+?)\]/i)
-    let ventaCerrada = false
 
-    if (ventaToken) {
+    if (!ventaCerrada && ventaToken) {
       const [ , nombre, producto, precio, direccion ] = ventaToken
       const venta: VentaCerrada = {
         cliente: nombre.trim(), producto: producto.trim(),
@@ -1713,19 +1754,16 @@ async function procesarMensaje(msg: any): Promise<void> {
         MEDIA_POR_CLIENTE.delete(clienteId)
         const telefonoReal = await numeroRealPromise
         const historial = await obtenerHistorial(telefono)
-        const historialTexto = historial.map(m => m.content).join(' ').toLowerCase()
-        const primeraCaption = mediaAcumulado[0].caption.toLowerCase()
-        const textoCompleto = `${historialTexto} ${primeraCaption}`
+        const historialRecienteTexto = historial.slice(-8).map(m => m.content).join(' ')
+        const captionsTexto = mediaAcumulado.map(m => m.caption).filter(Boolean).join(' ')
+        const textoTurno = `${textoCliente} ${captionsTexto}`.trim()
+        const textoClasificacion = `${textoTurno} ${historialRecienteTexto}`
 
-        const esComprobante =
-          ARREGLO_ELEGIDO.has(clienteId) ||
-          PEDIDO_EN_CURSO.has(clienteId) ||
-          VENTA_ACTUAL.has(clienteId) ||
-          /\b(bbva|transfer|pague|comprobante|cuenta|4152|pago|total\s*\$|pagar|comprobante)\b/i.test(textoCompleto)
-
-        const esReferencia =
-          !esComprobante &&
-          /\b(como.*este|asi|parecido|quiero.*asi|cuanto.*cuesta|precio|cotiza|armar|ramo|arreglo|flor|referencia|modelo)\b/i.test(textoCompleto)
+        const quiereCotizarTurno = esTextoReferenciaOCotizacion(textoTurno)
+        const pagoEnTurno = esTextoComprobante(textoTurno)
+        const pagoReciente = esTextoComprobante(textoClasificacion)
+        const esReferencia = quiereCotizarTurno || (!pagoEnTurno && !pagoReciente)
+        const esComprobante = !esReferencia && (pagoEnTurno || pagoReciente)
 
         for (const media of mediaAcumulado) {
           if (esComprobante) {
@@ -1751,6 +1789,9 @@ async function procesarMensaje(msg: any): Promise<void> {
           }).catch(() => {})
         } else if (esReferencia) {
           const descripcion = mediaAcumulado.map(m => m.caption).filter(Boolean).join(' | ') || 'Envió foto(s) de referencia'
+          const pedido = pedidoActual(clienteId)
+          pedido.productoPersonalizado ||= descripcion === 'Envió foto(s) de referencia' ? 'Ramo personalizado con foto de referencia' : descripcion
+          persistirPedido(clienteId, telefonoReal, 'cotizacion', descripcion).catch(() => {})
           enviarAlertaCotizacion(telefonoReal, descripcion).catch(() => {})
           notificarEmpleadosWhatsApp(
             `🌷 *Cliente necesita cotización:* ${telefonoReal}\n\n${descripcion}\n\nRevisa la foto de referencia y cotízale por WhatsApp.`
@@ -1801,6 +1842,24 @@ async function ventaCerradaHandler(clienteId: string, venta: VentaCerrada, telef
     numeroCliente: numeroReal,
   }
   enviarAlertaVentaCerrada(alertaVenta).catch(err => console.error('[bot] Telegram venta:', err))
+}
+
+async function pedidoApartadoHandler(clienteId: string, venta: VentaCerrada, telefono: string, metodoPago: string): Promise<void> {
+  const numeroReal = telefono.startsWith('+') ? telefono : `+${telefono}`
+  const pedido = PEDIDO_EN_CURSO.get(clienteId)
+  console.log(`[bot] 📦 Pedido apartado: ${venta.cliente} — ${venta.producto} — ${venta.total}`)
+  await persistirPedido(clienteId, numeroReal, 'apartado')
+  enviarAlertaPedidoApartado({
+    cliente: venta.cliente,
+    producto: venta.producto,
+    precioArreglo: precioArregloTexto(clienteId),
+    precioEnvio: pedido?.envio ? `$${pedido.envio.precio.toFixed(2)} MXN (${pedido.envio.zona})` : undefined,
+    total: venta.total,
+    entrega: venta.direccion,
+    metodoPago,
+    numeroCliente: numeroReal,
+  }).catch(err => console.error('[bot] Telegram apartado:', err))
+  resetearPedidoActivo(clienteId)
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1990,6 +2049,13 @@ async function manejarMensajeEntrante(msg: any): Promise<void> {
     if (telefonoDestino && body) {
       const num = telefonoDestino.startsWith('52') ? `+${telefonoDestino}` : telefonoDestino
       agregarAlHistorial(num, 'assistant', `[Agente: ${body.trim()}]`)
+      const precioAgente = extraerPrecioRespuesta(body)
+      if (precioAgente) {
+        const pedido = pedidoActual(remoteJid)
+        pedido.productoPersonalizado ||= 'Ramo personalizado'
+        pedido.precioPersonalizado = precioAgente
+        persistirPedido(remoteJid, num, 'cotizacion', `[Agente: ${body.trim()}]`).catch(() => {})
+      }
     }
     return
   }
