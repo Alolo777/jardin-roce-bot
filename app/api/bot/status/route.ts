@@ -28,15 +28,62 @@ export async function GET() {
 
     if (ventasError) throw ventasError
 
-    const cantidadVentas = ventas?.length ?? 0
-    const totalVentas = ventas?.reduce((sum, v) => sum + (v.precio_total || 0), 0) ?? 0
-    const ventasRecientes = (ventas ?? []).slice(0, 6)
+    let pedidosMetricas: any[] = []
+    try {
+      const { data: pedidos } = await supabaseAdmin
+        .from('pedidos_bot')
+        .select('telefono, cliente_nombre, producto, total, zona_envio, precio_envio, direccion, sucursal, metodo_pago, estado, actualizado_en')
+        .in('estado', ['apartado', 'pagado', 'entregado'])
+        .gte('actualizado_en', inicio.toISOString())
+        .lte('actualizado_en', fin.toISOString())
+      pedidosMetricas = pedidos ?? []
+    } catch {
+      pedidosMetricas = []
+    }
+
+    const metricas = [
+      ...(ventas ?? []).map(v => ({
+        cliente_nombre: v.cliente_nombre,
+        cliente_telefono: v.cliente_telefono,
+        producto: v.producto,
+        precio_total: Number(v.precio_total || 0),
+        direccion_entrega: v.direccion_entrega,
+        metodo_pago: v.metodo_pago,
+        estado: v.estado,
+        creado_en: v.creado_en,
+        precio_envio: 0,
+        fuente: 'venta',
+      })),
+    ]
+
+    const clavesVenta = new Set(metricas.map(v => `${v.cliente_telefono || ''}|${v.producto || ''}|${v.precio_total || 0}`))
+    for (const pedido of pedidosMetricas) {
+      const precio = Number(pedido.total || 0)
+      const clave = `${pedido.telefono || ''}|${pedido.producto || ''}|${precio}`
+      if (clavesVenta.has(clave)) continue
+      metricas.push({
+        cliente_nombre: pedido.cliente_nombre,
+        cliente_telefono: pedido.telefono,
+        producto: pedido.producto || 'Pedido',
+        precio_total: precio,
+        direccion_entrega: pedido.zona_envio || pedido.direccion || (pedido.sucursal ? `Sucursal ${pedido.sucursal}` : ''),
+        metodo_pago: pedido.metodo_pago,
+        estado: pedido.estado,
+        creado_en: pedido.actualizado_en,
+        precio_envio: Number(pedido.precio_envio || 0),
+        fuente: 'pedido',
+      })
+    }
+
+    const cantidadVentas = metricas.length
+    const totalVentas = metricas.reduce((sum, v) => sum + (v.precio_total || 0), 0)
+    const ventasRecientes = metricas.sort((a, b) => new Date(b.creado_en || 0).getTime() - new Date(a.creado_en || 0).getTime()).slice(0, 6)
     const promedioVenta = cantidadVentas > 0 ? totalVentas / cantidadVentas : 0
-    const ticketMayor = (ventas ?? []).reduce((max, v) => Math.max(max, v.precio_total || 0), 0)
-    const enviosHoy = (ventas ?? []).filter(v => /env[ií]o|apizaco|tzompantepec|domicilio/i.test(v.direccion_entrega || '')).length
-    const recogidasHoy = (ventas ?? []).filter(v => /sucursal|recoger|centro|norte/i.test(v.direccion_entrega || '')).length
-    const ultimaVentaHora = ventas?.[0]?.creado_en ?? null
-    const productosTop = Object.entries((ventas ?? []).reduce<Record<string, number>>((acc, v) => {
+    const ticketMayor = metricas.reduce((max, v) => Math.max(max, v.precio_total || 0), 0)
+    const enviosHoy = metricas.filter(v => v.precio_envio > 0 || /env[ií]o|domicilio/i.test(`${v.direccion_entrega || ''} ${v.metodo_pago || ''}`)).length
+    const recogidasHoy = metricas.filter(v => /sucursal|recoger|centro|norte/i.test(v.direccion_entrega || '')).length
+    const ultimaVentaHora = ventasRecientes[0]?.creado_en ?? null
+    const productosTop = Object.entries(metricas.reduce<Record<string, number>>((acc, v) => {
       const producto = v.producto || 'Pedido'
       acc[producto] = (acc[producto] ?? 0) + 1
       return acc

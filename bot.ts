@@ -16,6 +16,7 @@ import pino from 'pino'
 import qrcode from 'qrcode-terminal'
 import dotenv from 'dotenv'
 import fs from 'node:fs'
+import { Buffer } from 'node:buffer'
 
 dotenv.config({ path: '.env.local' })
 
@@ -189,8 +190,21 @@ function yaProcesadoRecientemente(msg: any): boolean {
 // EXTRACCIÓN DE TEXTO Y TIPO DE MENSAJE (proto Baileys)
 // ════════════════════════════════════════════════════════════════
 
+function getContenidoMensaje(msg: any): any {
+  let full = msg?.message
+  for (let i = 0; i < 4 && full; i++) {
+    if (full.ephemeralMessage?.message) full = full.ephemeralMessage.message
+    else if (full.viewOnceMessage?.message) full = full.viewOnceMessage.message
+    else if (full.viewOnceMessageV2?.message) full = full.viewOnceMessageV2.message
+    else if (full.viewOnceMessageV2Extension?.message) full = full.viewOnceMessageV2Extension.message
+    else if (full.documentWithCaptionMessage?.message) full = full.documentWithCaptionMessage.message
+    else break
+  }
+  return full
+}
+
 function getMessageBody(msg: any): string {
-  const full = msg?.message
+  const full = getContenidoMensaje(msg)
   if (!full) return ''
   const type = getContentType(full)
   if (!type) return ''
@@ -209,7 +223,7 @@ function getMensajeTexto(msg: any): string {
 }
 
 function getMessageType(msg: any): string {
-  const full = msg?.message
+  const full = getContenidoMensaje(msg)
   if (!full) return 'unknown'
   const type = getContentType(full)
   if (type === 'conversation' || type === 'extendedTextMessage') return 'chat'
@@ -476,6 +490,33 @@ async function notificarEmpleadosWhatsApp(mensaje: string): Promise<void> {
       console.log(`[bot] ✅ WhatsApp empleado enviado a ${jid}${enviado?.key?.id ? ` (${enviado.key.id})` : ''}`)
     } catch (err) {
       console.warn(`[bot] Error notificando a empleado ${num} (JID: ${jid}):`, err)
+    }
+  }
+}
+
+async function enviarFotoEmpleadosWhatsApp(base64: string, caption: string, mimetype = 'image/jpeg'): Promise<void> {
+  const numeros = await obtenerEmpleadosANotificar()
+  if (numeros.length === 0) return
+  if (!sock?.user) {
+    console.warn('[bot] sock.user no disponible — no se puede enviar foto a empleados por WhatsApp')
+    return
+  }
+
+  const image = Buffer.from(base64, 'base64')
+  for (const num of numeros) {
+    let jid = ''
+    try {
+      const telefono = num.replace(/^\+/, '').replace(/\D/g, '')
+      jid = (num.includes('@') ? num : `${telefono}@s.whatsapp.net`).replace(/@c\.us$/, '@s.whatsapp.net')
+      if (telefono && sock.onWhatsApp) {
+        const resultado = await sock.onWhatsApp(telefono).catch(() => undefined)
+        const contacto = resultado?.find(r => r.exists && r.jid)
+        if (contacto?.jid) jid = contacto.jid.replace(/@c\.us$/, '@s.whatsapp.net')
+      }
+      const enviado = await sock.sendMessage(jid, { image, caption, mimetype })
+      console.log(`[bot] ✅ Foto enviada a empleado ${jid}${enviado?.key?.id ? ` (${enviado.key.id})` : ''}`)
+    } catch (err) {
+      console.warn(`[bot] Error enviando foto a empleado ${num} (JID: ${jid}):`, err)
     }
   }
 }
@@ -750,6 +791,25 @@ function extraerTotalNumerico(total: string): number {
   return primero
 }
 
+function extraerPrecioRespuesta(texto: string): number | null {
+  const matchTotal = texto.match(/(?:total|saldr[ií]a|ser[ií]a|queda(?:r[ií]a)?(?: en)?|precio)[^$\d]{0,40}\$?\s*(\d{2,6}(?:[,.]\d{2})?)/i)
+  const matchMoneda = texto.match(/\$\s*(\d{2,6}(?:[,.]\d{2})?)/)
+  const raw = matchTotal?.[1] ?? matchMoneda?.[1]
+  return raw ? Number(raw.replace(/,/g, '')) || null : null
+}
+
+function describirPedidoPersonalizado(texto: string): string {
+  return texto
+    .replace(/^(me gustar[ií]a|quiero|quisiera|ocupo|necesito)\s+/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120) || 'Ramo personalizado'
+}
+
+function mediaToBase64(media: Buffer | Uint8Array | ArrayBuffer): string {
+  return Buffer.from(media as any).toString('base64' as BufferEncoding)
+}
+
 function fechaInicioFinCDMX(): { inicio: Date; fin: Date } {
   const ahora = new Date()
   const cdmxStr = ahora.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })
@@ -904,7 +964,7 @@ function parsearPedidoCotizador(texto: string): PedidoWebParseado {
 const VENTAS_CERRADAS  = new Set<string>()
 const VENTA_ACTUAL     = new Map<string, VentaCerrada>()
 const ARREGLO_ELEGIDO  = new Map<string, ArregloConFoto>()
-const PEDIDO_EN_CURSO  = new Map<string, { arreglo?: ArregloConFoto; envio?: { zona: string; precio: number }; nombre?: string; direccion?: string; sucursal?: string; metodoPago?: 'transferencia' | 'efectivo_recoger'; nota?: string }>()
+const PEDIDO_EN_CURSO  = new Map<string, { arreglo?: ArregloConFoto; productoPersonalizado?: string; precioPersonalizado?: number; envio?: { zona: string; precio: number }; nombre?: string; direccion?: string; sucursal?: string; metodoPago?: 'transferencia' | 'efectivo_recoger'; nota?: string }>()
 
 function pedidoActual(clienteId: string) {
   const pedido = PEDIDO_EN_CURSO.get(clienteId) ?? {}
@@ -924,8 +984,9 @@ function limpiarDireccionCliente(texto: string): string {
 function totalPedidoNumerico(clienteId: string): number | null {
   const pedido = PEDIDO_EN_CURSO.get(clienteId)
   const arreglo = pedido?.arreglo ?? ARREGLO_ELEGIDO.get(clienteId)
-  if (!arreglo) return null
-  return arreglo.precio + (pedido?.envio?.precio ?? 0)
+  const subtotal = arreglo?.precio ?? pedido?.precioPersonalizado
+  if (!subtotal) return null
+  return subtotal + (pedido?.envio?.precio ?? 0)
 }
 
 async function persistirPedido(clienteId: string, telefono: string | null, estado: 'cotizacion' | 'apartado' | 'pagado' | 'entregado' | 'cancelado', ultimoMensaje?: string): Promise<void> {
@@ -938,9 +999,9 @@ async function persistirPedido(clienteId: string, telefono: string | null, estad
       telefono,
       estado,
       cliente_nombre: pedido?.nombre ?? null,
-      producto: arreglo?.nombre ?? null,
+      producto: arreglo?.nombre ?? pedido?.productoPersonalizado ?? null,
       arreglo_id: arreglo?.id ?? null,
-      precio_arreglo: arreglo?.precio ?? null,
+      precio_arreglo: arreglo?.precio ?? pedido?.precioPersonalizado ?? null,
       zona_envio: pedido?.envio?.zona ?? null,
       precio_envio: pedido?.envio?.precio ?? null,
       direccion: pedido?.direccion ?? null,
@@ -995,10 +1056,10 @@ function resetearPedidoCliente(clienteId: string): void {
 function ventaDesdeEstado(clienteId: string, fallback?: VentaCerrada): VentaCerrada | null {
   const pedido = PEDIDO_EN_CURSO.get(clienteId)
   const elegido = pedido?.arreglo ?? ARREGLO_ELEGIDO.get(clienteId)
-  if (!elegido && !fallback) return null
+  if (!elegido && !pedido?.productoPersonalizado && !fallback) return null
 
-  const producto = elegido?.nombre ?? fallback?.producto ?? 'Pedido'
-  const subtotal = elegido?.precio ?? (parseFloat(String(fallback?.total ?? '').replace(/[^0-9.]/g, '')) || 0)
+  const producto = elegido?.nombre ?? pedido?.productoPersonalizado ?? fallback?.producto ?? 'Pedido'
+  const subtotal = elegido?.precio ?? pedido?.precioPersonalizado ?? (parseFloat(String(fallback?.total ?? '').replace(/[^0-9.]/g, '')) || 0)
   const envio = pedido?.envio?.precio ?? 0
   const total = subtotal + envio
   const direccion = pedido?.envio?.zona
@@ -1019,7 +1080,8 @@ function ventaDesdeEstado(clienteId: string, fallback?: VentaCerrada): VentaCerr
 }
 
 function tieneArregloVerificado(clienteId: string): boolean {
-  return Boolean(PEDIDO_EN_CURSO.get(clienteId)?.arreglo || ARREGLO_ELEGIDO.get(clienteId))
+  const pedido = PEDIDO_EN_CURSO.get(clienteId)
+  return Boolean(pedido?.arreglo || pedido?.productoPersonalizado || ARREGLO_ELEGIDO.get(clienteId))
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1309,6 +1371,13 @@ async function procesarMensaje(msg: any): Promise<void> {
     // ── Saludo dinámico en primer mensaje ─────────────────────────
     const historialCompleto = await obtenerHistorial(telefono)
     const historialTexto = historialCompleto.map(m => m.content).join('\n').toLowerCase()
+    const mediaPendiente = MEDIA_POR_CLIENTE.get(clienteId)
+    if (mediaPendiente && mediaPendiente.length > 0) {
+      contextoExtra +=
+        `\n\n[CLIENTE ENVIO ${mediaPendiente.length} IMAGEN(ES) EN ESTE TURNO] ` +
+        `El sistema ya recibio la foto de referencia/comprobante y la enviara al equipo. ` +
+        `NO le pidas al cliente que la reenvie. Si pide cotizacion de un ramo como la foto, responde que ya recibiste la referencia y que el equipo la revisara para cotizarle.`
+    }
     const motivoAtencionHumana = detectarAtencionHumana(textoCliente)
     if (motivoAtencionHumana) {
       contextoExtra +=
@@ -1356,7 +1425,7 @@ async function procesarMensaje(msg: any): Promise<void> {
     const pareceEnvio = mencionaEnvio || mencionaDireccion || detectarLinkMaps(textoCliente)
 
     if (pareceEnvio) {
-      if (mencionaDireccion && ARREGLO_ELEGIDO.has(clienteId)) {
+      if (mencionaDireccion && tieneArregloVerificado(clienteId)) {
         pedidoActual(clienteId).direccion = limpiarDireccionCliente(textoCliente)
       }
       contextoExtra +=
@@ -1501,10 +1570,10 @@ async function procesarMensaje(msg: any): Promise<void> {
 
     // ── EXTRAER DATOS DEL PEDIDO ────────────────────────────────
     const notaMatch = textoCliente.match(/nota[:\s]*([\s\S]{1,500})/i)
-    if (notaMatch && ARREGLO_ELEGIDO.has(clienteId)) pedidoActual(clienteId).nota = notaMatch[1].trim().slice(0, 500)
+    if (notaMatch && tieneArregloVerificado(clienteId)) pedidoActual(clienteId).nota = notaMatch[1].trim().slice(0, 500)
 
-    const nombreMatch = textoCliente.match(/(?:a qué nombre|nombre|apartar a nombre de|para quien|para quién|ponerle|se lo aparto a nombre de)[:\s]*([a-záéíóúñ\s]+)/i)
-    if (nombreMatch && ARREGLO_ELEGIDO.has(clienteId)) {
+    const nombreMatch = textoCliente.match(/(?:a qué nombre|a nombre de|nombre de|nombre|apartar a nombre de|para quien|para quién|ponerle|se lo aparto a nombre de)[:\s]*([a-záéíóúñ\s]+)/i)
+    if (nombreMatch && tieneArregloVerificado(clienteId)) {
       const nombre = nombreMatch[1].trim().replace(/\s+/g, ' ').slice(0, 80)
       if (!/^(ok|si|sí|vale|dale|va|de acuerdo|esta bien|está bien)$/i.test(nombre)) {
         pedidoActual(clienteId).nombre = nombre
@@ -1512,11 +1581,15 @@ async function procesarMensaje(msg: any): Promise<void> {
     }
 
     // ── MÉTODO DE PAGO ──────────────────────────────────────────
-    const consultaPagoEnviado = /(?:ya\s*)?pag[uú]e|comprobante|transferencia|ya\s*transfer/i.test(textoCliente)
+    const consultaPagoEnviado = /(?:ya\s*)?pag[uú]e|comprobante|transferencia|ya\s*transfer|transfer[ií]|transfiero|le\s+transfiero|devi\s+america|devi\s+américa/i.test(textoCliente)
+    if (consultaPagoEnviado && tieneArregloVerificado(clienteId)) {
+      pedidoActual(clienteId).metodoPago = 'transferencia'
+      persistirPedido(clienteId, await numeroRealPromise, 'apartado', textoCliente).catch(() => {})
+    }
 
     const esSucursal = /recoger|recojo|paso|pasare|sucursal|ah[ií]|all[aá]|voy/i.test(textoCliente)
-    if (esSucursal && ARREGLO_ELEGIDO.has(clienteId) && !consultaPagoEnviado) {
-      pedidoActual(clienteId).sucursal = 'Apizaco (sucursal)'
+    if (esSucursal && tieneArregloVerificado(clienteId) && !consultaPagoEnviado) {
+      pedidoActual(clienteId).sucursal = /centro/i.test(textoCliente) ? 'Centro' : (/norte/i.test(textoCliente) ? 'Norte' : 'Apizaco (sucursal)')
       pedidoActual(clienteId).metodoPago = 'efectivo_recoger'
       contextoExtra +=
         `\n\n[CLIENTE RECOGE EN SUCURSAL] ` +
@@ -1540,19 +1613,20 @@ async function procesarMensaje(msg: any): Promise<void> {
       ventaCerrada = true
     }
 
-    if (!ventaCerrada && !VENTAS_CERRADAS.has(clienteId) && confirmaCorto && (ARREGLO_ELEGIDO.has(clienteId) || (textoCliente.length < 150 && !textoCliente.includes('?')))) {
-      const elegido = ARREGLO_ELEGIDO.get(clienteId)
-      if (elegido) {
+    if (!ventaCerrada && !VENTAS_CERRADAS.has(clienteId) && confirmaCorto && (tieneArregloVerificado(clienteId) || (textoCliente.length < 150 && !textoCliente.includes('?')))) {
+      const venta = ventaDesdeEstado(clienteId)
+      if (venta) {
         const pedido = PEDIDO_EN_CURSO.get(clienteId)
-        const total = elegido.precio + (pedido?.envio?.precio ?? 0)
+        const subtotal = pedido?.arreglo?.precio ?? ARREGLO_ELEGIDO.get(clienteId)?.precio ?? pedido?.precioPersonalizado ?? 0
+        const total = subtotal + (pedido?.envio?.precio ?? 0)
         const totalTexto = pedido?.envio
-          ? `$${total.toFixed(2)} MXN (ramo $${elegido.precio.toFixed(2)} + envío $${(pedido?.envio?.precio ?? 0).toFixed(2)})`
+          ? `$${total.toFixed(2)} MXN (ramo $${subtotal.toFixed(2)} + envío $${(pedido?.envio?.precio ?? 0).toFixed(2)})`
           : `$${total.toFixed(2)} MXN`
         ventaCerradaHandler(clienteId, {
-          cliente: pedido?.nombre ?? 'Verificar en chat',
-          producto: elegido.nombre,
+          cliente: venta.cliente,
+          producto: venta.producto,
           total: totalTexto,
-          direccion: pedido?.envio?.zona ?? 'Por confirmar',
+          direccion: venta.direccion,
           rawToken: '',
         }, await numeroRealPromise)
       }
@@ -1584,6 +1658,14 @@ async function procesarMensaje(msg: any): Promise<void> {
 
       const mensajeFinal       = limpiarRespuestaIA(respuestaIA.mensaje)
       const ventaTokenEnResp   = mensajeFinal.match(/\[VENTA_CERRADA:\s*(.+?)\|(.+?)\|(.+?)\|(.+?)\]/i)
+      const precioPersonalizado = extraerPrecioRespuesta(mensajeFinal)
+      const parecePedidoPersonalizado = /\b(apartar|ramo|ramito|lili|lilis|rosa|rosas|papel|personalizado|as[ií]|referencia)\b/i.test(textoCliente)
+      if (!ARREGLO_ELEGIDO.has(clienteId) && precioPersonalizado && parecePedidoPersonalizado) {
+        const pedido = pedidoActual(clienteId)
+        pedido.productoPersonalizado ||= describirPedidoPersonalizado(textoCliente)
+        pedido.precioPersonalizado = precioPersonalizado
+        persistirPedido(clienteId, await numeroRealPromise, 'cotizacion', textoCliente).catch(() => {})
+      }
 
       if (ventaTokenEnResp) {
         const [ , nombre, producto, precio, direccion ] = ventaTokenEnResp
@@ -1600,22 +1682,23 @@ async function procesarMensaje(msg: any): Promise<void> {
         }
         ventaCerradaHandler(clienteId, venta, await numeroRealPromise)
       } else {
-        const elegido = ARREGLO_ELEGIDO.get(clienteId)
         let mensajeParaEnviar = mensajeFinal
 
-        if (!VENTAS_CERRADAS.has(clienteId) && elegido && (
+        const ventaEstado = ventaDesdeEstado(clienteId)
+        if (!VENTAS_CERRADAS.has(clienteId) && ventaEstado && (
           confirmaCorto || /lo[sv]? quiero|me gusta|adelante|procedo|hagamoslo|hag[aá]moslo|d[aá]le|adelante|apartalo|aparta lo|si? (por favor|gracias)/i.test(textoCliente)
         )) {
           const pedido = PEDIDO_EN_CURSO.get(clienteId)
-          const total = elegido.precio + (pedido?.envio?.precio ?? 0)
+          const subtotal = pedido?.arreglo?.precio ?? ARREGLO_ELEGIDO.get(clienteId)?.precio ?? pedido?.precioPersonalizado ?? 0
+          const total = subtotal + (pedido?.envio?.precio ?? 0)
           const totalTexto = pedido?.envio
-            ? `$${total.toFixed(2)} MXN (ramo $${elegido.precio.toFixed(2)} + envío $${(pedido?.envio?.precio ?? 0).toFixed(2)})`
+            ? `$${total.toFixed(2)} MXN (ramo $${subtotal.toFixed(2)} + envío $${(pedido?.envio?.precio ?? 0).toFixed(2)})`
             : `$${total.toFixed(2)} MXN`
           ventaCerradaHandler(clienteId, {
-            cliente: pedido?.nombre ?? 'Verificar en chat',
-            producto: elegido.nombre,
+            cliente: ventaEstado.cliente,
+            producto: ventaEstado.producto,
             total: totalTexto,
-            direccion: pedido?.envio?.zona ?? 'Por confirmar',
+            direccion: ventaEstado.direccion,
             rawToken: '',
           }, await numeroRealPromise)
         }
@@ -1651,6 +1734,7 @@ async function procesarMensaje(msg: any): Promise<void> {
           } else if (esReferencia) {
             const captionTelegram = `📷 *Foto de referencia* — ${telefonoReal}${media.caption ? `\n\nCliente dice: ${media.caption}` : '\n\nCliente envió una foto de referencia.'}`
             enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
+            enviarFotoEmpleadosWhatsApp(media.base64, `📷 Foto de referencia de ${telefonoReal}${media.caption ? `\n\nCliente dice: ${media.caption}` : ''}`, media.mimetype).catch(err => console.error('[bot] WhatsApp foto referencia:', err))
           } else {
             const captionTelegram = `📸 *Imagen del cliente* — ${telefonoReal}${media.caption ? `\n\nDice: ${media.caption}` : '\n\n_Sin mensaje de texto_'}`
             enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
@@ -1683,6 +1767,17 @@ async function procesarMensaje(msg: any): Promise<void> {
         await responderMensaje(msg, '🌷 Perdón, un pequeño mareo digital. ¿Me repites?')
       }
     } catch {}
+  } finally {
+    const mediaPendiente = MEDIA_POR_CLIENTE.get(clienteId)
+    if (mediaPendiente && mediaPendiente.length > 0) {
+      MEDIA_POR_CLIENTE.delete(clienteId)
+      const telefonoReal = await numeroRealPromise.catch(() => telefono)
+      for (const media of mediaPendiente) {
+        const caption = `📷 *Imagen pendiente del cliente* — ${telefonoReal}${media.caption ? `\n\nDice: ${media.caption}` : '\n\n_Sin mensaje de texto_'}`
+        enviarFotoTelegram(media.base64, caption, media.mimetype).catch(() => {})
+        enviarFotoEmpleadosWhatsApp(media.base64, `📷 Imagen pendiente de ${telefonoReal}${media.caption ? `\n\nCliente dice: ${media.caption}` : ''}`, media.mimetype).catch(err => console.error('[bot] WhatsApp imagen pendiente:', err))
+      }
+    }
   }
 }
 
@@ -1844,11 +1939,12 @@ function programarReinicioBaileys(motivo: string, delayMs = 5_000): void {
 
 async function descargarMedia(msg: any, type: 'image' | 'document'): Promise<Buffer | null> {
   try {
-    const contenido = type === 'document' ? msg.message?.documentMessage : msg.message?.imageMessage
+    const full = getContenidoMensaje(msg)
+    const contenido = type === 'document' ? full?.documentMessage : full?.imageMessage
     if (!contenido) return null
     const stream = await downloadContentFromMessage(contenido, type === 'document' ? 'document' : 'image')
-    const chunks: Buffer[] = []
-    for await (const chunk of stream) chunks.push(chunk)
+    const chunks: Uint8Array[] = []
+    for await (const chunk of stream) chunks.push(chunk as Uint8Array)
     return Buffer.concat(chunks)
   } catch (e) {
     console.warn('[bot] Error descargando media:', e)
@@ -1912,9 +2008,10 @@ async function manejarMensajeEntrante(msg: any): Promise<void> {
       // Descargar la imagen y agregarla al batch junto con mensajes de texto
       const buffer = await descargarMedia(msg, msgType as 'image' | 'document')
       if (buffer) {
-        ;(msg as any)._mediaBuffer = (buffer as any).toString('base64')
-        (msg as any)._mediaMime = msgType === 'document'
-          ? msg?.message?.documentMessage?.mimetype || 'application/octet-stream'
+        const msgConMedia = msg as any
+        msgConMedia._mediaBuffer = mediaToBase64(buffer)
+        msgConMedia._mediaMime = msgType === 'document'
+          ? getContenidoMensaje(msg)?.documentMessage?.mimetype || 'application/octet-stream'
           : 'image/jpeg'
       }
       encolarMensajeAgrupado(clienteId, msg)
