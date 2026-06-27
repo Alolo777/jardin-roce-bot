@@ -36,7 +36,6 @@ function BotStatusPanel() {
   const [cargando, setCargando] = useState(true)
   const [accion, setAccion] = useState<string | null>(null)
   const [mensaje, setMensaje] = useState<string | null>(null)
-  const [editandoPedido, setEditandoPedido] = useState<any>(null)
 
   async function cargar() {
     try {
@@ -61,45 +60,6 @@ function BotStatusPanel() {
       setTimeout(cargar, 2000)
     } catch (error) {
       setMensaje(error instanceof Error ? error.message : 'No se pudo ejecutar la acción')
-    } finally {
-      setAccion(null)
-    }
-  }
-
-  async function guardarPedido() {
-    if (!editandoPedido?.id) return
-    setAccion('pedido')
-    setMensaje(null)
-    try {
-      const res = await fetch(`/api/pedidos/${editandoPedido.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cliente_nombre: editandoPedido.cliente_nombre,
-          producto: editandoPedido.producto,
-          precio_arreglo: Number(editandoPedido.precio_arreglo || 0),
-          precio_envio: Number(editandoPedido.precio_envio || 0),
-          zona_envio: editandoPedido.zona_envio,
-          direccion: editandoPedido.direccion,
-          metodo_pago: editandoPedido.metodo_pago,
-          estado: editandoPedido.estado,
-          estado_flujo: editandoPedido.estado_flujo,
-          fecha_entrega: editandoPedido.fecha_entrega,
-          hora_entrega: editandoPedido.hora_entrega,
-          sucursal: editandoPedido.sucursal,
-          nota: editandoPedido.nota,
-          detalles_especiales: editandoPedido.detalles_especiales,
-          precio_confirmado_por: editandoPedido.precio_confirmado_por,
-          total: Number(editandoPedido.total || 0),
-          requiere_revision: false,
-        }),
-      })
-      if (!res.ok) throw new Error('No se pudo guardar el pedido')
-      setMensaje('Pedido actualizado')
-      setEditandoPedido(null)
-      cargar()
-    } catch (error) {
-      setMensaje(error instanceof Error ? error.message : 'No se pudo guardar')
     } finally {
       setAccion(null)
     }
@@ -280,57 +240,6 @@ function BotStatusPanel() {
       {status.zonasAmbiguasPendientes > 0 && (
         <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           Hay {status.zonasAmbiguasPendientes} zona(s) de envío ambiguas pendientes de revisar.
-        </div>
-      )}
-
-      {Array.isArray(status.pedidosActivos) && status.pedidosActivos.length > 0 && (
-        <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-800">Pedidos en curso</h3>
-            <span className="text-xs text-blue-500">Cotizaciones y apartados</span>
-          </div>
-          <div className="space-y-3">
-            {status.pedidosActivos.map((pedido: any) => (
-              <div key={pedido.id} className="rounded-xl bg-white p-3 text-sm shadow-sm">
-                {editandoPedido?.id === pedido.id ? (
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <input className="rounded-lg border px-3 py-2" value={editandoPedido.cliente_nombre || ''} onChange={e => setEditandoPedido({ ...editandoPedido, cliente_nombre: e.target.value })} placeholder="Cliente" />
-                    <input className="rounded-lg border px-3 py-2" value={editandoPedido.producto || ''} onChange={e => setEditandoPedido({ ...editandoPedido, producto: e.target.value })} placeholder="Producto" />
-                    <input className="rounded-lg border px-3 py-2" value={editandoPedido.precio_arreglo || ''} onChange={e => setEditandoPedido({ ...editandoPedido, precio_arreglo: e.target.value })} placeholder="Precio ramo" />
-                    <input className="rounded-lg border px-3 py-2" value={editandoPedido.precio_envio || ''} onChange={e => setEditandoPedido({ ...editandoPedido, precio_envio: e.target.value })} placeholder="Precio envio" />
-                    <input className="rounded-lg border px-3 py-2" value={editandoPedido.zona_envio || ''} onChange={e => setEditandoPedido({ ...editandoPedido, zona_envio: e.target.value })} placeholder="Zona" />
-                    <input className="rounded-lg border px-3 py-2" value={editandoPedido.total || ''} onChange={e => setEditandoPedido({ ...editandoPedido, total: e.target.value })} placeholder="Total" />
-                    <input className="rounded-lg border px-3 py-2" value={editandoPedido.fecha_entrega || ''} onChange={e => setEditandoPedido({ ...editandoPedido, fecha_entrega: e.target.value })} placeholder="Fecha entrega" />
-                    <input className="rounded-lg border px-3 py-2" value={editandoPedido.hora_entrega || ''} onChange={e => setEditandoPedido({ ...editandoPedido, hora_entrega: e.target.value })} placeholder="Hora entrega" />
-                    <input className="rounded-lg border px-3 py-2" value={editandoPedido.sucursal || ''} onChange={e => setEditandoPedido({ ...editandoPedido, sucursal: e.target.value })} placeholder="Sucursal" />
-                    <input className="rounded-lg border px-3 py-2" value={editandoPedido.metodo_pago || ''} onChange={e => setEditandoPedido({ ...editandoPedido, metodo_pago: e.target.value })} placeholder="Metodo pago" />
-                    <select className="rounded-lg border px-3 py-2" value={editandoPedido.estado || 'cotizacion'} onChange={e => setEditandoPedido({ ...editandoPedido, estado: e.target.value })}>
-                      <option value="cotizacion">cotizacion</option><option value="apartado">apartado</option><option value="pagado">pagado</option><option value="entregado">entregado</option><option value="cancelado">cancelado</option>
-                    </select>
-                    <select className="rounded-lg border px-3 py-2" value={editandoPedido.estado_flujo || ''} onChange={e => setEditandoPedido({ ...editandoPedido, estado_flujo: e.target.value })}>
-                      <option value="">estado flujo</option><option value="cotizando">cotizando</option><option value="esperando_precio_equipo">esperando precio</option><option value="precio_confirmado">precio confirmado</option><option value="esperando_fecha_hora">esperando fecha/hora</option><option value="esperando_entrega">esperando entrega</option><option value="esperando_nombre">esperando nombre</option><option value="esperando_pago">esperando pago</option><option value="apartado_sucursal">apartado sucursal</option><option value="pagado_transferencia">pagado transferencia</option><option value="cerrado">cerrado</option><option value="cancelado">cancelado</option>
-                    </select>
-                    <input className="rounded-lg border px-3 py-2 sm:col-span-2" value={editandoPedido.direccion || ''} onChange={e => setEditandoPedido({ ...editandoPedido, direccion: e.target.value })} placeholder="Dirección" />
-                    <input className="rounded-lg border px-3 py-2 sm:col-span-2" value={editandoPedido.detalles_especiales || editandoPedido.nota || ''} onChange={e => setEditandoPedido({ ...editandoPedido, detalles_especiales: e.target.value, nota: e.target.value })} placeholder="Notas / detalles especiales" />
-                    <div className="flex gap-2 sm:col-span-2">
-                      <button onClick={guardarPedido} disabled={accion !== null} className="rounded-lg bg-emerald-600 px-3 py-2 text-white disabled:opacity-60">Guardar</button>
-                      <button onClick={() => setEditandoPedido(null)} className="rounded-lg bg-gray-100 px-3 py-2 text-gray-700">Cancelar</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-gray-800">{pedido.cliente_nombre || 'Sin nombre'} · {pedido.estado_flujo || pedido.estado}</p>
-                      <p className="text-xs text-gray-500">{pedido.producto || 'Producto por confirmar'} · ${Number(pedido.total || 0).toFixed(2)} {pedido.foto_referencia_base64 ? '· con foto' : ''}</p>
-                      <p className="text-[11px] text-gray-400">{pedido.direccion || pedido.zona_envio || pedido.sucursal || 'Entrega pendiente'} · {[pedido.fecha_entrega, pedido.hora_entrega].filter(Boolean).join(' ') || 'fecha/hora pendiente'} · {pedido.telefono || 'Sin teléfono'}</p>
-                      {(pedido.detalles_especiales || pedido.nota) && <p className="mt-1 text-[11px] text-gray-500">{pedido.detalles_especiales || pedido.nota}</p>}
-                    </div>
-                    <button onClick={() => setEditandoPedido(pedido)} className="rounded-lg border border-blue-200 px-3 py-1 text-xs font-semibold text-blue-700">Corregir</button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
         </div>
       )}
 

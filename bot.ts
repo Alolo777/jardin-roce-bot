@@ -39,6 +39,7 @@ import {
   enviarAlertaEmpleadoFotos,
   enviarAlertaEmpleadoEnvio,
   enviarFotoTelegram,
+  enviarArchivoTelegram,
 } from './lib/telegram'
 import { supabaseAdmin } from './lib/supabase'
 import type { MensajeChat } from './lib/ai'
@@ -502,7 +503,7 @@ async function enviarFotoEmpleadosWhatsApp(base64: string, caption: string, mime
     return
   }
 
-  const image = Buffer.from(base64, 'base64')
+  const buffer = Buffer.from(base64, 'base64')
   for (const num of numeros) {
     let jid = ''
     try {
@@ -513,8 +514,11 @@ async function enviarFotoEmpleadosWhatsApp(base64: string, caption: string, mime
         const contacto = resultado?.find(r => r.exists && r.jid)
         if (contacto?.jid) jid = contacto.jid.replace(/@c\.us$/, '@s.whatsapp.net')
       }
-      const enviado = await sock.sendMessage(jid, { image, caption, mimetype })
-      console.log(`[bot] ✅ Foto enviada a empleado ${jid}${enviado?.key?.id ? ` (${enviado.key.id})` : ''}`)
+      const contenido = mimetype.startsWith('image/')
+        ? { image: buffer, caption, mimetype }
+        : { document: buffer, caption, mimetype, fileName: mimetype.includes('pdf') ? 'comprobante.pdf' : 'archivo-cliente' }
+      const enviado = await sock.sendMessage(jid, contenido)
+      console.log(`[bot] ✅ Media enviada a empleado ${jid}${enviado?.key?.id ? ` (${enviado.key.id})` : ''}`)
     } catch (err) {
       console.warn(`[bot] Error enviando foto a empleado ${num} (JID: ${jid}):`, err)
     }
@@ -1194,6 +1198,11 @@ function ventaListaParaCerrar(clienteId: string): boolean {
   return tienePrecioConfirmado(clienteId) && tieneNombreValido(clienteId) && !faltaFechaHoraParaCerrar(clienteId)
 }
 
+function ventaListaParaPagoTransferencia(clienteId: string): boolean {
+  const pedido = PEDIDO_EN_CURSO.get(clienteId)
+  return Boolean(tienePrecioConfirmado(clienteId) && tieneNombreValido(clienteId) && (pedido?.direccion || pedido?.sucursal || pedido?.envio?.zona))
+}
+
 function apartadoSucursalListo(clienteId: string): boolean {
   const pedido = PEDIDO_EN_CURSO.get(clienteId)
   return Boolean(pedido?.sucursal && ventaListaParaCerrar(clienteId))
@@ -1203,6 +1212,21 @@ function pareceNombreCliente(texto: string): boolean {
   const limpio = texto.trim()
   if (!/^[a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){1,4}$/i.test(limpio)) return false
   return !/\b(hola|buenas|gracias|ok|okay|si|sí|ramo|sucursal|centro|norte|envio|envío|mañana|hoy|viernes|lunes|martes|miercoles|miércoles|jueves|sabado|sábado|domingo)\b/i.test(limpio)
+}
+
+function contextoEsperaComprobante(clienteId: string, textoTurno: string, historialRecienteTexto: string): boolean {
+  const pedido = PEDIDO_EN_CURSO.get(clienteId)
+  const contextoPago = pedido?.metodoPago === 'transferencia' || pedido?.estadoFlujo === 'esperando_pago' || /comprobante|transferencia|pago\s+por\s+transferencia|mandame\s+el\s+comprobante|m[aá]ndame\s+el\s+comprobante|cuenta\s*:?\s*4152|bbva|devi\s+am[eé]rica/i.test(historialRecienteTexto)
+  const confirmaTurno = /\b(listo|claro|va|vale|ya\s+est[aá]|hecho|te\s+lo\s+mand[oó]|lo\s+mand[oó])\b/i.test(textoTurno)
+  return Boolean(contextoPago && (confirmaTurno || esTextoComprobante(textoTurno) || textoTurno === '[Imagen sin texto]'))
+}
+
+function enviarMediaTelegram(base64: string, caption: string, mimetype: string): void {
+  if (mimetype.startsWith('image/')) {
+    enviarFotoTelegram(base64, caption, mimetype).catch(() => {})
+  } else {
+    enviarArchivoTelegram(base64, caption, mimetype).catch(() => {})
+  }
 }
 
 function tieneArregloVerificado(clienteId: string): boolean {
@@ -1246,34 +1270,40 @@ async function procesarMediaAcumulado(clienteId: string, telefono: string, texto
   const quiereCotizarTurno = esTextoReferenciaOCotizacion(textoTurno)
   const pagoEnTurno = esTextoComprobante(textoTurno)
   const pagoReciente = esTextoComprobante(textoClasificacion)
-  const esReferencia = quiereCotizarTurno || (!pagoEnTurno && !pagoReciente)
-  const esComprobante = !esReferencia && (pagoEnTurno || pagoReciente)
+  const esperaComprobante = contextoEsperaComprobante(clienteId, textoTurno, historialRecienteTexto)
+  const esComprobante = esperaComprobante || (!quiereCotizarTurno && (pagoEnTurno || pagoReciente))
+  const esReferencia = !esComprobante && (quiereCotizarTurno || (!pagoEnTurno && !pagoReciente))
 
   for (const media of mediaAcumulado) {
     if (esComprobante) {
       const captionTelegram = `📸 *Comprobante de pago* — ${telefono}${media.caption ? `\n\n${media.caption}` : ''}`
-      enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
+      enviarMediaTelegram(media.base64, captionTelegram, media.mimetype)
     } else if (esReferencia) {
       const captionTelegram = `📷 *Foto de referencia* — ${telefono}${media.caption ? `\n\nCliente dice: ${media.caption}` : '\n\nCliente envió una foto de referencia.'}`
-      enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
+      enviarMediaTelegram(media.base64, captionTelegram, media.mimetype)
       enviarFotoEmpleadosWhatsApp(media.base64, `📷 Foto de referencia de ${telefono}${media.caption ? `\n\nCliente dice: ${media.caption}` : ''}`, media.mimetype).catch(err => console.error('[bot] WhatsApp foto referencia:', err))
     } else {
       const captionTelegram = `📸 *Imagen del cliente* — ${telefono}${media.caption ? `\n\nDice: ${media.caption}` : '\n\n_Sin mensaje de texto_'}`
-      enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
+      enviarMediaTelegram(media.base64, captionTelegram, media.mimetype)
     }
   }
 
   if (esComprobante) {
+    const pedido = pedidoActual(clienteId)
+    pedido.metodoPago = 'transferencia'
+    pedido.estadoFlujo = 'pagado_transferencia'
     const venta = ventaDesdeEstado(clienteId)
-    if (venta && ventaListaParaCerrar(clienteId)) {
+    if (venta && ventaListaParaPagoTransferencia(clienteId)) {
       await ventaCerradaHandler(clienteId, venta, telefono)
     } else {
+      await persistirPedido(clienteId, telefono, 'apartado', 'Comprobante recibido, faltan datos para cierre')
       enviarAlertaVentaCerrada({
-        cliente: PEDIDO_EN_CURSO.get(clienteId)?.nombre ?? 'Verificar en chat',
-        producto: PEDIDO_EN_CURSO.get(clienteId)?.productoPersonalizado ?? 'Verificar en conversación',
+        cliente: pedido.nombre ?? 'Verificar en chat',
+        producto: pedido.productoPersonalizado ?? 'Verificar en conversación',
         total: tienePrecioConfirmado(clienteId) ? precioArregloTexto(clienteId) : 'Verificar en conversación',
-        direccion: PEDIDO_EN_CURSO.get(clienteId)?.direccion ?? PEDIDO_EN_CURSO.get(clienteId)?.sucursal ?? 'Por confirmar',
+        direccion: pedido.direccion ?? pedido.sucursal ?? pedido.envio?.zona ?? 'Por confirmar',
         numeroCliente: telefono,
+        metodoPago: 'Transferencia',
       }).catch(() => {})
     }
     return 'comprobante'
@@ -1649,7 +1679,7 @@ async function procesarMensaje(msg: any): Promise<void> {
     const pareceEnvio = mencionaEnvio || mencionaDireccion || detectarLinkMaps(textoCliente)
 
     if (pareceEnvio) {
-      if (mencionaDireccion && tieneArregloVerificado(clienteId)) {
+      if ((mencionaDireccion || detectarLinkMaps(textoCliente)) && tieneArregloVerificado(clienteId)) {
         pedidoActual(clienteId).direccion = limpiarDireccionCliente(textoCliente)
       }
       contextoExtra +=
@@ -1797,6 +1827,12 @@ async function procesarMensaje(msg: any): Promise<void> {
       await agregarAlHistorial(telefono, 'assistant', respuesta)
       return
     }
+    if (tipoMediaProcesada === 'comprobante') {
+      const respuesta = 'Gracias, ya recibí tu comprobante 🌷 Lo registro para que el equipo continúe con tu pedido.'
+      await responderMensaje(msg, respuesta)
+      await agregarAlHistorial(telefono, 'assistant', respuesta)
+      return
+    }
 
     // ── VENTA CERRADA manual ────────────────────────────────────
     if (/venta\s*cerrada/i.test(textoCliente)) {
@@ -1821,6 +1857,11 @@ async function procesarMensaje(msg: any): Promise<void> {
 
     if (!pedidoActual(clienteId).nombre && tieneArregloVerificado(clienteId) && pareceNombreCliente(textoCliente)) {
       pedidoActual(clienteId).nombre = textoCliente.trim().replace(/\s+/g, ' ').slice(0, 80)
+    }
+
+    const primeraLineaNombre = textoCliente.split('\n---\n')[0]?.trim() || ''
+    if (!pedidoActual(clienteId).nombre && tieneArregloVerificado(clienteId) && pareceNombreCliente(primeraLineaNombre)) {
+      pedidoActual(clienteId).nombre = primeraLineaNombre.replace(/\s+/g, ' ').slice(0, 80)
     }
 
     let ventaCerrada = false
@@ -2257,10 +2298,15 @@ async function manejarMensajeEntrante(msg: any): Promise<void> {
       const precioAgente = extraerPrecioRespuesta(body)
       if (precioAgente) {
         const pedido = pedidoActual(remoteJid)
-        pedido.productoPersonalizado ||= 'Ramo personalizado'
-        pedido.precioPersonalizado = precioAgente
-        pedido.precioConfirmadoPor = 'equipo'
-        pedido.estadoFlujo = 'precio_confirmado'
+        if (/\b(env[ií]o|flete|reparto|domicilio|llevar)\b/i.test(body)) {
+          pedido.envio = { zona: pedido.envio?.zona ?? 'Envío confirmado por equipo', precio: precioAgente }
+          if (pedido.precioPersonalizado || pedido.arreglo || ARREGLO_ELEGIDO.get(remoteJid)) pedido.estadoFlujo = 'esperando_pago'
+        } else {
+          pedido.productoPersonalizado ||= 'Ramo personalizado'
+          pedido.precioPersonalizado = precioAgente
+          pedido.precioConfirmadoPor = 'equipo'
+          pedido.estadoFlujo = 'precio_confirmado'
+        }
         persistirPedido(remoteJid, num, 'cotizacion', `[Agente: ${body.trim()}]`).catch(() => {})
       }
     }

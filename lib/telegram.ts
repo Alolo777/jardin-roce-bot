@@ -522,6 +522,48 @@ export async function enviarFotoTelegram(
   }
 }
 
+export async function enviarArchivoTelegram(
+  base64: string,
+  caption: string,
+  mimetype = 'application/octet-stream'
+): Promise<void> {
+  if (!process.env.TELEGRAM_BOT_TOKEN || CHAT_IDS.length === 0) {
+    console.warn('[Telegram] Variables no configuradas para archivo.')
+    return
+  }
+
+  try {
+    const buf = Buffer.from(base64, 'base64')
+    const blob = new Blob([buf], { type: mimetype })
+    const filename = mimetype.includes('pdf') ? 'comprobante.pdf' : 'archivo-cliente'
+
+    for (const chatId of CHAT_IDS) {
+      const form = new FormData()
+      form.append('chat_id', chatId)
+      form.append('document', blob, filename)
+      form.append('caption', caption)
+      form.append('parse_mode', 'Markdown')
+
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 15_000)
+
+      const res = await fetch(`${API_BASE}/sendDocument`, {
+        method: 'POST',
+        body: form as any,
+        signal: controller.signal,
+      })
+      clearTimeout(timeout)
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        console.warn(`[Telegram] Error sendDocument a ${chatId}:`, JSON.stringify(err))
+      }
+    }
+  } catch (err) {
+    console.warn('[Telegram] Error enviando archivo:', (err as Error).message)
+  }
+}
+
 // ── Export legacy ─────────────────────────────────────────────────────────────
 export async function enviarAlertaTelegram(datos: DatosVentaCerrada): Promise<void> {
   return enviarAlertaVentaCerrada(datos)
