@@ -796,7 +796,7 @@ function extraerTotalNumerico(total: string): number {
 }
 
 function extraerPrecioRespuesta(texto: string): number | null {
-  const matchTotal = texto.match(/(?:total|saldr[ií]a|ser[ií]a|queda(?:r[ií]a)?(?: en)?|precio)[^$\d]{0,40}\$?\s*(\d{2,6}(?:[,.]\d{2})?)/i)
+  const matchTotal = texto.match(/(?:total|saldr[ií]a|ser[ií]a|est[aá](?:r[ií]a)?(?:\s+en)?|queda(?:r[ií]a)?(?: en)?|precio)[^$\d]{0,40}\$?\s*(\d{2,6}(?:[,.]\d{2})?)/i)
   const matchMoneda = texto.match(/\$\s*(\d{2,6}(?:[,.]\d{2})?)/)
   const matchMonedaDespues = texto.match(/\b(\d{2,6}(?:[,.]\d{2})?)\s*(?:\$|mxn|pesos?)\b/i)
   const raw = matchTotal?.[1] ?? matchMoneda?.[1] ?? matchMonedaDespues?.[1]
@@ -1212,6 +1212,32 @@ function pareceNombreCliente(texto: string): boolean {
   const limpio = texto.trim()
   if (!/^[a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){1,4}$/i.test(limpio)) return false
   return !/\b(hola|buenas|gracias|ok|okay|si|sí|ramo|sucursal|centro|norte|envio|envío|mañana|hoy|viernes|lunes|martes|miercoles|miércoles|jueves|sabado|sábado|domingo)\b/i.test(limpio)
+}
+
+function extraerNombrePedido(texto: string): string | null {
+  const match = texto.match(/(?:a\s+nombre\s+de|nombre\s+de|apartar\s+a\s+nombre\s+de|se\s+lo\s+aparto\s+a\s+nombre\s+de)[:\s]*([^\n|\-]{3,100})/i)
+  const nombre = match?.[1]?.replace(/\s+/g, ' ').trim().slice(0, 80)
+  if (!nombre || /^(ok|si|sí|vale|dale|va|de acuerdo|esta bien|está bien|pls|por favor)$/i.test(nombre)) return null
+  return nombre
+}
+
+function aplicarDatosPedidoDesdeTexto(clienteId: string, texto: string): void {
+  if (!tieneArregloVerificado(clienteId)) return
+  const pedido = pedidoActual(clienteId)
+  const nombre = extraerNombrePedido(texto)
+  if (nombre) pedido.nombre = nombre
+
+  const lineas = texto.split('\n---\n').map(l => l.trim()).filter(Boolean)
+  const posibleNombre = lineas.find(l => pareceNombreCliente(l))
+  if (!pedido.nombre && posibleNombre) pedido.nombre = posibleNombre.replace(/\s+/g, ' ').slice(0, 80)
+
+  if (/\b(recoger|recojo|paso|pasare|pasaré|sucursal|local|norte|centro)\b/i.test(texto)) {
+    pedido.sucursal = /norte/i.test(texto) ? 'Norte' : (/centro/i.test(texto) ? 'Centro' : (pedido.sucursal ?? 'Apizaco (sucursal)'))
+  }
+  if (/\b(transferencia|transfer|comprobante|recibo|ticket|listo\s+ese\s+es\s+el\s+recibo|pago\s+con\s+transferencia)\b/i.test(texto)) {
+    pedido.metodoPago = 'transferencia'
+    pedido.estadoFlujo = 'esperando_pago'
+  }
 }
 
 function contextoEsperaComprobante(clienteId: string, textoTurno: string, historialRecienteTexto: string): boolean {
@@ -1814,6 +1840,8 @@ async function procesarMensaje(msg: any): Promise<void> {
       }
     }
 
+    aplicarDatosPedidoDesdeTexto(clienteId, textoCliente)
+
     const tipoMediaProcesada = await procesarMediaAcumulado(clienteId, await numeroRealPromise, textoCliente, msg.pushName)
     if (tipoMediaProcesada === 'referencia') {
       const respuesta = 'Ya recibí la foto de referencia 🌷 Se la paso al equipo para que la revise y te confirme el precio.'
@@ -1849,7 +1877,7 @@ async function procesarMensaje(msg: any): Promise<void> {
 
     const nombreMatch = textoCliente.match(/(?:a qué nombre|a nombre de|nombre de|nombre|apartar a nombre de|para quien|para quién|ponerle|se lo aparto a nombre de)[:\s]*([a-záéíóúñ\s]+)/i)
     if (nombreMatch && tieneArregloVerificado(clienteId)) {
-      const nombre = nombreMatch[1].trim().replace(/\s+/g, ' ').slice(0, 80)
+      const nombre = extraerNombrePedido(textoCliente) ?? nombreMatch[1].trim().replace(/\s+/g, ' ').slice(0, 80)
       if (!/^(ok|si|sí|vale|dale|va|de acuerdo|esta bien|está bien)$/i.test(nombre)) {
         pedidoActual(clienteId).nombre = nombre
       }
@@ -1867,7 +1895,7 @@ async function procesarMensaje(msg: any): Promise<void> {
     let ventaCerrada = false
 
     // ── MÉTODO DE PAGO ──────────────────────────────────────────
-    const consultaPagoEnviado = /(?:ya\s*)?pag[uú]e|comprobante|transferencia|ya\s*transfer|transfer[ií]|transfiero|le\s+transfiero|devi\s+america|devi\s+américa/i.test(textoCliente)
+    const consultaPagoEnviado = /(?:ya\s*)?pag[uú]e|comprobante|recibo|ticket|transferencia|ya\s*transfer|transfer[ií]|transfiero|le\s+transfiero|devi\s+america|devi\s+américa/i.test(textoCliente)
     if (consultaPagoEnviado && tieneArregloVerificado(clienteId)) {
       pedidoActual(clienteId).metodoPago = 'transferencia'
       pedidoActual(clienteId).estadoFlujo = 'esperando_pago'
@@ -1875,10 +1903,12 @@ async function procesarMensaje(msg: any): Promise<void> {
     }
 
     const esSucursal = /recoger|recojo|paso|pasare|sucursal|ah[ií]|all[aá]|voy/i.test(textoCliente)
-    if (esSucursal && tieneArregloVerificado(clienteId) && !consultaPagoEnviado) {
+    if (esSucursal && tieneArregloVerificado(clienteId)) {
       pedidoActual(clienteId).sucursal = /centro/i.test(textoCliente) ? 'Centro' : (/norte/i.test(textoCliente) ? 'Norte' : 'Apizaco (sucursal)')
-      pedidoActual(clienteId).metodoPago = /tarjeta/i.test(textoCliente) ? 'tarjeta_recoger' : 'efectivo_recoger'
-      pedidoActual(clienteId).estadoFlujo = 'esperando_fecha_hora'
+      if (!consultaPagoEnviado) {
+        pedidoActual(clienteId).metodoPago = /tarjeta/i.test(textoCliente) ? 'tarjeta_recoger' : 'efectivo_recoger'
+        pedidoActual(clienteId).estadoFlujo = 'esperando_fecha_hora'
+      }
       contextoExtra +=
         `\n\n[CLIENTE RECOGE EN SUCURSAL] ` +
         `INSTRUCCION: Confirma dirección: Av. Hidalgo 12, Apizaco Centro. ` +
@@ -2308,6 +2338,17 @@ async function manejarMensajeEntrante(msg: any): Promise<void> {
           pedido.estadoFlujo = 'precio_confirmado'
         }
         persistirPedido(remoteJid, num, 'cotizacion', `[Agente: ${body.trim()}]`).catch(() => {})
+      }
+      if (/\b(gracias\s+por\s+(su\s+)?pago|pago\s+recibido|comprobante\s+recibido|le\s+agendamos|queda\s+agendado|pagado)\b/i.test(body)) {
+        const pedido = pedidoActual(remoteJid)
+        pedido.metodoPago = 'transferencia'
+        pedido.estadoFlujo = 'pagado_transferencia'
+        const venta = ventaDesdeEstado(remoteJid)
+        if (venta && ventaListaParaPagoTransferencia(remoteJid)) {
+          ventaCerradaHandler(remoteJid, venta, num).catch(() => {})
+        } else {
+          persistirPedido(remoteJid, num, 'pagado', `[Agente confirmó pago: ${body.trim()}]`).catch(() => {})
+        }
       }
     }
     return

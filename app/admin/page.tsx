@@ -213,10 +213,7 @@ function BotStatusPanel() {
 
       {status.pedidosResumen && (
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-xl bg-pink-50 p-3"><p className="text-xs text-pink-600">Cotizaciones</p><p className="text-base font-bold text-pink-800">{status.pedidosResumen.cotizacionesPendientes ?? 0}</p></div>
-          <div className="rounded-xl bg-purple-50 p-3"><p className="text-xs text-purple-600">Esperando precio</p><p className="text-base font-bold text-purple-800">{status.pedidosResumen.esperandoPrecioEquipo ?? 0}</p></div>
           <div className="rounded-xl bg-teal-50 p-3"><p className="text-xs text-teal-600">Precio confirmado</p><p className="text-base font-bold text-teal-800">{status.pedidosResumen.precioConfirmado ?? 0}</p></div>
-          <div className="rounded-xl bg-orange-50 p-3"><p className="text-xs text-orange-600">Esperando datos</p><p className="text-base font-bold text-orange-800">{status.pedidosResumen.esperandoDatos ?? 0}</p></div>
           <div className="rounded-xl bg-amber-50 p-3"><p className="text-xs text-amber-600">Apartados sucursal</p><p className="text-base font-bold text-amber-800">{status.pedidosResumen.apartadosSucursal ?? 0}</p></div>
           <div className="rounded-xl bg-emerald-50 p-3"><p className="text-xs text-emerald-600">Pagados transferencia</p><p className="text-base font-bold text-emerald-800">{status.pedidosResumen.pagadosTransferencia ?? 0}</p></div>
           <div className="rounded-xl bg-sky-50 p-3"><p className="text-xs text-sky-600">Con foto</p><p className="text-base font-bold text-sky-800">{status.pedidosResumen.conFotoReferencia ?? 0}</p></div>
@@ -243,28 +240,6 @@ function BotStatusPanel() {
         </div>
       )}
 
-      {Array.isArray(status.ventasRecientes) && status.ventasRecientes.length > 0 && (
-        <div className="mt-5 border-t border-gray-100 pt-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-800">Pedidos pagados recientes</h3>
-            <span className="text-xs text-gray-400">{status.ultimaVentaHora ? new Date(status.ultimaVentaHora).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : 'Hoy'}</span>
-          </div>
-          <div className="space-y-2">
-            {status.ventasRecientes.map((venta: any, index: number) => (
-              <div key={`${venta.creado_en}-${index}`} className="rounded-xl bg-gray-50/80 p-3 text-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-gray-800">{venta.cliente_nombre || 'Cliente sin nombre'}</p>
-                    <p className="text-xs text-gray-500">{venta.producto || 'Pedido'} · {venta.direccion_entrega || 'Entrega por confirmar'}</p>
-                    <p className="text-[11px] text-gray-400">{venta.cliente_telefono || 'Sin telefono'} · {venta.metodo_pago || 'metodo no registrado'}</p>
-                  </div>
-                  <p className="shrink-0 font-bold text-emerald-700">${Number(venta.precio_total || 0).toFixed(2)}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }
