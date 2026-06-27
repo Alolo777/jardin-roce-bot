@@ -794,7 +794,8 @@ function extraerTotalNumerico(total: string): number {
 function extraerPrecioRespuesta(texto: string): number | null {
   const matchTotal = texto.match(/(?:total|saldr[ií]a|ser[ií]a|queda(?:r[ií]a)?(?: en)?|precio)[^$\d]{0,40}\$?\s*(\d{2,6}(?:[,.]\d{2})?)/i)
   const matchMoneda = texto.match(/\$\s*(\d{2,6}(?:[,.]\d{2})?)/)
-  const raw = matchTotal?.[1] ?? matchMoneda?.[1]
+  const matchMonedaDespues = texto.match(/\b(\d{2,6}(?:[,.]\d{2})?)\s*(?:\$|mxn|pesos?)\b/i)
+  const raw = matchTotal?.[1] ?? matchMoneda?.[1] ?? matchMonedaDespues?.[1]
   return raw ? Number(raw.replace(/,/g, '')) || null : null
 }
 
@@ -1175,6 +1176,35 @@ function ventaDesdeEstado(clienteId: string, fallback?: VentaCerrada): VentaCerr
   }
 }
 
+function precioPedidoActual(clienteId: string): number {
+  const pedido = PEDIDO_EN_CURSO.get(clienteId)
+  return pedido?.arreglo?.precio ?? ARREGLO_ELEGIDO.get(clienteId)?.precio ?? pedido?.precioPersonalizado ?? 0
+}
+
+function tienePrecioConfirmado(clienteId: string): boolean {
+  return precioPedidoActual(clienteId) > 0
+}
+
+function tieneNombreValido(clienteId: string): boolean {
+  const nombre = PEDIDO_EN_CURSO.get(clienteId)?.nombre
+  return Boolean(nombre && !/verificar|confirmar|chat/i.test(nombre))
+}
+
+function ventaListaParaCerrar(clienteId: string): boolean {
+  return tienePrecioConfirmado(clienteId) && tieneNombreValido(clienteId) && !faltaFechaHoraParaCerrar(clienteId)
+}
+
+function apartadoSucursalListo(clienteId: string): boolean {
+  const pedido = PEDIDO_EN_CURSO.get(clienteId)
+  return Boolean(pedido?.sucursal && ventaListaParaCerrar(clienteId))
+}
+
+function pareceNombreCliente(texto: string): boolean {
+  const limpio = texto.trim()
+  if (!/^[a-záéíóúñ]+(?:\s+[a-záéíóúñ]+){1,4}$/i.test(limpio)) return false
+  return !/\b(hola|buenas|gracias|ok|okay|si|sí|ramo|sucursal|centro|norte|envio|envío|mañana|hoy|viernes|lunes|martes|miercoles|miércoles|jueves|sabado|sábado|domingo)\b/i.test(limpio)
+}
+
 function tieneArregloVerificado(clienteId: string): boolean {
   const pedido = PEDIDO_EN_CURSO.get(clienteId)
   return Boolean(pedido?.arreglo || pedido?.productoPersonalizado || ARREGLO_ELEGIDO.get(clienteId))
@@ -1200,6 +1230,75 @@ async function pedirFechaHoraSiFalta(msg: any, telefono: string, clienteId: stri
   await responderMensaje(msg, pregunta)
   await agregarAlHistorial(telefono, 'assistant', pregunta)
   return true
+}
+
+async function procesarMediaAcumulado(clienteId: string, telefono: string, textoCliente: string, pushName?: string): Promise<'referencia' | 'comprobante' | 'imagen' | null> {
+  const mediaAcumulado = MEDIA_POR_CLIENTE.get(clienteId)
+  if (!mediaAcumulado || mediaAcumulado.length === 0) return null
+
+  MEDIA_POR_CLIENTE.delete(clienteId)
+  const historial = await obtenerHistorial(telefono)
+  const historialRecienteTexto = historial.slice(-3).map(m => m.content).join(' ')
+  const captionsTexto = mediaAcumulado.map(m => m.caption).filter(Boolean).join(' ')
+  const textoTurno = `${textoCliente} ${captionsTexto}`.trim()
+  const textoClasificacion = `${textoTurno} ${historialRecienteTexto}`
+
+  const quiereCotizarTurno = esTextoReferenciaOCotizacion(textoTurno)
+  const pagoEnTurno = esTextoComprobante(textoTurno)
+  const pagoReciente = esTextoComprobante(textoClasificacion)
+  const esReferencia = quiereCotizarTurno || (!pagoEnTurno && !pagoReciente)
+  const esComprobante = !esReferencia && (pagoEnTurno || pagoReciente)
+
+  for (const media of mediaAcumulado) {
+    if (esComprobante) {
+      const captionTelegram = `📸 *Comprobante de pago* — ${telefono}${media.caption ? `\n\n${media.caption}` : ''}`
+      enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
+    } else if (esReferencia) {
+      const captionTelegram = `📷 *Foto de referencia* — ${telefono}${media.caption ? `\n\nCliente dice: ${media.caption}` : '\n\nCliente envió una foto de referencia.'}`
+      enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
+      enviarFotoEmpleadosWhatsApp(media.base64, `📷 Foto de referencia de ${telefono}${media.caption ? `\n\nCliente dice: ${media.caption}` : ''}`, media.mimetype).catch(err => console.error('[bot] WhatsApp foto referencia:', err))
+    } else {
+      const captionTelegram = `📸 *Imagen del cliente* — ${telefono}${media.caption ? `\n\nDice: ${media.caption}` : '\n\n_Sin mensaje de texto_'}`
+      enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
+    }
+  }
+
+  if (esComprobante) {
+    const venta = ventaDesdeEstado(clienteId)
+    if (venta && ventaListaParaCerrar(clienteId)) {
+      await ventaCerradaHandler(clienteId, venta, telefono)
+    } else {
+      enviarAlertaVentaCerrada({
+        cliente: PEDIDO_EN_CURSO.get(clienteId)?.nombre ?? 'Verificar en chat',
+        producto: PEDIDO_EN_CURSO.get(clienteId)?.productoPersonalizado ?? 'Verificar en conversación',
+        total: tienePrecioConfirmado(clienteId) ? precioArregloTexto(clienteId) : 'Verificar en conversación',
+        direccion: PEDIDO_EN_CURSO.get(clienteId)?.direccion ?? PEDIDO_EN_CURSO.get(clienteId)?.sucursal ?? 'Por confirmar',
+        numeroCliente: telefono,
+      }).catch(() => {})
+    }
+    return 'comprobante'
+  }
+
+  if (esReferencia) {
+    const descripcion = mediaAcumulado.map(m => m.caption).filter(Boolean).join(' | ') || 'Envió foto(s) de referencia'
+    const pedido = pedidoActual(clienteId)
+    pedido.productoPersonalizado ||= descripcion === 'Envió foto(s) de referencia' ? 'Ramo personalizado con foto de referencia' : descripcion
+    pedido.estadoFlujo = 'esperando_precio_equipo'
+    pedido.fotoReferenciaBase64 = mediaAcumulado[0]?.base64
+    pedido.fotoReferenciaMimetype = mediaAcumulado[0]?.mimetype
+    pedido.fotoReferenciaCaption = descripcion
+    pedido.fotoReferenciaRecibidaEn = new Date().toISOString()
+    pedido.detallesEspeciales = descripcion
+    await persistirPedido(clienteId, telefono, 'cotizacion', descripcion)
+    enviarAlertaCotizacion(telefono, descripcion).catch(() => {})
+    notificarEmpleadosWhatsApp(
+      `🌷 *Cliente necesita cotización:* ${telefono}\n\n${descripcion}\n\nRevisa la foto de referencia y cotízale por WhatsApp.`
+    ).catch(err => console.error('[bot] WhatsApp empleados cotización:', err))
+    return 'referencia'
+  }
+
+  enviarAlertaAtencionHumana(telefono, pushName || '', 'Envió imagen sin contexto claro', 'Imagen sin contexto').catch(() => {})
+  return 'imagen'
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1685,6 +1784,20 @@ async function procesarMensaje(msg: any): Promise<void> {
       }
     }
 
+    const tipoMediaProcesada = await procesarMediaAcumulado(clienteId, await numeroRealPromise, textoCliente, msg.pushName)
+    if (tipoMediaProcesada === 'referencia') {
+      const respuesta = 'Ya recibí la foto de referencia 🌷 Se la paso al equipo para que la revise y te confirme el precio.'
+      await responderMensaje(msg, respuesta)
+      await agregarAlHistorial(telefono, 'assistant', respuesta)
+      return
+    }
+    if (tipoMediaProcesada === 'imagen') {
+      const respuesta = 'Ya recibí tu imagen 🌷 Se la paso al equipo para que la revise.'
+      await responderMensaje(msg, respuesta)
+      await agregarAlHistorial(telefono, 'assistant', respuesta)
+      return
+    }
+
     // ── VENTA CERRADA manual ────────────────────────────────────
     if (/venta\s*cerrada/i.test(textoCliente)) {
       const venta = ventaDesdeEstado(clienteId)
@@ -1704,6 +1817,10 @@ async function procesarMensaje(msg: any): Promise<void> {
       if (!/^(ok|si|sí|vale|dale|va|de acuerdo|esta bien|está bien)$/i.test(nombre)) {
         pedidoActual(clienteId).nombre = nombre
       }
+    }
+
+    if (!pedidoActual(clienteId).nombre && tieneArregloVerificado(clienteId) && pareceNombreCliente(textoCliente)) {
+      pedidoActual(clienteId).nombre = textoCliente.trim().replace(/\s+/g, ' ').slice(0, 80)
     }
 
     let ventaCerrada = false
@@ -1731,7 +1848,7 @@ async function procesarMensaje(msg: any): Promise<void> {
     const pagoEfectivoAlRecoger = /\b(efectivo|tarjeta)\b/i.test(textoCliente) && /\b(recoger|pasar[ií]a|pasaria|paso|sucursal|norte|centro)\b/i.test(textoCliente)
     const pedidoParaCierre = PEDIDO_EN_CURSO.get(clienteId)
     const ventaParaCierre = ventaDesdeEstado(clienteId)
-    if (!VENTAS_CERRADAS.has(clienteId) && ventaParaCierre && pagoEfectivoAlRecoger && (pedidoParaCierre?.sucursal || /\b(norte|centro)\b/i.test(textoCliente))) {
+    if (!VENTAS_CERRADAS.has(clienteId) && ventaParaCierre && pagoEfectivoAlRecoger && ventaListaParaCerrar(clienteId) && (pedidoParaCierre?.sucursal || /\b(norte|centro)\b/i.test(textoCliente))) {
       if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
       const confirmacion = `¡Listo, ${ventaParaCierre.cliente}! 🌷 Tu pedido queda apartado para ${ventaParaCierre.direccion}. Total: ${ventaParaCierre.total}. Pagas al recoger.`
       await responderMensaje(msg, confirmacion)
@@ -1741,7 +1858,7 @@ async function procesarMensaje(msg: any): Promise<void> {
     }
 
     const cierrePagoTransferencia = /\b(listo|ya\s+qued[oó]|ya\s+pag[uú]e|ya\s+transfer[ií]|comprobante)\b/i.test(textoCliente) && (consultaPagoEnviado || /\b(bbva|devi\s+america|devi\s+américa|cuenta|transferencia)\b/i.test(historialTexto))
-    if (!ventaCerrada && !VENTAS_CERRADAS.has(clienteId) && ventaParaCierre && cierrePagoTransferencia) {
+    if (!ventaCerrada && !VENTAS_CERRADAS.has(clienteId) && ventaParaCierre && cierrePagoTransferencia && ventaListaParaCerrar(clienteId)) {
       if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
       const confirmacion = `¡Gracias, ${ventaParaCierre.cliente}! 🌸 Tu pedido queda registrado. Total: ${ventaParaCierre.total}.`
       await responderMensaje(msg, confirmacion)
@@ -1765,7 +1882,7 @@ async function procesarMensaje(msg: any): Promise<void> {
       ventaCerrada = true
     }
 
-    if (!ventaCerrada && !VENTAS_CERRADAS.has(clienteId) && confirmaCorto && (tieneArregloVerificado(clienteId) || (textoCliente.length < 150 && !textoCliente.includes('?')))) {
+    if (!ventaCerrada && !VENTAS_CERRADAS.has(clienteId) && confirmaCorto && ventaListaParaCerrar(clienteId) && (tieneArregloVerificado(clienteId) || (textoCliente.length < 150 && !textoCliente.includes('?')))) {
       const venta = ventaDesdeEstado(clienteId)
       if (venta) {
         const pedido = PEDIDO_EN_CURSO.get(clienteId)
@@ -1782,6 +1899,15 @@ async function procesarMensaje(msg: any): Promise<void> {
           direccion: venta.direccion,
           rawToken: '',
         }, await numeroRealPromise)
+      }
+    }
+
+    if (!ventaCerrada && !VENTAS_CERRADAS.has(clienteId) && apartadoSucursalListo(clienteId)) {
+      const venta = ventaDesdeEstado(clienteId)
+      if (venta) {
+        const metodo = pedidoActual(clienteId).metodoPago === 'tarjeta_recoger' ? 'Tarjeta al recoger' : 'Efectivo al recoger'
+        await pedidoApartadoHandler(clienteId, venta, await numeroRealPromise, metodo)
+        ventaCerrada = true
       }
     }
 
@@ -1841,7 +1967,7 @@ async function procesarMensaje(msg: any): Promise<void> {
         let mensajeParaEnviar = mensajeFinal
 
         const ventaEstado = ventaDesdeEstado(clienteId)
-        if (!VENTAS_CERRADAS.has(clienteId) && ventaEstado && (
+        if (!VENTAS_CERRADAS.has(clienteId) && ventaEstado && ventaListaParaCerrar(clienteId) && (
           confirmaCorto || /lo[sv]? quiero|me gusta|adelante|procedo|hagamoslo|hag[aá]moslo|d[aá]le|adelante|apartalo|aparta lo|si? (por favor|gracias)/i.test(textoCliente)
         )) {
           const pedido = PEDIDO_EN_CURSO.get(clienteId)
@@ -1864,64 +1990,6 @@ async function procesarMensaje(msg: any): Promise<void> {
         await agregarAlHistorial(telefono, 'assistant', mensajeParaEnviar)
       }
 
-      // ── PROCESAR MEDIA ACUMULADO (imágenes) ─────────────────
-      const mediaAcumulado = MEDIA_POR_CLIENTE.get(clienteId)
-      if (mediaAcumulado && mediaAcumulado.length > 0) {
-        MEDIA_POR_CLIENTE.delete(clienteId)
-        const telefonoReal = await numeroRealPromise
-        const historial = await obtenerHistorial(telefono)
-        const historialRecienteTexto = historial.slice(-3).map(m => m.content).join(' ')
-        const captionsTexto = mediaAcumulado.map(m => m.caption).filter(Boolean).join(' ')
-        const textoTurno = `${textoCliente} ${captionsTexto}`.trim()
-        const textoClasificacion = `${textoTurno} ${historialRecienteTexto}`
-
-        const quiereCotizarTurno = esTextoReferenciaOCotizacion(textoTurno)
-        const pagoEnTurno = esTextoComprobante(textoTurno)
-        const pagoReciente = esTextoComprobante(textoClasificacion)
-        const esReferencia = quiereCotizarTurno || (!pagoEnTurno && !pagoReciente)
-        const esComprobante = !esReferencia && (pagoEnTurno || pagoReciente)
-
-        for (const media of mediaAcumulado) {
-          if (esComprobante) {
-            const captionTelegram = `📸 *Comprobante de pago* — ${telefonoReal}${media.caption ? `\n\n${media.caption}` : ''}`
-            enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
-          } else if (esReferencia) {
-            const captionTelegram = `📷 *Foto de referencia* — ${telefonoReal}${media.caption ? `\n\nCliente dice: ${media.caption}` : '\n\nCliente envió una foto de referencia.'}`
-            enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
-            enviarFotoEmpleadosWhatsApp(media.base64, `📷 Foto de referencia de ${telefonoReal}${media.caption ? `\n\nCliente dice: ${media.caption}` : ''}`, media.mimetype).catch(err => console.error('[bot] WhatsApp foto referencia:', err))
-          } else {
-            const captionTelegram = `📸 *Imagen del cliente* — ${telefonoReal}${media.caption ? `\n\nDice: ${media.caption}` : '\n\n_Sin mensaje de texto_'}`
-            enviarFotoTelegram(media.base64, captionTelegram, media.mimetype).catch(() => {})
-          }
-        }
-
-        if (esComprobante) {
-          enviarAlertaVentaCerrada({
-            cliente: 'Verificar en chat',
-            producto: 'Verificar en conversación',
-            total: 'Verificar en conversación',
-            direccion: 'Por confirmar',
-            numeroCliente: telefonoReal,
-          }).catch(() => {})
-        } else if (esReferencia) {
-          const descripcion = mediaAcumulado.map(m => m.caption).filter(Boolean).join(' | ') || 'Envió foto(s) de referencia'
-          const pedido = pedidoActual(clienteId)
-          pedido.productoPersonalizado ||= descripcion === 'Envió foto(s) de referencia' ? 'Ramo personalizado con foto de referencia' : descripcion
-          pedido.estadoFlujo = 'esperando_precio_equipo'
-          pedido.fotoReferenciaBase64 = mediaAcumulado[0]?.base64
-          pedido.fotoReferenciaMimetype = mediaAcumulado[0]?.mimetype
-          pedido.fotoReferenciaCaption = descripcion
-          pedido.fotoReferenciaRecibidaEn = new Date().toISOString()
-          pedido.detallesEspeciales = descripcion
-          persistirPedido(clienteId, telefonoReal, 'cotizacion', descripcion).catch(() => {})
-          enviarAlertaCotizacion(telefonoReal, descripcion).catch(() => {})
-          notificarEmpleadosWhatsApp(
-            `🌷 *Cliente necesita cotización:* ${telefonoReal}\n\n${descripcion}\n\nRevisa la foto de referencia y cotízale por WhatsApp.`
-          ).catch(err => console.error('[bot] WhatsApp empleados cotización:', err))
-        } else {
-          enviarAlertaAtencionHumana(telefonoReal, msg.pushName || '', 'Envió imagen sin contexto claro', 'Imagen sin contexto').catch(() => {})
-        }
-      }
     }
   } catch (err) {
     console.error('[bot] Error en procesarMensaje:', err)
