@@ -25,6 +25,21 @@ create table if not exists pedidos_bot (
 create index if not exists pedidos_bot_estado_idx on pedidos_bot (estado);
 create index if not exists pedidos_bot_actualizado_idx on pedidos_bot (actualizado_en desc);
 
+alter table pedidos_bot add column if not exists estado_flujo text;
+alter table pedidos_bot add column if not exists fecha_entrega text;
+alter table pedidos_bot add column if not exists hora_entrega text;
+alter table pedidos_bot add column if not exists foto_referencia_url text;
+alter table pedidos_bot add column if not exists foto_referencia_base64 text;
+alter table pedidos_bot add column if not exists foto_referencia_mimetype text;
+alter table pedidos_bot add column if not exists foto_referencia_caption text;
+alter table pedidos_bot add column if not exists foto_referencia_recibida_en timestamptz;
+alter table pedidos_bot add column if not exists resumen_pedido text;
+alter table pedidos_bot add column if not exists detalles_especiales text;
+alter table pedidos_bot add column if not exists precio_confirmado_por text;
+alter table pedidos_bot add column if not exists cerrado_en timestamptz;
+
+create index if not exists pedidos_bot_estado_flujo_idx on pedidos_bot (estado_flujo);
+
 create table if not exists zonas_envio_ambiguas (
   id uuid primary key default gen_random_uuid(),
   texto_cliente text not null,

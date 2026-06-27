@@ -83,6 +83,7 @@ export interface DatosVentaCerrada {
   cliente: string; producto: string; total: string
   direccion: string; numeroCliente: string
   precioArreglo?: string; precioEnvio?: string; metodoPago?: string
+  detalles?: string; tieneFotoReferencia?: boolean; fechaHora?: string
 }
 
 export async function enviarAlertaVentaCerrada(datos: DatosVentaCerrada): Promise<void> {
@@ -92,10 +93,13 @@ export async function enviarAlertaVentaCerrada(datos: DatosVentaCerrada): Promis
     `👤 *Cliente:* ${esc(datos.cliente)}`,
     `📱 *Teléfono:* ${formatearNumero(datos.numeroCliente)}`,
     `💐 *Producto:* ${esc(datos.producto)}`,
+    ...(datos.detalles ? [`📝 *Detalles:* ${esc(datos.detalles)}`] : []),
+    ...(datos.tieneFotoReferencia !== undefined ? [`🖼️ *Foto referencia:* ${datos.tieneFotoReferencia ? 'sí' : 'no'}`] : []),
     ...(datos.precioArreglo ? [`🌷 *Ramo:* ${esc(datos.precioArreglo)}`] : []),
     ...(datos.precioEnvio ? [`🚚 *Envío:* ${esc(datos.precioEnvio)}`] : []),
     `💰 *Total:* ${esc(datos.total)}`,
     `📍 *Entrega:* ${esc(datos.direccion)}`,
+    ...(datos.fechaHora ? [`📅 *Fecha/hora:* ${esc(datos.fechaHora)}`] : []),
     ...(datos.metodoPago ? [`💳 *Pago:* ${esc(datos.metodoPago)}`] : []),
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
@@ -165,10 +169,12 @@ export async function enviarAlertaCotizacion(
   descripcion: string
 ): Promise<void> {
   const msg = [
-    '🌷 *CLIENTE QUIERE COTIZACIÓN*',
+    '🌷 *COTIZACIÓN CON FOTO/REFERENCIA*',
     '',
     `📱 *Teléfono:* ${formatearNumero(numeroCliente)}`,
     `💬 *Busca:* ${esc(descripcion.slice(0, 300))}`,
+    '🖼️ *Foto:* enviada abajo si el cliente la mandó',
+    '⚠️ *Acción:* cotizar precio y confirmar disponibilidad',
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
     '_Se le envió el cotizador web — puede necesitar ayuda con precio de envío_',
@@ -205,6 +211,9 @@ export interface DatosApartadoPedido {
   entrega: string
   metodoPago: string
   numeroCliente: string
+  detalles?: string
+  tieneFotoReferencia?: boolean
+  fechaHora?: string
 }
 
 export async function enviarAlertaPedidoApartado(datos: DatosApartadoPedido): Promise<void> {
@@ -214,10 +223,13 @@ export async function enviarAlertaPedidoApartado(datos: DatosApartadoPedido): Pr
     `👤 *Cliente:* ${esc(datos.cliente)}`,
     `📱 *Teléfono:* ${ultimos4(datos.numeroCliente)}`,
     `💐 *Producto:* ${esc(datos.producto)}`,
+    ...(datos.detalles ? [`📝 *Detalles:* ${esc(datos.detalles)}`] : []),
+    ...(datos.tieneFotoReferencia !== undefined ? [`🖼️ *Foto referencia:* ${datos.tieneFotoReferencia ? 'sí' : 'no'}`] : []),
     `🌷 *Ramo:* ${esc(datos.precioArreglo)}`,
     ...(datos.precioEnvio ? [`🚚 *Envío:* ${esc(datos.precioEnvio)}`] : []),
     `💰 *Total:* ${esc(datos.total)}`,
     `📍 *Entrega:* ${esc(datos.entrega)}`,
+    ...(datos.fechaHora ? [`📅 *Fecha/hora:* ${esc(datos.fechaHora)}`] : []),
     `💳 *Pago:* ${esc(datos.metodoPago)}`,
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',

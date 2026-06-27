@@ -5,19 +5,31 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const { id } = await params
     const body = await req.json()
-    const allowed = ['estado', 'cliente_nombre', 'producto', 'precio_arreglo', 'zona_envio', 'precio_envio', 'direccion', 'sucursal', 'metodo_pago', 'nota', 'total', 'requiere_revision']
+    const allowed = ['estado', 'estado_flujo', 'cliente_nombre', 'producto', 'precio_arreglo', 'zona_envio', 'precio_envio', 'direccion', 'sucursal', 'metodo_pago', 'nota', 'total', 'requiere_revision', 'fecha_entrega', 'hora_entrega', 'detalles_especiales', 'precio_confirmado_por']
     const update: Record<string, unknown> = { actualizado_en: new Date().toISOString() }
 
     for (const key of allowed) {
       if (key in body) update[key] = body[key]
     }
 
-    const { data, error } = await supabaseAdmin
+    let { data, error } = await supabaseAdmin
       .from('pedidos_bot')
       .update(update)
       .eq('id', id)
       .select()
       .single()
+
+    if (error && /estado_flujo|fecha_entrega|hora_entrega|detalles_especiales|precio_confirmado_por|schema cache|column/i.test(error.message || '')) {
+      for (const key of ['estado_flujo', 'fecha_entrega', 'hora_entrega', 'detalles_especiales', 'precio_confirmado_por']) delete update[key]
+      const retry = await supabaseAdmin
+        .from('pedidos_bot')
+        .update(update)
+        .eq('id', id)
+        .select()
+        .single()
+      data = retry.data
+      error = retry.error
+    }
 
     if (error) throw error
     return NextResponse.json({ ok: true, pedido: data })

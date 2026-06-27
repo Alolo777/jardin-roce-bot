@@ -757,7 +757,7 @@ function avisarRateLimitUnaVez(msg: any, id: string): void {
 // REPORTE DE VENTAS
 // ════════════════════════════════════════════════════════════════
 
-async function registrarVenta(clienteNombre: string, telefono: string, producto: string, total: string, direccion: string): Promise<void> {
+async function registrarVenta(clienteNombre: string, telefono: string, producto: string, total: string, direccion: string, metodoPago = 'transferencia'): Promise<void> {
   try {
     const precioNumerico = extraerTotalNumerico(total)
     const { error } = await supabaseAdmin.from('reporte_ventas').insert({
@@ -766,8 +766,8 @@ async function registrarVenta(clienteNombre: string, telefono: string, producto:
       producto,
       precio_total: precioNumerico,
       direccion_entrega: direccion,
-      metodo_pago: 'transferencia',
-      estado: 'pagado',
+      metodo_pago: metodoPago,
+      estado: metodoPago === 'transferencia' ? 'pagado' : 'apartado',
     })
     if (error) console.error('[bot] Error registrando venta:', error)
   } catch (err) { console.error('[bot] Error en registrarVenta:', err) }
@@ -816,6 +816,12 @@ function esTextoComprobante(texto: string): boolean {
 
 function esTextoReferenciaOCotizacion(texto: string): boolean {
   return /\b(cotiz|cotizar|cotizaci[oó]n|cu[aá]nto|cuanto|precio|saldr[ií]a|costar[ií]a|ramo\s+as[ií]|como\s+(este|esta|la\s+foto|imagen)|referencia|foto\s+de\s+referencia|imagen\s+de\s+referencia|hacer\s+un\s+ramo|podr[ií]an\s+hacer|hortensias?|lilis?|rosas?|flores?\s+de\s+la\s+imagen)\b/i.test(texto)
+}
+
+function extraerFechaHoraPedido(texto: string): { fecha?: string; hora?: string } {
+  const fecha = texto.match(/\b(hoy|ma[ñn]ana|pasado\s+ma[ñn]ana|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|\d{1,2}\s+de\s+[a-záéíóúñ]+)\b/i)?.[0]
+  const hora = texto.match(/\b(a\s+las\s*\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?|\d{1,2}(?::\d{2})\s*(?:am|pm|a\.m\.|p\.m\.)?|\d{1,2}\s*(?:am|pm|a\.m\.|p\.m\.)|en\s+la\s+ma[ñn]ana|por\s+la\s+ma[ñn]ana|en\s+la\s+tarde|por\s+la\s+tarde|mediod[ií]a)\b/i)?.[0]
+  return { fecha: fecha?.trim(), hora: hora?.trim() }
 }
 
 function fechaInicioFinCDMX(): { inicio: Date; fin: Date } {
@@ -972,7 +978,31 @@ function parsearPedidoCotizador(texto: string): PedidoWebParseado {
 const VENTAS_CERRADAS  = new Set<string>()
 const VENTA_ACTUAL     = new Map<string, VentaCerrada>()
 const ARREGLO_ELEGIDO  = new Map<string, ArregloConFoto>()
-const PEDIDO_EN_CURSO  = new Map<string, { arreglo?: ArregloConFoto; productoPersonalizado?: string; precioPersonalizado?: number; envio?: { zona: string; precio: number }; nombre?: string; direccion?: string; sucursal?: string; metodoPago?: 'transferencia' | 'efectivo_recoger'; nota?: string }>()
+type EstadoFlujoPedido = 'sin_pedido' | 'cotizando' | 'esperando_precio_equipo' | 'precio_confirmado' | 'esperando_fecha_hora' | 'esperando_entrega' | 'esperando_nombre' | 'esperando_pago' | 'apartado_sucursal' | 'pagado_transferencia' | 'cerrado' | 'cancelado'
+
+interface PedidoEnCurso {
+  arreglo?: ArregloConFoto
+  productoPersonalizado?: string
+  precioPersonalizado?: number
+  envio?: { zona: string; precio: number }
+  nombre?: string
+  direccion?: string
+  sucursal?: string
+  metodoPago?: 'transferencia' | 'efectivo_recoger' | 'tarjeta_recoger'
+  nota?: string
+  estadoFlujo?: EstadoFlujoPedido
+  fechaEntrega?: string
+  horaEntrega?: string
+  fotoReferenciaBase64?: string
+  fotoReferenciaMimetype?: string
+  fotoReferenciaCaption?: string
+  fotoReferenciaRecibidaEn?: string
+  detallesEspeciales?: string
+  precioConfirmadoPor?: 'equipo' | 'ia' | 'cliente' | 'manual'
+  cerradoEn?: string
+}
+
+const PEDIDO_EN_CURSO  = new Map<string, PedidoEnCurso>()
 
 function pedidoActual(clienteId: string) {
   const pedido = PEDIDO_EN_CURSO.get(clienteId) ?? {}
@@ -997,12 +1027,45 @@ function totalPedidoNumerico(clienteId: string): number | null {
   return subtotal + (pedido?.envio?.precio ?? 0)
 }
 
+function estadoFlujoDesdeEstado(estado: 'cotizacion' | 'apartado' | 'pagado' | 'entregado' | 'cancelado', pedido?: PedidoEnCurso): EstadoFlujoPedido {
+  if (estado === 'cancelado') return 'cancelado'
+  if (estado === 'entregado') return 'cerrado'
+  if (estado === 'pagado') return 'pagado_transferencia'
+  if (pedido?.estadoFlujo) return pedido.estadoFlujo
+  if (estado === 'apartado') return pedido?.metodoPago === 'transferencia' ? 'esperando_pago' : 'apartado_sucursal'
+  if (pedido?.fotoReferenciaBase64) return 'esperando_precio_equipo'
+  if (pedido?.precioPersonalizado) return 'precio_confirmado'
+  return 'cotizando'
+}
+
+function resumirPedidoOperativo(clienteId: string, telefono: string | null): string {
+  const pedido = PEDIDO_EN_CURSO.get(clienteId)
+  const arreglo = pedido?.arreglo ?? ARREGLO_ELEGIDO.get(clienteId)
+  const subtotal = arreglo?.precio ?? pedido?.precioPersonalizado ?? 0
+  const envio = pedido?.envio?.precio ?? 0
+  const total = subtotal + envio
+  return [
+    `cliente_nombre: ${pedido?.nombre ?? 'Por confirmar'}`,
+    `telefono: ${telefono ?? 'Por confirmar'}`,
+    `producto: ${arreglo?.nombre ?? pedido?.productoPersonalizado ?? 'Por confirmar'}`,
+    `detalles_especiales: ${pedido?.detallesEspeciales ?? pedido?.nota ?? 'Sin notas'}`,
+    `precio_arreglo: ${subtotal || 'Por confirmar'}`,
+    `precio_envio: ${envio || 0}`,
+    `total: ${total || 'Por confirmar'}`,
+    `entrega: ${pedido?.envio ? 'domicilio' : (pedido?.sucursal ? 'sucursal' : 'Por confirmar')}`,
+    `sucursal/direccion: ${pedido?.direccion ?? pedido?.sucursal ?? pedido?.envio?.zona ?? 'Por confirmar'}`,
+    `fecha/hora: ${[pedido?.fechaEntrega, pedido?.horaEntrega].filter(Boolean).join(' ') || 'Por confirmar'}`,
+    `metodo_pago: ${pedido?.metodoPago ?? 'Por confirmar'}`,
+    `tiene_foto_referencia: ${pedido?.fotoReferenciaBase64 ? 'si' : 'no'}`,
+  ].join('\n')
+}
+
 async function persistirPedido(clienteId: string, telefono: string | null, estado: 'cotizacion' | 'apartado' | 'pagado' | 'entregado' | 'cancelado', ultimoMensaje?: string): Promise<void> {
   try {
     const pedido = PEDIDO_EN_CURSO.get(clienteId)
     const arreglo = pedido?.arreglo ?? ARREGLO_ELEGIDO.get(clienteId)
     const total = totalPedidoNumerico(clienteId)
-    const { error } = await supabaseAdmin.from('pedidos_bot').upsert({
+    const base = {
       cliente_id: clienteId,
       telefono,
       estado,
@@ -1020,7 +1083,26 @@ async function persistirPedido(clienteId: string, telefono: string | null, estad
       ultimo_mensaje: ultimoMensaje ?? null,
       requiere_revision: false,
       actualizado_en: new Date().toISOString(),
-    }, { onConflict: 'cliente_id' })
+    }
+    const extendido = {
+      ...base,
+      estado_flujo: estadoFlujoDesdeEstado(estado, pedido),
+      fecha_entrega: pedido?.fechaEntrega ?? null,
+      hora_entrega: pedido?.horaEntrega ?? null,
+      foto_referencia_base64: pedido?.fotoReferenciaBase64 ?? null,
+      foto_referencia_mimetype: pedido?.fotoReferenciaMimetype ?? null,
+      foto_referencia_caption: pedido?.fotoReferenciaCaption ?? null,
+      foto_referencia_recibida_en: pedido?.fotoReferenciaRecibidaEn ?? null,
+      resumen_pedido: resumirPedidoOperativo(clienteId, telefono),
+      detalles_especiales: pedido?.detallesEspeciales ?? pedido?.nota ?? null,
+      precio_confirmado_por: pedido?.precioConfirmadoPor ?? null,
+      cerrado_en: pedido?.cerradoEn ?? null,
+    }
+    let { error } = await supabaseAdmin.from('pedidos_bot').upsert(extendido, { onConflict: 'cliente_id' })
+    if (error && /estado_flujo|fecha_entrega|foto_referencia|resumen_pedido|detalles_especiales|precio_confirmado_por|cerrado_en|schema cache|column/i.test(error.message || '')) {
+      const retry = await supabaseAdmin.from('pedidos_bot').upsert(base, { onConflict: 'cliente_id' })
+      error = retry.error
+    }
     if (error) throw error
   } catch (err) {
     console.warn('[pedidos_bot] No se pudo persistir pedido:', err)
@@ -1102,6 +1184,22 @@ function precioArregloTexto(clienteId: string): string {
   const pedido = PEDIDO_EN_CURSO.get(clienteId)
   const precio = pedido?.arreglo?.precio ?? ARREGLO_ELEGIDO.get(clienteId)?.precio ?? pedido?.precioPersonalizado ?? 0
   return `$${precio.toFixed(2)} MXN`
+}
+
+function faltaFechaHoraParaCerrar(clienteId: string): boolean {
+  const pedido = PEDIDO_EN_CURSO.get(clienteId)
+  return !pedido?.fechaEntrega || !pedido?.horaEntrega
+}
+
+async function pedirFechaHoraSiFalta(msg: any, telefono: string, clienteId: string): Promise<boolean> {
+  if (!faltaFechaHoraParaCerrar(clienteId)) return false
+  const pedido = pedidoActual(clienteId)
+  pedido.estadoFlujo = 'esperando_fecha_hora'
+  await persistirPedido(clienteId, telefono, 'apartado', 'Falta fecha/hora antes de cerrar')
+  const pregunta = '¿Para qué fecha y hora lo necesitas? 🌷'
+  await responderMensaje(msg, pregunta)
+  await agregarAlHistorial(telefono, 'assistant', pregunta)
+  return true
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1363,6 +1461,13 @@ async function procesarMensaje(msg: any): Promise<void> {
     const pideEmpezarDesdeCero = /empecemos\s+desde\s+cero|desde\s+cero|borr[oó]n\s+y\s+cuenta\s+nueva|nuevo\s+pedido|otro\s+pedido|otro\s+ramo|es\s+aparte|aparte\s+ese|ya\s+hab[ií]a\s+finalizado|ya\s+se\s+finaliz[oó]|ese\s+ya\s+qued[oó]/i.test(textoCliente)
     if (pideEmpezarDesdeCero) resetearPedidoActivo(clienteId)
 
+    const fechaHoraDetectada = extraerFechaHoraPedido(textoCliente)
+    if ((fechaHoraDetectada.fecha || fechaHoraDetectada.hora) && tieneArregloVerificado(clienteId)) {
+      const pedido = pedidoActual(clienteId)
+      if (fechaHoraDetectada.fecha) pedido.fechaEntrega = fechaHoraDetectada.fecha
+      if (fechaHoraDetectada.hora) pedido.horaEntrega = fechaHoraDetectada.hora
+    }
+
     const intencion     = detectarIntencion(textoCliente, clienteId)
     const horario       = getContextoHorario()
     let contextoExtra   = `[Fecha actual: ${getFechaActual()}]${horario}`
@@ -1584,7 +1689,8 @@ async function procesarMensaje(msg: any): Promise<void> {
     if (/venta\s*cerrada/i.test(textoCliente)) {
       const venta = ventaDesdeEstado(clienteId)
       if (venta) {
-        ventaCerradaHandler(clienteId, venta, await numeroRealPromise)
+        if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
+        await ventaCerradaHandler(clienteId, venta, await numeroRealPromise)
       }
     }
 
@@ -1606,13 +1712,15 @@ async function procesarMensaje(msg: any): Promise<void> {
     const consultaPagoEnviado = /(?:ya\s*)?pag[uú]e|comprobante|transferencia|ya\s*transfer|transfer[ií]|transfiero|le\s+transfiero|devi\s+america|devi\s+américa/i.test(textoCliente)
     if (consultaPagoEnviado && tieneArregloVerificado(clienteId)) {
       pedidoActual(clienteId).metodoPago = 'transferencia'
+      pedidoActual(clienteId).estadoFlujo = 'esperando_pago'
       persistirPedido(clienteId, await numeroRealPromise, 'apartado', textoCliente).catch(() => {})
     }
 
     const esSucursal = /recoger|recojo|paso|pasare|sucursal|ah[ií]|all[aá]|voy/i.test(textoCliente)
     if (esSucursal && tieneArregloVerificado(clienteId) && !consultaPagoEnviado) {
       pedidoActual(clienteId).sucursal = /centro/i.test(textoCliente) ? 'Centro' : (/norte/i.test(textoCliente) ? 'Norte' : 'Apizaco (sucursal)')
-      pedidoActual(clienteId).metodoPago = 'efectivo_recoger'
+      pedidoActual(clienteId).metodoPago = /tarjeta/i.test(textoCliente) ? 'tarjeta_recoger' : 'efectivo_recoger'
+      pedidoActual(clienteId).estadoFlujo = 'esperando_fecha_hora'
       contextoExtra +=
         `\n\n[CLIENTE RECOGE EN SUCURSAL] ` +
         `INSTRUCCION: Confirma dirección: Av. Hidalgo 12, Apizaco Centro. ` +
@@ -1624,6 +1732,7 @@ async function procesarMensaje(msg: any): Promise<void> {
     const pedidoParaCierre = PEDIDO_EN_CURSO.get(clienteId)
     const ventaParaCierre = ventaDesdeEstado(clienteId)
     if (!VENTAS_CERRADAS.has(clienteId) && ventaParaCierre && pagoEfectivoAlRecoger && (pedidoParaCierre?.sucursal || /\b(norte|centro)\b/i.test(textoCliente))) {
+      if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
       const confirmacion = `¡Listo, ${ventaParaCierre.cliente}! 🌷 Tu pedido queda apartado para ${ventaParaCierre.direccion}. Total: ${ventaParaCierre.total}. Pagas al recoger.`
       await responderMensaje(msg, confirmacion)
       await agregarAlHistorial(telefono, 'assistant', confirmacion)
@@ -1633,6 +1742,7 @@ async function procesarMensaje(msg: any): Promise<void> {
 
     const cierrePagoTransferencia = /\b(listo|ya\s+qued[oó]|ya\s+pag[uú]e|ya\s+transfer[ií]|comprobante)\b/i.test(textoCliente) && (consultaPagoEnviado || /\b(bbva|devi\s+america|devi\s+américa|cuenta|transferencia)\b/i.test(historialTexto))
     if (!ventaCerrada && !VENTAS_CERRADAS.has(clienteId) && ventaParaCierre && cierrePagoTransferencia) {
+      if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
       const confirmacion = `¡Gracias, ${ventaParaCierre.cliente}! 🌸 Tu pedido queda registrado. Total: ${ventaParaCierre.total}.`
       await responderMensaje(msg, confirmacion)
       await agregarAlHistorial(telefono, 'assistant', confirmacion)
@@ -1650,7 +1760,8 @@ async function procesarMensaje(msg: any): Promise<void> {
         total: precio.trim(), direccion: direccion.trim(),
         rawToken: ventaToken[0],
       }
-      ventaCerradaHandler(clienteId, venta, await numeroRealPromise)
+      if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
+      await ventaCerradaHandler(clienteId, venta, await numeroRealPromise)
       ventaCerrada = true
     }
 
@@ -1663,7 +1774,8 @@ async function procesarMensaje(msg: any): Promise<void> {
         const totalTexto = pedido?.envio
           ? `$${total.toFixed(2)} MXN (ramo $${subtotal.toFixed(2)} + envío $${(pedido?.envio?.precio ?? 0).toFixed(2)})`
           : `$${total.toFixed(2)} MXN`
-        ventaCerradaHandler(clienteId, {
+        if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
+        await ventaCerradaHandler(clienteId, {
           cliente: venta.cliente,
           producto: venta.producto,
           total: totalTexto,
@@ -1705,6 +1817,8 @@ async function procesarMensaje(msg: any): Promise<void> {
         const pedido = pedidoActual(clienteId)
         pedido.productoPersonalizado ||= describirPedidoPersonalizado(textoCliente)
         pedido.precioPersonalizado = precioPersonalizado
+        pedido.precioConfirmadoPor ||= 'ia'
+        pedido.estadoFlujo = 'precio_confirmado'
         persistirPedido(clienteId, await numeroRealPromise, 'cotizacion', textoCliente).catch(() => {})
       }
 
@@ -1721,7 +1835,8 @@ async function procesarMensaje(msg: any): Promise<void> {
           await responderMensaje(msg, msgLimpio)
           await new Promise(r => setTimeout(r, 1500))
         }
-        ventaCerradaHandler(clienteId, venta, await numeroRealPromise)
+        if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
+        await ventaCerradaHandler(clienteId, venta, await numeroRealPromise)
       } else {
         let mensajeParaEnviar = mensajeFinal
 
@@ -1735,6 +1850,7 @@ async function procesarMensaje(msg: any): Promise<void> {
           const totalTexto = pedido?.envio
             ? `$${total.toFixed(2)} MXN (ramo $${subtotal.toFixed(2)} + envío $${(pedido?.envio?.precio ?? 0).toFixed(2)})`
             : `$${total.toFixed(2)} MXN`
+          if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
           ventaCerradaHandler(clienteId, {
             cliente: ventaEstado.cliente,
             producto: ventaEstado.producto,
@@ -1754,7 +1870,7 @@ async function procesarMensaje(msg: any): Promise<void> {
         MEDIA_POR_CLIENTE.delete(clienteId)
         const telefonoReal = await numeroRealPromise
         const historial = await obtenerHistorial(telefono)
-        const historialRecienteTexto = historial.slice(-8).map(m => m.content).join(' ')
+        const historialRecienteTexto = historial.slice(-3).map(m => m.content).join(' ')
         const captionsTexto = mediaAcumulado.map(m => m.caption).filter(Boolean).join(' ')
         const textoTurno = `${textoCliente} ${captionsTexto}`.trim()
         const textoClasificacion = `${textoTurno} ${historialRecienteTexto}`
@@ -1791,6 +1907,12 @@ async function procesarMensaje(msg: any): Promise<void> {
           const descripcion = mediaAcumulado.map(m => m.caption).filter(Boolean).join(' | ') || 'Envió foto(s) de referencia'
           const pedido = pedidoActual(clienteId)
           pedido.productoPersonalizado ||= descripcion === 'Envió foto(s) de referencia' ? 'Ramo personalizado con foto de referencia' : descripcion
+          pedido.estadoFlujo = 'esperando_precio_equipo'
+          pedido.fotoReferenciaBase64 = mediaAcumulado[0]?.base64
+          pedido.fotoReferenciaMimetype = mediaAcumulado[0]?.mimetype
+          pedido.fotoReferenciaCaption = descripcion
+          pedido.fotoReferenciaRecibidaEn = new Date().toISOString()
+          pedido.detallesEspeciales = descripcion
           persistirPedido(clienteId, telefonoReal, 'cotizacion', descripcion).catch(() => {})
           enviarAlertaCotizacion(telefonoReal, descripcion).catch(() => {})
           notificarEmpleadosWhatsApp(
@@ -1831,22 +1953,34 @@ async function ventaCerradaHandler(clienteId: string, venta: VentaCerrada, telef
   VENTAS_CERRADAS.add(clienteId)
 
   const numeroReal = telefono.startsWith('+') ? telefono : `+${telefono}`
+  const pedido = pedidoActual(clienteId)
+  pedido.metodoPago ||= 'transferencia'
+  pedido.estadoFlujo = 'pagado_transferencia'
+  pedido.cerradoEn = new Date().toISOString()
 
   console.log(`[bot] 💰 Venta cerrada: ${venta.cliente} — ${venta.producto} — ${venta.total}`)
-  await registrarVenta(venta.cliente, numeroReal, venta.producto, venta.total, venta.direccion)
+  await registrarVenta(venta.cliente, numeroReal, venta.producto, venta.total, venta.direccion, 'transferencia')
   await persistirPedido(clienteId, numeroReal, 'pagado')
-  resetearPedidoCliente(clienteId)
 
   const alertaVenta = {
     ...venta,
     numeroCliente: numeroReal,
+    precioArreglo: precioArregloTexto(clienteId),
+    precioEnvio: pedido?.envio ? `$${pedido.envio.precio.toFixed(2)} MXN (${pedido.envio.zona})` : undefined,
+    metodoPago: 'Transferencia',
+    detalles: pedido?.detallesEspeciales ?? pedido?.nota,
+    tieneFotoReferencia: Boolean(pedido?.fotoReferenciaBase64),
+    fechaHora: [pedido?.fechaEntrega, pedido?.horaEntrega].filter(Boolean).join(' ') || undefined,
   }
   enviarAlertaVentaCerrada(alertaVenta).catch(err => console.error('[bot] Telegram venta:', err))
+  resetearPedidoCliente(clienteId)
 }
 
 async function pedidoApartadoHandler(clienteId: string, venta: VentaCerrada, telefono: string, metodoPago: string): Promise<void> {
   const numeroReal = telefono.startsWith('+') ? telefono : `+${telefono}`
-  const pedido = PEDIDO_EN_CURSO.get(clienteId)
+  const pedido = pedidoActual(clienteId)
+  pedido.estadoFlujo = 'apartado_sucursal'
+  pedido.cerradoEn = new Date().toISOString()
   console.log(`[bot] 📦 Pedido apartado: ${venta.cliente} — ${venta.producto} — ${venta.total}`)
   await persistirPedido(clienteId, numeroReal, 'apartado')
   enviarAlertaPedidoApartado({
@@ -1858,6 +1992,9 @@ async function pedidoApartadoHandler(clienteId: string, venta: VentaCerrada, tel
     entrega: venta.direccion,
     metodoPago,
     numeroCliente: numeroReal,
+    detalles: pedido?.detallesEspeciales ?? pedido?.nota,
+    tieneFotoReferencia: Boolean(pedido?.fotoReferenciaBase64),
+    fechaHora: [pedido?.fechaEntrega, pedido?.horaEntrega].filter(Boolean).join(' ') || undefined,
   }).catch(err => console.error('[bot] Telegram apartado:', err))
   resetearPedidoActivo(clienteId)
 }
@@ -2054,6 +2191,8 @@ async function manejarMensajeEntrante(msg: any): Promise<void> {
         const pedido = pedidoActual(remoteJid)
         pedido.productoPersonalizado ||= 'Ramo personalizado'
         pedido.precioPersonalizado = precioAgente
+        pedido.precioConfirmadoPor = 'equipo'
+        pedido.estadoFlujo = 'precio_confirmado'
         persistirPedido(remoteJid, num, 'cotizacion', `[Agente: ${body.trim()}]`).catch(() => {})
       }
     }

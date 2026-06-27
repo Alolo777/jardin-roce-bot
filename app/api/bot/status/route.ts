@@ -30,12 +30,24 @@ export async function GET() {
 
     let pedidosMetricas: any[] = []
     try {
-      const { data: pedidos } = await supabaseAdmin
+      let pedidos: any[] | null = null
+      const pedidosMetricasExtendidos = await supabaseAdmin
         .from('pedidos_bot')
-        .select('telefono, cliente_nombre, producto, total, zona_envio, precio_envio, direccion, sucursal, metodo_pago, estado, actualizado_en')
+        .select('telefono, cliente_nombre, producto, total, zona_envio, precio_envio, direccion, sucursal, metodo_pago, estado, estado_flujo, fecha_entrega, hora_entrega, foto_referencia_base64, actualizado_en')
         .in('estado', ['apartado', 'pagado', 'entregado'])
         .gte('actualizado_en', inicio.toISOString())
         .lte('actualizado_en', fin.toISOString())
+      pedidos = pedidosMetricasExtendidos.data
+      const pedidosError = pedidosMetricasExtendidos.error
+      if (pedidosError && /estado_flujo|fecha_entrega|foto_referencia/i.test(pedidosError.message || '')) {
+        const retry = await supabaseAdmin
+          .from('pedidos_bot')
+          .select('telefono, cliente_nombre, producto, total, zona_envio, precio_envio, direccion, sucursal, metodo_pago, estado, actualizado_en')
+          .in('estado', ['apartado', 'pagado', 'entregado'])
+          .gte('actualizado_en', inicio.toISOString())
+          .lte('actualizado_en', fin.toISOString())
+        pedidos = retry.data
+      }
       pedidosMetricas = pedidos ?? []
     } catch {
       pedidosMetricas = []
@@ -102,15 +114,48 @@ export async function GET() {
     if (msgsError) throw msgsError
 
     let pedidosActivos: any[] = []
+    let pedidosResumen = {
+      cotizacionesPendientes: 0,
+      esperandoPrecioEquipo: 0,
+      precioConfirmado: 0,
+      esperandoDatos: 0,
+      apartadosSucursal: 0,
+      pagadosTransferencia: 0,
+      conFotoReferencia: 0,
+    }
     let zonasAmbiguasPendientes = 0
     try {
-      const { data: pedidos } = await supabaseAdmin
+      let pedidos: any[] | null = null
+      const pedidosExtendidos = await supabaseAdmin
         .from('pedidos_bot')
-        .select('id, cliente_id, telefono, estado, cliente_nombre, producto, precio_arreglo, zona_envio, precio_envio, direccion, sucursal, metodo_pago, nota, total, ultimo_mensaje, requiere_revision, actualizado_en')
+        .select('id, cliente_id, telefono, estado, estado_flujo, cliente_nombre, producto, precio_arreglo, zona_envio, precio_envio, direccion, sucursal, metodo_pago, nota, total, ultimo_mensaje, requiere_revision, fecha_entrega, hora_entrega, detalles_especiales, precio_confirmado_por, foto_referencia_base64, actualizado_en')
         .in('estado', ['cotizacion', 'apartado'])
         .order('actualizado_en', { ascending: false })
-        .limit(8)
+        .limit(20)
+      pedidos = pedidosExtendidos.data
+      const pedidosError = pedidosExtendidos.error
+
+      if (pedidosError && /estado_flujo|fecha_entrega|detalles_especiales|precio_confirmado_por|foto_referencia/i.test(pedidosError.message || '')) {
+        const retry = await supabaseAdmin
+          .from('pedidos_bot')
+          .select('id, cliente_id, telefono, estado, cliente_nombre, producto, precio_arreglo, zona_envio, precio_envio, direccion, sucursal, metodo_pago, nota, total, ultimo_mensaje, requiere_revision, actualizado_en')
+          .in('estado', ['cotizacion', 'apartado'])
+          .order('actualizado_en', { ascending: false })
+          .limit(20)
+        pedidos = retry.data
+      }
       pedidosActivos = pedidos ?? []
+      pedidosResumen = pedidosActivos.reduce((acc, pedido) => {
+        const flujo = pedido.estado_flujo || pedido.estado
+        if (pedido.estado === 'cotizacion') acc.cotizacionesPendientes++
+        if (flujo === 'esperando_precio_equipo') acc.esperandoPrecioEquipo++
+        if (flujo === 'precio_confirmado') acc.precioConfirmado++
+        if (['esperando_fecha_hora', 'esperando_entrega', 'esperando_nombre', 'esperando_pago'].includes(flujo)) acc.esperandoDatos++
+        if (flujo === 'apartado_sucursal' || (pedido.estado === 'apartado' && /recoger|efectivo|tarjeta/i.test(`${pedido.metodo_pago || ''}`))) acc.apartadosSucursal++
+        if (flujo === 'pagado_transferencia' || pedido.estado === 'pagado') acc.pagadosTransferencia++
+        if (pedido.foto_referencia_base64) acc.conFotoReferencia++
+        return acc
+      }, pedidosResumen)
 
       const { count } = await supabaseAdmin
         .from('zonas_envio_ambiguas')
@@ -211,6 +256,7 @@ export async function GET() {
       productosTop,
       ventasRecientes,
       pedidosActivos,
+      pedidosResumen,
       zonasAmbiguasPendientes,
       clientesAtendidosHoy: mensajesHoy ?? 0,
     })
