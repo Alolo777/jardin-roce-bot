@@ -827,7 +827,7 @@ function esTextoReferenciaOCotizacion(texto: string): boolean {
 
 function extraerFechaHoraPedido(texto: string): { fecha?: string; hora?: string } {
   const fecha = texto.match(/\b(hoy|ma[ñn]ana|pasado\s+ma[ñn]ana|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|\d{1,2}\s+de\s+[a-záéíóúñ]+)\b/i)?.[0]
-  const hora = texto.match(/\b(a\s+las\s*\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?|\d{1,2}(?::\d{2})\s*(?:am|pm|a\.m\.|p\.m\.)?|\d{1,2}\s*(?:am|pm|a\.m\.|p\.m\.)|en\s+la\s+ma[ñn]ana|por\s+la\s+ma[ñn]ana|en\s+la\s+tarde|por\s+la\s+tarde|mediod[ií]a)\b/i)?.[0]
+  const hora = texto.match(/\b(a\s+las\s*\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?|\d{1,2}(?::\d{2})\s*(?:am|pm|a\.m\.|p\.m\.)?|\d{1,2}\s*(?:am|pm|a\.m\.|p\.m\.)|en\s+la\s+ma[ñn]ana|por\s+la\s+ma[ñn]ana|temprano|al\s+abrir|en\s+la\s+tarde|por\s+la\s+tarde|mediod[ií]a)\b/i)?.[0]
   return { fecha: fecha?.trim(), hora: hora?.trim() }
 }
 
@@ -1294,6 +1294,11 @@ function precioArregloTexto(clienteId: string): string {
   const pedido = PEDIDO_EN_CURSO.get(clienteId)
   const precio = pedido?.arreglo?.precio ?? ARREGLO_ELEGIDO.get(clienteId)?.precio ?? pedido?.precioPersonalizado ?? 0
   return `$${precio.toFixed(2)} MXN`
+}
+
+function totalDashboardPedido(clienteId: string, fallback: string): string {
+  const precio = precioPedidoActual(clienteId)
+  return precio > 0 ? `$${precio.toFixed(2)} MXN` : fallback
 }
 
 function faltaFechaHoraParaCerrar(clienteId: string): boolean {
@@ -2039,6 +2044,7 @@ async function procesarMensaje(msg: any): Promise<void> {
           direccion: venta.direccion,
           rawToken: '',
         }, await numeroRealPromise)
+        ventaCerrada = true
       }
     }
 
@@ -2046,6 +2052,9 @@ async function procesarMensaje(msg: any): Promise<void> {
       const venta = ventaDesdeEstado(clienteId)
       if (venta) {
         const metodo = pedidoActual(clienteId).metodoPago === 'tarjeta_recoger' ? 'Tarjeta al recoger' : 'Efectivo al recoger'
+        const confirmacion = `¡Listo, ${venta.cliente}! 🌷 Tu pedido queda apartado para ${venta.direccion}. Total: ${venta.total}. Pagas al recoger.`
+        await responderMensaje(msg, confirmacion)
+        await agregarAlHistorial(telefono, 'assistant', confirmacion)
         await pedidoApartadoHandler(clienteId, venta, await numeroRealPromise, metodo)
         ventaCerrada = true
       }
@@ -2173,7 +2182,7 @@ async function ventaCerradaHandler(clienteId: string, venta: VentaCerrada, telef
   pedido.cerradoEn = new Date().toISOString()
 
   console.log(`[bot] 💰 Venta cerrada: ${venta.cliente} — ${venta.producto} — ${venta.total}`)
-  await registrarVenta(venta.cliente, numeroReal, venta.producto, venta.total, venta.direccion, 'transferencia')
+  await registrarVenta(venta.cliente, numeroReal, venta.producto, totalDashboardPedido(clienteId, venta.total), venta.direccion, 'transferencia')
   await persistirPedido(clienteId, numeroReal, 'pagado')
 
   const alertaVenta = {
@@ -2196,6 +2205,7 @@ async function pedidoApartadoHandler(clienteId: string, venta: VentaCerrada, tel
   pedido.estadoFlujo = 'apartado_sucursal'
   pedido.cerradoEn = new Date().toISOString()
   console.log(`[bot] 📦 Pedido apartado: ${venta.cliente} — ${venta.producto} — ${venta.total}`)
+  await registrarVenta(venta.cliente, numeroReal, venta.producto, totalDashboardPedido(clienteId, venta.total), venta.direccion, metodoPago)
   await persistirPedido(clienteId, numeroReal, 'apartado')
   enviarAlertaPedidoApartado({
     cliente: venta.cliente,
