@@ -789,7 +789,7 @@ function extraerTotalNumerico(total: string): number {
 
   // Si solo hay desglose tipo "ramo $500 + envio $80", registrar la suma.
   if (/[+]/.test(total) && montos.length > 1) {
-    return montos.reduce((sum, monto) => sum + normalizar(monto), 0)
+    return Array.from(montos).reduce((sum, monto) => sum + normalizar(monto), 0)
   }
 
   return primero
@@ -1242,9 +1242,14 @@ function aplicarDatosPedidoDesdeTexto(clienteId: string, texto: string): void {
 
 function contextoEsperaComprobante(clienteId: string, textoTurno: string, historialRecienteTexto: string): boolean {
   const pedido = PEDIDO_EN_CURSO.get(clienteId)
-  const contextoPago = pedido?.metodoPago === 'transferencia' || pedido?.estadoFlujo === 'esperando_pago' || /comprobante|transferencia|pago\s+por\s+transferencia|mandame\s+el\s+comprobante|m[aá]ndame\s+el\s+comprobante|cuenta\s*:?\s*4152|bbva|devi\s+am[eé]rica/i.test(historialRecienteTexto)
+  const contextoPago = pedido?.metodoPago === 'transferencia' || pedido?.estadoFlujo === 'esperando_pago' || /comprobante|pago\s+por\s+transferencia|mandame\s+(?:tu\s+)?comprobante|m[aá]ndame\s+(?:tu\s+)?comprobante|cuenta\s*(?:bbva)?\s*:?\s*4152|bbva|devi\s+am[eé]rica|pon\s+tu\s+nombre\s+en\s+concepto|cuando\s+est[eé]\s+listo/i.test(historialRecienteTexto)
   const confirmaTurno = /\b(listo|claro|va|vale|ya\s+est[aá]|hecho|te\s+lo\s+mand[oó]|lo\s+mand[oó])\b/i.test(textoTurno)
-  return Boolean(contextoPago && (confirmaTurno || esTextoComprobante(textoTurno) || textoTurno === '[Imagen sin texto]'))
+  const imagenSinTexto = !textoTurno.trim() || /^\[Imagen sin texto\]$/i.test(textoTurno.trim())
+  return Boolean(contextoPago && (imagenSinTexto || confirmaTurno || esTextoComprobante(textoTurno)))
+}
+
+function respuestaPideComprobante(texto: string): boolean {
+  return /(?:bbva|4152|devi\s+am[eé]rica|m[aá]ndame\s+(?:tu\s+)?comprobante|comprobante\s+cuando\s+est[eé]\s+listo|pon\s+tu\s+nombre\s+en\s+concepto)/i.test(texto)
 }
 
 function enviarMediaTelegram(base64: string, caption: string, mimetype: string): void {
@@ -1288,7 +1293,7 @@ async function procesarMediaAcumulado(clienteId: string, telefono: string, texto
 
   MEDIA_POR_CLIENTE.delete(clienteId)
   const historial = await obtenerHistorial(telefono)
-  const historialRecienteTexto = historial.slice(-3).map(m => m.content).join(' ')
+  const historialRecienteTexto = historial.slice(-8).map(m => m.content).join(' ')
   const captionsTexto = mediaAcumulado.map(m => m.caption).filter(Boolean).join(' ')
   const textoTurno = `${textoCliente} ${captionsTexto}`.trim()
   const textoClasificacion = `${textoTurno} ${historialRecienteTexto}`
@@ -2059,6 +2064,12 @@ async function procesarMensaje(msg: any): Promise<void> {
 
         await responderMensaje(msg, mensajeParaEnviar)
         await agregarAlHistorial(telefono, 'assistant', mensajeParaEnviar)
+        if (respuestaPideComprobante(mensajeParaEnviar) && tieneArregloVerificado(clienteId)) {
+          const pedido = pedidoActual(clienteId)
+          pedido.metodoPago = 'transferencia'
+          pedido.estadoFlujo = 'esperando_pago'
+          persistirPedido(clienteId, await numeroRealPromise, 'apartado', 'Esperando comprobante de transferencia').catch(() => {})
+        }
       }
 
     }
