@@ -543,6 +543,8 @@ const INTERES_COMPRA_NOTIFICADO = new Map<string, number>()
 const RECLAMACION_NOTIFICADA = new Map<string, number>()
 const ENVIO_NOTIFICADO = new Map<string, number>()
 const FOTOS_NOTIFICADO = new Map<string, number>()
+const FOTOS_DISPONIBLES_RECIENTES = new Map<string, number>()
+const FOTOS_DISPONIBLES_TTL_MS = 2 * 60 * 60_000
 
 function detectarFrustracion(texto: string): boolean {
   const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -1004,6 +1006,7 @@ interface PedidoEnCurso {
   fotoReferenciaRecibidaEn?: string
   detallesEspeciales?: string
   precioConfirmadoPor?: 'equipo' | 'ia' | 'cliente' | 'manual'
+  esperandoPrecioEnvio?: boolean
   cerradoEn?: string
 }
 
@@ -1013,6 +1016,27 @@ function pedidoActual(clienteId: string) {
   const pedido = PEDIDO_EN_CURSO.get(clienteId) ?? {}
   PEDIDO_EN_CURSO.set(clienteId, pedido)
   return pedido
+}
+
+function marcarFotosDisponibles(clienteId: string): void {
+  FOTOS_DISPONIBLES_RECIENTES.set(clienteId, Date.now())
+}
+
+function hayFotosDisponiblesRecientes(clienteId: string): boolean {
+  const timestamp = FOTOS_DISPONIBLES_RECIENTES.get(clienteId)
+  return Boolean(timestamp && Date.now() - timestamp < FOTOS_DISPONIBLES_TTL_MS)
+}
+
+function esSolicitudFotosDisponibles(texto: string): boolean {
+  return /\b(fotos?|ver.*arregl|muestra|enseña|manda.*foto|averlos|verlos|qu[eé].*(?:ramos?|ramitos?|arreglos?|flores?).*tiene(?:n)?|qu[eé]\s+tiene(?:n)?\s+disponible|hay.*foto|puedo.*ver|quisiera.*ver|ramitos?.*disponibles?|ramos?.*disponibles?|arreglos?.*disponibles?|disponibles?\s+hoy)\b/i.test(texto)
+}
+
+function esMensajeFotosDisponiblesEquipo(texto: string): boolean {
+  return /\b(esos?|estos?|ramitos?|ramos?|arreglos?)\b.*\b(disponibles?|tenemos|hay)\b|\b(disponibles?|tenemos|hay)\b.*\b(esos?|estos?|ramitos?|ramos?|arreglos?)\b/i.test(texto)
+}
+
+function clienteEligeFotoDisponible(texto: string): boolean {
+  return /\b(me\s+gust[oó]|me\s+interesa|quiero|quisiera|ap[aá]rtame|apartame|apartarlo|este|esta|ese|esa|el\s+de\s+la\s+foto|la\s+de\s+la\s+foto|qu[eé]\s+precio|cu[aá]nto|cuanto)\b/i.test(texto)
 }
 
 function limpiarDireccionCliente(texto: string): string {
@@ -1146,6 +1170,7 @@ function resetearPedidoCliente(clienteId: string): void {
   ARREGLO_ELEGIDO.delete(clienteId)
   VENTAS_CERRADAS.delete(clienteId)
   VENTA_ACTUAL.delete(clienteId)
+  FOTOS_DISPONIBLES_RECIENTES.delete(clienteId)
 }
 
 function resetearPedidoActivo(clienteId: string): void {
@@ -1656,6 +1681,31 @@ async function procesarMensaje(msg: any): Promise<void> {
     // ── Saludo dinámico en primer mensaje ─────────────────────────
     const historialCompleto = await obtenerHistorial(telefono)
     const historialTexto = historialCompleto.map(m => m.content).join('\n').toLowerCase()
+    const pideFotosDisponibles = esSolicitudFotosDisponibles(textoCliente) &&
+      !(/\b(pague|pag[uú]e|comprobante|transfer|ya\s*envi[eé])\b/i.test(textoCliente))
+    if (pideFotosDisponibles) {
+      resetearPedidoActivo(clienteId)
+      marcarFotosDisponibles(clienteId)
+      contextoExtra +=
+        `\n\n[CLIENTE INICIA NUEVA SELECCION CON FOTOS DISPONIBLES] ` +
+        `El cliente esta dejando atras cualquier cotizacion inconclusa anterior. No reutilices productos, precios, envio, nombre ni pago anteriores. ` +
+        `Pide al equipo que le mande fotos disponibles y espera a que el cliente elija una foto nueva.`
+    }
+
+    const seleccionaFotoDisponible = !pideFotosDisponibles && hayFotosDisponiblesRecientes(clienteId) && clienteEligeFotoDisponible(textoCliente)
+    if (seleccionaFotoDisponible) {
+      resetearPedidoActivo(clienteId)
+      FOTOS_DISPONIBLES_RECIENTES.delete(clienteId)
+      const pedido = pedidoActual(clienteId)
+      pedido.productoPersonalizado = 'Ramo elegido de fotos disponibles'
+      pedido.detallesEspeciales = 'Cliente eligio un ramo de las fotos disponibles enviadas por el equipo'
+      pedido.estadoFlujo = 'esperando_precio_equipo'
+      contextoExtra +=
+        `\n\n[CLIENTE ELIGIO UNA FOTO DISPONIBLE RECIENTE] ` +
+        `Es un pedido nuevo basado en fotos que envio el equipo. NO uses precios de cotizaciones anteriores. ` +
+        `Si el cliente pregunta precio, di que lo confirmas con el equipo; no inventes ni reutilices $400, $600 u otro precio viejo.`
+    }
+
     const mediaPendiente = MEDIA_POR_CLIENTE.get(clienteId)
     if (mediaPendiente && mediaPendiente.length > 0) {
       contextoExtra +=
@@ -1711,7 +1761,9 @@ async function procesarMensaje(msg: any): Promise<void> {
 
     if (pareceEnvio) {
       if ((mencionaDireccion || detectarLinkMaps(textoCliente)) && tieneArregloVerificado(clienteId)) {
-        pedidoActual(clienteId).direccion = limpiarDireccionCliente(textoCliente)
+        const pedido = pedidoActual(clienteId)
+        pedido.direccion = limpiarDireccionCliente(textoCliente)
+        pedido.esperandoPrecioEnvio = true
       }
       contextoExtra +=
         `\n\n[CLIENTE PREGUNTA POR ENVÍO] El cliente quiere saber sobre envío a domicilio. ` +
@@ -1829,9 +1881,7 @@ async function procesarMensaje(msg: any): Promise<void> {
     }
 
     // ── DETECCIÓN DE PETICIÓN DE FOTOS ──────────────────────────
-    const pideFotos = /fotos|ver.*arregl|muestra|enseña|manda.*foto|averlos|verlos|que.*tiene|hay.*foto|puedo.*ver|quisiera.*ver|me.*muestra|me.*enseña|tienes.*foto/i.test(textoCliente) &&
-      !(/\b(pague|comprobante|transfer|ya\s*envi[eé])\b/i.test(textoCliente)) &&
-      !VENTAS_CERRADAS.has(clienteId)
+    const pideFotos = pideFotosDisponibles && !VENTAS_CERRADAS.has(clienteId)
     if (pideFotos) {
       const ahoraFotos = FOTOS_NOTIFICADO.get(clienteId) ?? 0
       if (Date.now() - ahoraFotos > 60 * 60_000) {
@@ -1862,6 +1912,20 @@ async function procesarMensaje(msg: any): Promise<void> {
     }
     if (tipoMediaProcesada === 'comprobante') {
       const respuesta = 'Gracias, ya recibí tu comprobante 🌷 Lo registro para que el equipo continúe con tu pedido.'
+      await responderMensaje(msg, respuesta)
+      await agregarAlHistorial(telefono, 'assistant', respuesta)
+      return
+    }
+
+    if (seleccionaFotoDisponible && /\b(precio|cu[aá]nto|cuanto|saldr[ií]a|costar[ií]a)\b/i.test(textoCliente) && !tienePrecioConfirmado(clienteId)) {
+      const telefonoReal = await numeroRealPromise
+      await persistirPedido(clienteId, telefonoReal, 'cotizacion', 'Cliente eligio foto disponible, falta precio del equipo')
+      notificarEmpleadosWhatsApp(
+        `🌷 *Cliente eligió un ramo de las fotos disponibles:* ${telefonoReal}\n\n${textoCliente.slice(0, 300)}\n\nConfirma el precio real del ramo antes de continuar.`
+      ).catch(err => console.error('[bot] WhatsApp empleados precio foto disponible:', err))
+      const respuesta = detectarLinkMaps(textoCliente) || /\b(env[ií]o|env[ií]ar|domicilio|direcci[oó]n)\b/i.test(textoCliente)
+        ? 'Sí, podemos revisar el envío 🌷 Déjame confirmar con el equipo el precio real de ese ramo y el costo de envío antes de apartarlo.'
+        : 'Claro 🌷 Déjame confirmar con el equipo el precio real de ese ramo y te digo.'
       await responderMensaje(msg, respuesta)
       await agregarAlHistorial(telefono, 'assistant', respuesta)
       return
@@ -2333,14 +2397,18 @@ async function manejarMensajeEntrante(msg: any): Promise<void> {
   // Guardar mensajes enviados desde la cuenta (agente humano) al historial
   if (msg.key?.fromMe) {
     const telefonoDestino = remoteJid.replace(/@[^\s]*/g, '').trim()
-    if (telefonoDestino && body) {
+    if (telefonoDestino) {
       const num = telefonoDestino.startsWith('52') ? `+${telefonoDestino}` : telefonoDestino
+      if (msgType === 'image' || msgType === 'document') marcarFotosDisponibles(remoteJid)
+      if (!body) return
       agregarAlHistorial(num, 'assistant', `[Agente: ${body.trim()}]`)
+      if (esMensajeFotosDisponiblesEquipo(body)) marcarFotosDisponibles(remoteJid)
       const precioAgente = extraerPrecioRespuesta(body)
       if (precioAgente) {
         const pedido = pedidoActual(remoteJid)
-        if (/\b(env[ií]o|flete|reparto|domicilio|llevar)\b/i.test(body)) {
+        if (pedido.esperandoPrecioEnvio || /\b(env[ií]o|flete|reparto|domicilio|llevar)\b/i.test(body)) {
           pedido.envio = { zona: pedido.envio?.zona ?? 'Envío confirmado por equipo', precio: precioAgente }
+          pedido.esperandoPrecioEnvio = false
           if (pedido.precioPersonalizado || pedido.arreglo || ARREGLO_ELEGIDO.get(remoteJid)) pedido.estadoFlujo = 'esperando_pago'
         } else {
           pedido.productoPersonalizado ||= 'Ramo personalizado'
