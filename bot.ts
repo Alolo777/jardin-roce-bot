@@ -2397,10 +2397,20 @@ async function manejarMensajeEntrante(msg: any): Promise<void> {
 
   // Ignorar números silenciados
   const ignorados = await cargarIgnorados()
-  const numeroParaIgnorar = remoteJid.replace(/@[^\s]*/g, '')
-  const variantesMensaje = variantesTelefono(numeroParaIgnorar)
+  const numeroRealParaIgnorar = await obtenerNumeroReal(msg)
+  const candidatosIgnorar = [
+    numeroRealParaIgnorar,
+    remoteJid,
+    msg.key?.participant,
+    msg.key?.remoteJidAlt,
+    msg.key?.participantAlt,
+    msg.key?.senderPn,
+    msg.senderPn,
+    msg.participant,
+  ].filter(Boolean) as string[]
+  const variantesMensaje = [...new Set(candidatosIgnorar.flatMap(n => variantesTelefono(jidANumero(n))))]
   if (!msg.key?.fromMe && variantesMensaje.some(n => ignorados.includes(n))) {
-    console.log(`[bot] 🔇 Número ignorado: ${numeroParaIgnorar}`)
+    console.log(`[bot] 🔇 Número ignorado: ${numeroRealParaIgnorar || remoteJid}`)
     return
   }
 
