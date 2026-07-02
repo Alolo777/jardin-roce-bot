@@ -82,7 +82,7 @@ async function enviar(texto: string, intentos = 3): Promise<void> {
 export interface DatosVentaCerrada {
   cliente: string; producto: string; total: string
   direccion: string; numeroCliente: string
-  precioArreglo?: string; precioEnvio?: string; metodoPago?: string
+  precioArreglo?: string; precioExtras?: string; precioEnvio?: string; metodoPago?: string
   detalles?: string; tieneFotoReferencia?: boolean; fechaHora?: string
 }
 
@@ -96,6 +96,7 @@ export async function enviarAlertaVentaCerrada(datos: DatosVentaCerrada): Promis
     ...(datos.detalles ? [`📝 *Detalles:* ${esc(datos.detalles)}`] : []),
     ...(datos.tieneFotoReferencia !== undefined ? [`🖼️ *Foto referencia:* ${datos.tieneFotoReferencia ? 'sí' : 'no'}`] : []),
     ...(datos.precioArreglo ? [`🌷 *Ramo:* ${esc(datos.precioArreglo)}`] : []),
+    ...(datos.precioExtras ? [`➕ *Extras:* ${esc(datos.precioExtras)}`] : []),
     ...(datos.precioEnvio ? [`🚚 *Envío:* ${esc(datos.precioEnvio)}`] : []),
     `💰 *Total:* ${esc(datos.total)}`,
     `📍 *Entrega:* ${esc(datos.direccion)}`,
@@ -206,6 +207,7 @@ export interface DatosApartadoPedido {
   cliente: string
   producto: string
   precioArreglo: string
+  precioExtras?: string
   precioEnvio?: string
   total: string
   entrega: string
@@ -226,6 +228,7 @@ export async function enviarAlertaPedidoApartado(datos: DatosApartadoPedido): Pr
     ...(datos.detalles ? [`📝 *Detalles:* ${esc(datos.detalles)}`] : []),
     ...(datos.tieneFotoReferencia !== undefined ? [`🖼️ *Foto referencia:* ${datos.tieneFotoReferencia ? 'sí' : 'no'}`] : []),
     `🌷 *Ramo:* ${esc(datos.precioArreglo)}`,
+    ...(datos.precioExtras ? [`➕ *Extras:* ${esc(datos.precioExtras)}`] : []),
     ...(datos.precioEnvio ? [`🚚 *Envío:* ${esc(datos.precioEnvio)}`] : []),
     `💰 *Total:* ${esc(datos.total)}`,
     `📍 *Entrega:* ${esc(datos.entrega)}`,

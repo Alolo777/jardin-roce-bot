@@ -20,7 +20,7 @@ import { Buffer } from 'node:buffer'
 
 dotenv.config({ path: '.env.local' })
 
-import { getAIResponse } from './lib/ai'
+import { clasificarImagenVenta, getAIResponse } from './lib/ai'
 import {
   enviarAlertaVentaCerrada,
   enviarAlertaPedidoWeb,
@@ -987,6 +987,11 @@ const VENTA_ACTUAL     = new Map<string, VentaCerrada>()
 const ARREGLO_ELEGIDO  = new Map<string, ArregloConFoto>()
 type EstadoFlujoPedido = 'sin_pedido' | 'cotizando' | 'esperando_precio_equipo' | 'precio_confirmado' | 'esperando_fecha_hora' | 'esperando_entrega' | 'esperando_nombre' | 'esperando_pago' | 'apartado_sucursal' | 'pagado_transferencia' | 'cerrado' | 'cancelado'
 
+interface PedidoExtra {
+  nombre: string
+  precio: number
+}
+
 interface PedidoEnCurso {
   arreglo?: ArregloConFoto
   productoPersonalizado?: string
@@ -1005,6 +1010,7 @@ interface PedidoEnCurso {
   fotoReferenciaCaption?: string
   fotoReferenciaRecibidaEn?: string
   detallesEspeciales?: string
+  extras?: PedidoExtra[]
   precioConfirmadoPor?: 'equipo' | 'ia' | 'cliente' | 'manual'
   esperandoPrecioEnvio?: boolean
   cerradoEn?: string
@@ -1039,6 +1045,39 @@ function clienteEligeFotoDisponible(texto: string): boolean {
   return /\b(me\s+gust[oó]|me\s+interesa|quiero|quisiera|ap[aá]rtame|apartame|apartarlo|este|esta|ese|esa|el\s+de\s+la\s+foto|la\s+de\s+la\s+foto|qu[eé]\s+precio|cu[aá]nto|cuanto)\b/i.test(texto)
 }
 
+function detectarExtrasPedido(texto: string): PedidoExtra[] {
+  const extras = new Map<string, PedidoExtra>()
+  if (/\b(notita|nota\s+personalizada|nota|tarjeta|dedicatoria|mensaje\s+(?:escrito|impreso)|papelito)\b/i.test(texto)) {
+    extras.set('Nota personalizada', { nombre: 'Nota personalizada', precio: 10 })
+  }
+  return [...extras.values()]
+}
+
+function agregarExtrasPedido(clienteId: string, extras: PedidoExtra[]): void {
+  if (extras.length === 0) return
+  const pedido = pedidoActual(clienteId)
+  const actuales = new Map((pedido.extras ?? []).map(extra => [extra.nombre.toLowerCase(), extra]))
+  for (const extra of extras) actuales.set(extra.nombre.toLowerCase(), extra)
+  pedido.extras = [...actuales.values()]
+}
+
+function totalExtrasPedido(clienteId: string): number {
+  const pedido = PEDIDO_EN_CURSO.get(clienteId)
+  return (pedido?.extras ?? []).reduce((sum, extra) => sum + extra.precio, 0)
+}
+
+function extrasPedidoTexto(clienteId: string): string | null {
+  const pedido = PEDIDO_EN_CURSO.get(clienteId)
+  const extras = pedido?.extras ?? []
+  if (extras.length === 0) return null
+  return extras.map(extra => `${extra.nombre} $${extra.precio.toFixed(2)} MXN`).join(', ')
+}
+
+function detallesConExtras(clienteId: string, detalles?: string | null): string | undefined {
+  const extras = extrasPedidoTexto(clienteId)
+  return [detalles || '', extras ? `Extras: ${extras}` : ''].filter(Boolean).join('\n') || undefined
+}
+
 function limpiarDireccionCliente(texto: string): string {
   return String(texto || '')
     .replace(GOOGLE_MAPS_REGEX, '')
@@ -1053,7 +1092,7 @@ function totalPedidoNumerico(clienteId: string): number | null {
   const arreglo = pedido?.arreglo ?? ARREGLO_ELEGIDO.get(clienteId)
   const subtotal = arreglo?.precio ?? pedido?.precioPersonalizado
   if (!subtotal) return null
-  return subtotal + (pedido?.envio?.precio ?? 0)
+  return subtotal + totalExtrasPedido(clienteId) + (pedido?.envio?.precio ?? 0)
 }
 
 function estadoFlujoDesdeEstado(estado: 'cotizacion' | 'apartado' | 'pagado' | 'entregado' | 'cancelado', pedido?: PedidoEnCurso): EstadoFlujoPedido {
@@ -1071,14 +1110,16 @@ function resumirPedidoOperativo(clienteId: string, telefono: string | null): str
   const pedido = PEDIDO_EN_CURSO.get(clienteId)
   const arreglo = pedido?.arreglo ?? ARREGLO_ELEGIDO.get(clienteId)
   const subtotal = arreglo?.precio ?? pedido?.precioPersonalizado ?? 0
+  const extras = totalExtrasPedido(clienteId)
   const envio = pedido?.envio?.precio ?? 0
-  const total = subtotal + envio
+  const total = subtotal + extras + envio
   return [
     `cliente_nombre: ${pedido?.nombre ?? 'Por confirmar'}`,
     `telefono: ${telefono ?? 'Por confirmar'}`,
     `producto: ${arreglo?.nombre ?? pedido?.productoPersonalizado ?? 'Por confirmar'}`,
     `detalles_especiales: ${pedido?.detallesEspeciales ?? pedido?.nota ?? 'Sin notas'}`,
     `precio_arreglo: ${subtotal || 'Por confirmar'}`,
+    `extras: ${extrasPedidoTexto(clienteId) ?? 'Sin extras'}`,
     `precio_envio: ${envio || 0}`,
     `total: ${total || 'Por confirmar'}`,
     `entrega: ${pedido?.envio ? 'domicilio' : (pedido?.sucursal ? 'sucursal' : 'Por confirmar')}`,
@@ -1123,7 +1164,7 @@ async function persistirPedido(clienteId: string, telefono: string | null, estad
       foto_referencia_caption: pedido?.fotoReferenciaCaption ?? null,
       foto_referencia_recibida_en: pedido?.fotoReferenciaRecibidaEn ?? null,
       resumen_pedido: resumirPedidoOperativo(clienteId, telefono),
-      detalles_especiales: pedido?.detallesEspeciales ?? pedido?.nota ?? null,
+      detalles_especiales: detallesConExtras(clienteId, pedido?.detallesEspeciales ?? pedido?.nota) ?? null,
       precio_confirmado_por: pedido?.precioConfirmadoPor ?? null,
       cerrado_en: pedido?.cerradoEn ?? null,
     }
@@ -1186,14 +1227,18 @@ function ventaDesdeEstado(clienteId: string, fallback?: VentaCerrada): VentaCerr
 
   const producto = elegido?.nombre ?? pedido?.productoPersonalizado ?? fallback?.producto ?? 'Pedido'
   const subtotal = elegido?.precio ?? pedido?.precioPersonalizado ?? (parseFloat(String(fallback?.total ?? '').replace(/[^0-9.]/g, '')) || 0)
+  const extras = totalExtrasPedido(clienteId)
   const envio = pedido?.envio?.precio ?? 0
-  const total = subtotal + envio
+  const total = subtotal + extras + envio
   const direccion = pedido?.envio?.zona
     ? `${pedido.envio.zona}${pedido.direccion ? ` — ${pedido.direccion}` : ''}`
     : (pedido?.sucursal ? `Sucursal ${pedido.sucursal}` : (pedido?.direccion ?? fallback?.direccion ?? 'Por confirmar'))
 
-  const totalTexto = pedido?.envio
-    ? `$${total.toFixed(2)} MXN (ramo $${subtotal.toFixed(2)} + envío $${envio.toFixed(2)})`
+  const desglose = [`ramo $${subtotal.toFixed(2)}`]
+  if (extras > 0) desglose.push(`extras $${extras.toFixed(2)}`)
+  if (envio > 0) desglose.push(`envío $${envio.toFixed(2)}`)
+  const totalTexto = desglose.length > 1
+    ? `$${total.toFixed(2)} MXN (${desglose.join(' + ')})`
     : `$${total.toFixed(2)} MXN`
 
   return {
@@ -1249,6 +1294,7 @@ function extraerNombrePedido(texto: string): string | null {
 function aplicarDatosPedidoDesdeTexto(clienteId: string, texto: string): void {
   if (!tieneArregloVerificado(clienteId)) return
   const pedido = pedidoActual(clienteId)
+  agregarExtrasPedido(clienteId, detectarExtrasPedido(texto))
   const nombre = extraerNombrePedido(texto)
   if (nombre) pedido.nombre = nombre
 
@@ -1297,8 +1343,8 @@ function precioArregloTexto(clienteId: string): string {
 }
 
 function totalDashboardPedido(clienteId: string, fallback: string): string {
-  const precio = precioPedidoActual(clienteId)
-  return precio > 0 ? `$${precio.toFixed(2)} MXN` : fallback
+  const total = totalPedidoNumerico(clienteId)
+  return total && total > 0 ? `$${total.toFixed(2)} MXN` : fallback
 }
 
 function faltaFechaHoraParaCerrar(clienteId: string): boolean {
@@ -1332,8 +1378,35 @@ async function procesarMediaAcumulado(clienteId: string, telefono: string, texto
   const pagoEnTurno = esTextoComprobante(textoTurno)
   const pagoReciente = esTextoComprobante(textoClasificacion)
   const esperaComprobante = contextoEsperaComprobante(clienteId, textoTurno, historialRecienteTexto)
-  const esComprobante = esperaComprobante || (!quiereCotizarTurno && (pagoEnTurno || pagoReciente))
-  const esReferencia = !esComprobante && (quiereCotizarTurno || (!pagoEnTurno && !pagoReciente))
+  let esComprobante = esperaComprobante || (!quiereCotizarTurno && (pagoEnTurno || pagoReciente))
+  let esReferencia = !esComprobante && (quiereCotizarTurno || (!pagoEnTurno && !pagoReciente))
+
+  const tieneImagen = mediaAcumulado.some(m => m.mimetype.startsWith('image/'))
+  const textoClaroDePago = pagoEnTurno
+  const textoClaroDeReferencia = quiereCotizarTurno && !pagoEnTurno
+  const clasificacionAmbigua = tieneImagen && !textoClaroDePago && !textoClaroDeReferencia && (esperaComprobante || pagoReciente || esComprobante)
+
+  if (clasificacionAmbigua) {
+    const pedido = PEDIDO_EN_CURSO.get(clienteId)
+    const contextoVision = [
+      `estado_flujo: ${pedido?.estadoFlujo ?? 'sin_pedido'}`,
+      `metodo_pago: ${pedido?.metodoPago ?? 'sin_confirmar'}`,
+      `tiene_arreglo: ${tieneArregloVerificado(clienteId) ? 'si' : 'no'}`,
+      `texto_turno: ${textoTurno || 'sin texto'}`,
+    ].join('\n')
+    const vision = await clasificarImagenVenta(historial, contextoVision, mediaAcumulado)
+    console.log(`[bot] 👁️ Clasificación imagen ${telefono}: ${vision.tipo} (${vision.razon})`)
+    if (vision.tipo === 'comprobante') {
+      esComprobante = true
+      esReferencia = false
+    } else if (vision.tipo === 'referencia') {
+      esComprobante = false
+      esReferencia = true
+    } else if (vision.tipo === 'otra') {
+      esComprobante = false
+      esReferencia = false
+    }
+  }
 
   for (const media of mediaAcumulado) {
     if (esComprobante) {
@@ -1361,10 +1434,12 @@ async function procesarMediaAcumulado(clienteId: string, telefono: string, texto
       enviarAlertaVentaCerrada({
         cliente: pedido.nombre ?? 'Verificar en chat',
         producto: pedido.productoPersonalizado ?? 'Verificar en conversación',
-        total: tienePrecioConfirmado(clienteId) ? precioArregloTexto(clienteId) : 'Verificar en conversación',
+        total: totalDashboardPedido(clienteId, 'Verificar en conversación'),
         direccion: pedido.direccion ?? pedido.sucursal ?? pedido.envio?.zona ?? 'Por confirmar',
         numeroCliente: telefono,
         metodoPago: 'Transferencia',
+        precioArreglo: tienePrecioConfirmado(clienteId) ? precioArregloTexto(clienteId) : undefined,
+        precioExtras: extrasPedidoTexto(clienteId) ?? undefined,
       }).catch(() => {})
     }
     return 'comprobante'
@@ -1901,6 +1976,13 @@ async function procesarMensaje(msg: any): Promise<void> {
     }
 
     aplicarDatosPedidoDesdeTexto(clienteId, textoCliente)
+    const extrasDetectados = extrasPedidoTexto(clienteId)
+    if (extrasDetectados) {
+      contextoExtra +=
+        `\n\n[EXTRAS DETECTADOS EN PEDIDO] ${extrasDetectados}. ` +
+        `Estos costos NO son precio del ramo. Mantén ramo, extras, envío y total separados. ` +
+        `Si aparece $10 por nota/tarjeta/dedicatoria, es solo extra; nunca digas que el ramo cuesta $10.`
+    }
 
     const tipoMediaProcesada = await procesarMediaAcumulado(clienteId, await numeroRealPromise, textoCliente, msg.pushName)
     if (tipoMediaProcesada === 'referencia') {
@@ -2032,10 +2114,13 @@ async function procesarMensaje(msg: any): Promise<void> {
       if (venta) {
         const pedido = PEDIDO_EN_CURSO.get(clienteId)
         const subtotal = pedido?.arreglo?.precio ?? ARREGLO_ELEGIDO.get(clienteId)?.precio ?? pedido?.precioPersonalizado ?? 0
-        const total = subtotal + (pedido?.envio?.precio ?? 0)
-        const totalTexto = pedido?.envio
-          ? `$${total.toFixed(2)} MXN (ramo $${subtotal.toFixed(2)} + envío $${(pedido?.envio?.precio ?? 0).toFixed(2)})`
-          : `$${total.toFixed(2)} MXN`
+        const extras = totalExtrasPedido(clienteId)
+        const envio = pedido?.envio?.precio ?? 0
+        const total = subtotal + extras + envio
+        const desglose = [`ramo $${subtotal.toFixed(2)}`]
+        if (extras > 0) desglose.push(`extras $${extras.toFixed(2)}`)
+        if (envio > 0) desglose.push(`envío $${envio.toFixed(2)}`)
+        const totalTexto = desglose.length > 1 ? `$${total.toFixed(2)} MXN (${desglose.join(' + ')})` : `$${total.toFixed(2)} MXN`
         if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
         await ventaCerradaHandler(clienteId, {
           cliente: venta.cliente,
@@ -2121,10 +2206,13 @@ async function procesarMensaje(msg: any): Promise<void> {
         )) {
           const pedido = PEDIDO_EN_CURSO.get(clienteId)
           const subtotal = pedido?.arreglo?.precio ?? ARREGLO_ELEGIDO.get(clienteId)?.precio ?? pedido?.precioPersonalizado ?? 0
-          const total = subtotal + (pedido?.envio?.precio ?? 0)
-          const totalTexto = pedido?.envio
-            ? `$${total.toFixed(2)} MXN (ramo $${subtotal.toFixed(2)} + envío $${(pedido?.envio?.precio ?? 0).toFixed(2)})`
-            : `$${total.toFixed(2)} MXN`
+          const extras = totalExtrasPedido(clienteId)
+          const envio = pedido?.envio?.precio ?? 0
+          const total = subtotal + extras + envio
+          const desglose = [`ramo $${subtotal.toFixed(2)}`]
+          if (extras > 0) desglose.push(`extras $${extras.toFixed(2)}`)
+          if (envio > 0) desglose.push(`envío $${envio.toFixed(2)}`)
+          const totalTexto = desglose.length > 1 ? `$${total.toFixed(2)} MXN (${desglose.join(' + ')})` : `$${total.toFixed(2)} MXN`
           if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
           ventaCerradaHandler(clienteId, {
             cliente: ventaEstado.cliente,
@@ -2189,6 +2277,7 @@ async function ventaCerradaHandler(clienteId: string, venta: VentaCerrada, telef
     ...venta,
     numeroCliente: numeroReal,
     precioArreglo: precioArregloTexto(clienteId),
+    precioExtras: extrasPedidoTexto(clienteId) ?? undefined,
     precioEnvio: pedido?.envio ? `$${pedido.envio.precio.toFixed(2)} MXN (${pedido.envio.zona})` : undefined,
     metodoPago: 'Transferencia',
     detalles: pedido?.detallesEspeciales ?? pedido?.nota,
@@ -2211,6 +2300,7 @@ async function pedidoApartadoHandler(clienteId: string, venta: VentaCerrada, tel
     cliente: venta.cliente,
     producto: venta.producto,
     precioArreglo: precioArregloTexto(clienteId),
+    precioExtras: extrasPedidoTexto(clienteId) ?? undefined,
     precioEnvio: pedido?.envio ? `$${pedido.envio.precio.toFixed(2)} MXN (${pedido.envio.zona})` : undefined,
     total: venta.total,
     entrega: venta.direccion,

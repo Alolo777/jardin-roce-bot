@@ -112,6 +112,88 @@ export interface MensajeChat {
   content: string
 }
 
+export type ClasificacionImagenVenta = 'comprobante' | 'referencia' | 'otra' | 'incierto'
+
+interface ImagenCliente {
+  base64: string
+  mimetype: string
+  caption?: string
+}
+
+export async function clasificarImagenVenta(
+  historial: MensajeChat[],
+  contexto: string,
+  imagenes: ImagenCliente[]
+): Promise<{ tipo: ClasificacionImagenVenta; razon: string }> {
+  if (imagenes.length === 0) return { tipo: 'incierto', razon: 'sin imagenes' }
+
+  const historialReciente = historial
+    .slice(-8)
+    .map(m => `${m.role}: ${m.content}`)
+    .join('\n')
+    .slice(-3000)
+
+  const prompt = [
+    'Clasifica las imagenes del cliente en una venta de floreria.',
+    'Responde SOLO JSON valido, sin markdown, con este formato: {"tipo":"comprobante|referencia|otra|incierto","razon":"max 120 caracteres"}.',
+    'comprobante = captura/foto de transferencia, recibo, ticket, deposito, banco o pago.',
+    'referencia = flores, ramo, arreglo floral, imagen de inspiracion/cotizacion o producto deseado.',
+    'otra = imagen no relacionada con pago ni flores.',
+    'incierto = no se puede determinar.',
+    'Si el historial dice que esperaba pago pero la imagen muestra flores, clasifica referencia.',
+    'Si el historial dice que cotizaba flores pero la imagen muestra banco/recibo, clasifica comprobante.',
+    '',
+    `Contexto operativo: ${contexto}`,
+    '',
+    `Historial reciente:\n${historialReciente || 'Sin historial'}`,
+    '',
+    `Captions: ${imagenes.map(i => i.caption).filter(Boolean).join(' | ') || 'Sin texto'}`,
+  ].join('\n')
+
+  try {
+    console.time('[ai.ts] Vision classify')
+    const completion = await conRetry(async () => {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 12_000)
+      try {
+        return await client.chat.completions.create(
+          {
+            model: MODEL,
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: prompt },
+                  ...imagenes.slice(0, 2).map(img => ({
+                    type: 'image_url',
+                    image_url: { url: `data:${img.mimetype || 'image/jpeg'};base64,${img.base64}` },
+                  })),
+                ],
+              },
+            ] as any,
+            max_tokens: 120,
+            temperature: 0,
+          },
+          { signal: controller.signal }
+        )
+      } finally {
+        clearTimeout(timeoutId)
+      }
+    }, 2)
+    console.timeEnd('[ai.ts] Vision classify')
+
+    const raw = completion.choices[0]?.message?.content?.trim() || ''
+    const parsed = JSON.parse(raw) as { tipo?: string; razon?: string }
+    const tipo = parsed.tipo === 'comprobante' || parsed.tipo === 'referencia' || parsed.tipo === 'otra' || parsed.tipo === 'incierto'
+      ? parsed.tipo
+      : 'incierto'
+    return { tipo, razon: String(parsed.razon || '').slice(0, 160) }
+  } catch (error) {
+    console.warn('[ai.ts] Error clasificando imagen:', error instanceof Error ? error.message : error)
+    return { tipo: 'incierto', razon: 'error vision' }
+  }
+}
+
 // ─── Función principal del agente ────────────────────────────────────────────
 export async function getAIResponse(
   historial: MensajeChat[],
