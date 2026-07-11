@@ -20,7 +20,7 @@ import { Buffer } from 'node:buffer'
 
 dotenv.config({ path: '.env.local' })
 
-import { clasificarImagenVenta, getAIResponse } from './lib/ai'
+import { clasificarConversacion, clasificarImagenVenta, getAIResponse, revisarRespuestaFlora } from './lib/ai'
 import {
   enviarAlertaVentaCerrada,
   enviarAlertaPedidoWeb,
@@ -544,7 +544,10 @@ const RECLAMACION_NOTIFICADA = new Map<string, number>()
 const ENVIO_NOTIFICADO = new Map<string, number>()
 const FOTOS_NOTIFICADO = new Map<string, number>()
 const FOTOS_DISPONIBLES_RECIENTES = new Map<string, number>()
+const ALERTAS_DEDUP = new Map<string, number>()
+const ULTIMA_INTERVENCION_HUMANA = new Map<string, { ts: number; texto: string; precio?: number }>()
 const FOTOS_DISPONIBLES_TTL_MS = 2 * 60 * 60_000
+const INTERVENCION_HUMANA_TTL_MS = 10 * 60_000
 
 function detectarFrustracion(texto: string): boolean {
   const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -581,6 +584,37 @@ function debeNotificarReclamacion(clienteId: string, tipo: 'cancelacion' | 'quej
   if (ahora - ultima < 20 * 60_000) return false
   RECLAMACION_NOTIFICADA.set(key, ahora)
   return true
+}
+
+function debeEnviarAlertaDedup(clienteId: string, tipo: string, detalle: string, ttlMs: number): boolean {
+  const ahora = Date.now()
+  const huella = normalizarTexto(detalle).slice(0, 120)
+  const key = `${tipo}:${clienteId}:${huella}`
+  const ultima = ALERTAS_DEDUP.get(key) ?? 0
+  if (ahora - ultima < ttlMs) return false
+  ALERTAS_DEDUP.set(key, ahora)
+  if (ALERTAS_DEDUP.size > 500) {
+    for (const [k, ts] of ALERTAS_DEDUP) {
+      if (ahora - ts > 24 * 60 * 60_000) ALERTAS_DEDUP.delete(k)
+    }
+  }
+  return true
+}
+
+function registrarIntervencionHumana(clienteId: string, texto: string): void {
+  const precio = extraerPrecioRespuesta(texto)
+  ULTIMA_INTERVENCION_HUMANA.set(clienteId, { ts: Date.now(), texto: texto.trim().slice(0, 500), precio: precio ?? undefined })
+}
+
+function obtenerIntervencionHumanaReciente(clienteId: string): { texto: string; precio?: number; haceMs: number } | null {
+  const dato = ULTIMA_INTERVENCION_HUMANA.get(clienteId)
+  if (!dato) return null
+  const haceMs = Date.now() - dato.ts
+  if (haceMs > INTERVENCION_HUMANA_TTL_MS) {
+    ULTIMA_INTERVENCION_HUMANA.delete(clienteId)
+    return null
+  }
+  return { texto: dato.texto, precio: dato.precio, haceMs }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -881,7 +915,7 @@ async function obtenerClientesAtendidosHoy(): Promise<number> {
 const COLA_POR_CLIENTE = new Map<string, Promise<void>>()
 const MENSAJES_POR_AGRUPAR = new Map<string, { mensajes: any[]; timer: NodeJS.Timeout }>()
 const MEDIA_POR_CLIENTE = new Map<string, { base64: string; mimetype: string; caption: string }[]>()
-const AGRUPAR_MENSAJES_MS = 70_000 // 1 min 10 s: agrupa mensajes antes de responder
+const AGRUPAR_MENSAJES_MS = 60_000 // Agrupa mensajes seguidos antes de responder
 
 function encolarPorCliente(id: string, tarea: () => Promise<void>): void {
   const previa    = COLA_POR_CLIENTE.get(id) ?? Promise.resolve()
@@ -918,6 +952,13 @@ function encolarMensajeAgrupado(clienteId: string, msg: any): void {
     for (const m of mensajes) {
       const id = obtenerMensajeId(m)
       if (id && m !== base) marcarMensajeProcesado(id)
+    }
+
+    const intervencion = obtenerIntervencionHumanaReciente(clienteId)
+    const humanoRespondioDuranteEspera = intervencion && intervencion.haceMs < AGRUPAR_MENSAJES_MS + 1_500
+    if (humanoRespondioDuranteEspera && intervencion.precio && esTextoReferenciaOCotizacion(base.body)) {
+      console.log(`[bot] 🙋 Equipo cotizó durante la espera; Flora no duplica respuesta para ${clienteId}`)
+      return
     }
 
     console.log(`[bot] 🧵 Batch ${mensajes.length} mensajes de ${clienteId} (${AGRUPAR_MENSAJES_MS/1000}s)`)
@@ -1431,16 +1472,18 @@ async function procesarMediaAcumulado(clienteId: string, telefono: string, texto
       await ventaCerradaHandler(clienteId, venta, telefono)
     } else {
       await persistirPedido(clienteId, telefono, 'apartado', 'Comprobante recibido, faltan datos para cierre')
-      enviarAlertaVentaCerrada({
-        cliente: pedido.nombre ?? 'Verificar en chat',
-        producto: pedido.productoPersonalizado ?? 'Verificar en conversación',
-        total: totalDashboardPedido(clienteId, 'Verificar en conversación'),
-        direccion: pedido.direccion ?? pedido.sucursal ?? pedido.envio?.zona ?? 'Por confirmar',
-        numeroCliente: telefono,
-        metodoPago: 'Transferencia',
-        precioArreglo: tienePrecioConfirmado(clienteId) ? precioArregloTexto(clienteId) : undefined,
-        precioExtras: extrasPedidoTexto(clienteId) ?? undefined,
-      }).catch(() => {})
+      if (debeEnviarAlertaDedup(clienteId, 'comprobante-pendiente', textoTurno || 'comprobante', 30 * 60_000)) {
+        enviarAlertaVentaCerrada({
+          cliente: pedido.nombre ?? 'Verificar en chat',
+          producto: pedido.productoPersonalizado ?? 'Verificar en conversación',
+          total: totalDashboardPedido(clienteId, 'Verificar en conversación'),
+          direccion: pedido.direccion ?? pedido.sucursal ?? pedido.envio?.zona ?? 'Por confirmar',
+          numeroCliente: telefono,
+          metodoPago: 'Transferencia',
+          precioArreglo: tienePrecioConfirmado(clienteId) ? precioArregloTexto(clienteId) : undefined,
+          precioExtras: extrasPedidoTexto(clienteId) ?? undefined,
+        }).catch(() => {})
+      }
     }
     return 'comprobante'
   }
@@ -1456,10 +1499,12 @@ async function procesarMediaAcumulado(clienteId: string, telefono: string, texto
     pedido.fotoReferenciaRecibidaEn = new Date().toISOString()
     pedido.detallesEspeciales = descripcion
     await persistirPedido(clienteId, telefono, 'cotizacion', descripcion)
-    enviarAlertaCotizacion(telefono, descripcion).catch(() => {})
-    notificarEmpleadosWhatsApp(
-      `🌷 *Cliente necesita cotización:* ${telefono}\n\n${descripcion}\n\nRevisa la foto de referencia y cotízale por WhatsApp.`
-    ).catch(err => console.error('[bot] WhatsApp empleados cotización:', err))
+    if (debeEnviarAlertaDedup(clienteId, 'cotizacion-foto', descripcion, 30 * 60_000)) {
+      enviarAlertaCotizacion(telefono, descripcion).catch(() => {})
+      notificarEmpleadosWhatsApp(
+        `🌷 *Cliente necesita cotización:* ${telefono}\n\n${descripcion}\n\nRevisa la foto de referencia y cotízale por WhatsApp.`
+      ).catch(err => console.error('[bot] WhatsApp empleados cotización:', err))
+    }
     return 'referencia'
   }
 
@@ -1761,6 +1806,43 @@ async function procesarMensaje(msg: any): Promise<void> {
     // ── Saludo dinámico en primer mensaje ─────────────────────────
     const historialCompleto = await obtenerHistorial(telefono)
     const historialTexto = historialCompleto.map(m => m.content).join('\n').toLowerCase()
+    const intervencionHumana = obtenerIntervencionHumanaReciente(clienteId)
+    if (intervencionHumana) {
+      contextoExtra +=
+        `\n\n[INTERVENCION HUMANA RECIENTE] ` +
+        `El equipo respondió hace ${Math.round(intervencionHumana.haceMs / 1000)} segundos: "${intervencionHumana.texto.replace(/"/g, "'")}". ` +
+        `Flora NO debe ignorar esa respuesta. Si contiene precio, úsalo como precio confirmado por el equipo. No digas que falta confirmar ese mismo precio.`
+    }
+
+    const clasificacionIA = await clasificarConversacion(
+      historialCompleto,
+      textoCliente,
+      [
+        `estado_pedido: ${PEDIDO_EN_CURSO.get(clienteId)?.estadoFlujo ?? 'sin_pedido'}`,
+        `tiene_arreglo: ${tieneArregloVerificado(clienteId) ? 'si' : 'no'}`,
+        `precio_confirmado: ${tienePrecioConfirmado(clienteId) ? 'si' : 'no'}`,
+        intervencionHumana ? `intervencion_humana_reciente: ${intervencionHumana.texto}` : 'intervencion_humana_reciente: no',
+      ].join('\n')
+    )
+    contextoExtra +=
+      `\n\n[CLASIFICACION_JSON] ${JSON.stringify(clasificacionIA)} ` +
+      `Usa esta clasificacion como apoyo operativo, pero respeta reglas duras de inventario, precios y pagos.`
+
+    if (!clasificacionIA.debeResponder && clasificacionIA.confianza >= 0.7) {
+      console.log(`[bot] Clasificador indicó no responder a ${clienteId}: ${clasificacionIA.razon}`)
+      return
+    }
+
+    if (clasificacionIA.debeAlertarWhatsApp && debeEnviarAlertaDedup(clienteId, `ia-whatsapp-${clasificacionIA.intencion}`, clasificacionIA.razon || textoCliente, 20 * 60_000)) {
+      const telefonoReal = await numeroRealPromise
+      notificarEmpleadosWhatsApp(
+        `⚠️ *Alerta ${clasificacionIA.severidad.toUpperCase()} (${clasificacionIA.intencion}):* ${telefonoReal}\n\n${(clasificacionIA.razon || textoCliente).slice(0, 500)}`
+      ).catch(err => console.error('[bot] WhatsApp alerta IA:', err))
+    }
+    if (clasificacionIA.debeAlertarTelegram && clasificacionIA.intencion === 'atencion_humana' && debeEnviarAlertaDedup(clienteId, `ia-telegram-${clasificacionIA.intencion}`, clasificacionIA.razon || textoCliente, 20 * 60_000)) {
+      const telefonoReal = await numeroRealPromise
+      enviarAlertaAtencionHumana(telefonoReal, msg.pushName || '', clasificacionIA.razon || textoCliente.substring(0, 300), `Severidad: ${clasificacionIA.severidad} | Intención: ${clasificacionIA.intencion}`).catch(() => {})
+    }
     const pideFotosDisponibles = esSolicitudFotosDisponibles(textoCliente) &&
       !(/\b(pague|pag[uú]e|comprobante|transfer|ya\s*envi[eé])\b/i.test(textoCliente))
     if (pideFotosDisponibles) {
@@ -1793,7 +1875,7 @@ async function procesarMensaje(msg: any): Promise<void> {
         `El sistema ya recibio la foto de referencia/comprobante y la enviara al equipo. ` +
         `NO le pidas al cliente que la reenvie. Si pide cotizacion de un ramo como la foto, responde que ya recibiste la referencia y que el equipo la revisara para cotizarle.`
     }
-    const motivoAtencionHumana = detectarAtencionHumana(textoCliente)
+    const motivoAtencionHumana = detectarAtencionHumana(textoCliente) || (clasificacionIA.intencion === 'atencion_humana' && clasificacionIA.confianza >= 0.65 ? clasificacionIA.razon || 'Cliente requiere atención humana' : null)
     if (motivoAtencionHumana) {
       contextoExtra +=
         `\n\n[ATENCION HUMANA REQUERIDA: ${motivoAtencionHumana}] ` +
@@ -1895,12 +1977,14 @@ async function procesarMensaje(msg: any): Promise<void> {
     }
 
     // ── CANCELACIÓN ─────────────────────────────────────────────
-    if (detectarCancelacion(textoCliente)) {
+    const cancelacionDetectada = detectarCancelacion(textoCliente) || (clasificacionIA.intencion === 'cancelacion' && clasificacionIA.confianza >= 0.65)
+    const cancelacionDescartadaPorIA = detectarCancelacion(textoCliente) && clasificacionIA.confianza >= 0.75 && clasificacionIA.intencion !== 'cancelacion'
+    if (cancelacionDetectada && !cancelacionDescartadaPorIA) {
       contextoExtra +=
         `\n\n[CLIENTE QUIERE CANCELAR UN PEDIDO]` +
         `\nINSTRUCCION: Responde con empatía. Di que notificarás al equipo. ` +
         `NO prometas reembolsos ni descuentos. El sistema notificará automáticamente al administrador.`
-      if (debeNotificarReclamacion(clienteId, 'cancelacion')) {
+      if ((clasificacionIA.severidad === 'alta' || clasificacionIA.severidad === 'critica' || clasificacionIA.intencion === 'cancelacion') && debeNotificarReclamacion(clienteId, 'cancelacion')) {
         const telefonoReal = await numeroRealPromise
         const referencia = PEDIDO_EN_CURSO.get(clienteId)?.arreglo?.nombre ?? ARREGLO_ELEGIDO.get(clienteId)?.nombre ?? null
         enviarAlertaCancelacion(telefonoReal, textoCliente.substring(0, 300)).catch(() => {})
@@ -1910,12 +1994,14 @@ async function procesarMensaje(msg: any): Promise<void> {
     }
 
     // ── QUEJA ────────────────────────────────────────────────────
-    if (detectarQueja(textoCliente)) {
+    const quejaDetectada = detectarQueja(textoCliente) || (clasificacionIA.intencion === 'queja' && clasificacionIA.confianza >= 0.65)
+    const quejaDescartadaPorIA = detectarQueja(textoCliente) && clasificacionIA.confianza >= 0.75 && clasificacionIA.intencion !== 'queja'
+    if (quejaDetectada && !quejaDescartadaPorIA) {
       contextoExtra +=
         `\n\n[CLIENTE TIENE UNA QUEJA O RECLAMO]` +
         `\nINSTRUCCION: Responde con empatía. Pide disculpas y di que lo reportas al equipo. ` +
         `NO ofrezcas compensaciones ni descuentos. El sistema notificará automáticamente.`
-      if (debeNotificarReclamacion(clienteId, 'queja')) {
+      if ((clasificacionIA.severidad === 'alta' || clasificacionIA.severidad === 'critica' || clasificacionIA.intencion === 'queja') && debeNotificarReclamacion(clienteId, 'queja')) {
         const telefonoReal = await numeroRealPromise
         const referencia = PEDIDO_EN_CURSO.get(clienteId)?.arreglo?.nombre ?? ARREGLO_ELEGIDO.get(clienteId)?.nombre ?? null
         enviarAlertaQueja(telefonoReal, textoCliente.substring(0, 300)).catch(() => {})
@@ -2146,7 +2232,7 @@ async function procesarMensaje(msg: any): Promise<void> {
     }
 
     // ── ATENCIÓN HUMANA (notificación de alerta si aplica)
-    if (motivoAtencionHumana && debeNotificarAtencionHumana(clienteId)) {
+    if (motivoAtencionHumana && debeNotificarAtencionHumana(clienteId) && debeEnviarAlertaDedup(clienteId, 'atencion-humana', motivoAtencionHumana, 20 * 60_000)) {
       enviarAlertaAtencionHumana(await numeroRealPromise, msg.pushName || '', textoCliente.substring(0, 300), motivoAtencionHumana).catch(() => {})
     }
 
@@ -2192,13 +2278,55 @@ async function procesarMensaje(msg: any): Promise<void> {
 
         const msgLimpio = mensajeFinal.replace(ventaTokenEnResp[0], '').trim()
         if (msgLimpio) {
-          await responderMensaje(msg, msgLimpio)
+          let mensajeVenta = msgLimpio
+          const revisionVenta = await revisarRespuestaFlora(
+            historialCompleto,
+            textoCliente,
+            mensajeVenta,
+            [
+              `clasificacion: ${JSON.stringify(clasificacionIA)}`,
+              'respuesta_con_token_venta: si',
+              intervencionHumana ? `intervencion_humana_reciente: ${intervencionHumana.texto}` : 'intervencion_humana_reciente: no',
+            ].join('\n')
+          )
+          if (!revisionVenta.approved && revisionVenta.mensaje) {
+            console.log(`[bot] 🧪 Revisor corrigió respuesta de venta para ${clienteId}: ${revisionVenta.razon}`)
+            mensajeVenta = limpiarRespuestaIA(revisionVenta.mensaje)
+          }
+          await responderMensaje(msg, mensajeVenta)
           await new Promise(r => setTimeout(r, 1500))
         }
         if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
         await ventaCerradaHandler(clienteId, venta, await numeroRealPromise)
       } else {
         let mensajeParaEnviar = mensajeFinal
+
+        const revision = await revisarRespuestaFlora(
+          historialCompleto,
+          textoCliente,
+          mensajeParaEnviar,
+          [
+            `clasificacion: ${JSON.stringify(clasificacionIA)}`,
+            `estado_pedido: ${PEDIDO_EN_CURSO.get(clienteId)?.estadoFlujo ?? 'sin_pedido'}`,
+            `precio_confirmado: ${precioPedidoActual(clienteId) || 'no'}`,
+            intervencionHumana ? `intervencion_humana_reciente: ${intervencionHumana.texto}` : 'intervencion_humana_reciente: no',
+          ].join('\n')
+        )
+        if (!revision.approved && revision.mensaje) {
+          console.log(`[bot] 🧪 Revisor corrigió respuesta para ${clienteId}: ${revision.razon}`)
+          mensajeParaEnviar = limpiarRespuestaIA(revision.mensaje)
+        }
+        if ((revision.debeAlertarTelegram || revision.debeAlertarWhatsApp) && debeEnviarAlertaDedup(clienteId, `review-${revision.riesgo}`, revision.razon || textoCliente, 20 * 60_000)) {
+          const telefonoReal = await numeroRealPromise
+          if (revision.debeAlertarTelegram) {
+            enviarAlertaAtencionHumana(telefonoReal, msg.pushName || '', revision.razon || 'Revisor detectó riesgo en respuesta', `Cliente: ${textoCliente.slice(0, 300)}\nFlora: ${mensajeParaEnviar.slice(0, 300)}`).catch(() => {})
+          }
+          if (revision.debeAlertarWhatsApp) {
+            notificarEmpleadosWhatsApp(
+              `⚠️ *Revisar conversación con ${telefonoReal}:*\n\n${(revision.razon || textoCliente).slice(0, 500)}`
+            ).catch(err => console.error('[bot] WhatsApp alerta revisor:', err))
+          }
+        }
 
         const ventaEstado = ventaDesdeEstado(clienteId)
         if (!VENTAS_CERRADAS.has(clienteId) && ventaEstado && ventaListaParaCerrar(clienteId) && (
@@ -2511,7 +2639,8 @@ async function manejarMensajeEntrante(msg: any): Promise<void> {
       const num = telefonoDestino.startsWith('52') ? `+${telefonoDestino}` : telefonoDestino
       if (msgType === 'image' || msgType === 'document') marcarFotosDisponibles(remoteJid)
       if (!body) return
-      agregarAlHistorial(num, 'assistant', `[Agente: ${body.trim()}]`)
+      registrarIntervencionHumana(remoteJid, body)
+      await agregarAlHistorial(num, 'assistant', `[Agente: ${body.trim()}]`)
       if (esMensajeFotosDisponiblesEquipo(body)) marcarFotosDisponibles(remoteJid)
       const precioAgente = extraerPrecioRespuesta(body)
       if (precioAgente) {

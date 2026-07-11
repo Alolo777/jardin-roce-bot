@@ -11,7 +11,8 @@ const client = new OpenAI({
   apiKey: process.env.GITHUB_TOKEN,
 })
 
-const MODEL = process.env.GITHUB_MODEL ?? 'gpt-4o-mini'
+const MODEL = process.env.GITHUB_MODEL ?? 'gpt-4o'
+const REVIEW_MODEL = process.env.GITHUB_REVIEW_MODEL ?? MODEL
 
 // ─── Caché del System Prompt (TTL: 60 segundos) ─────────────────────────────
 interface CachePrompt {
@@ -112,6 +113,59 @@ export interface MensajeChat {
   content: string
 }
 
+export type IntencionConversacion =
+  | 'saludo'
+  | 'consulta_producto'
+  | 'cotizacion'
+  | 'envio'
+  | 'pago_comprobante'
+  | 'venta'
+  | 'cancelacion'
+  | 'queja'
+  | 'atencion_humana'
+  | 'seguimiento'
+  | 'off_topic'
+  | 'incierto'
+
+export type SeveridadAlerta = 'ninguna' | 'baja' | 'media' | 'alta' | 'critica'
+
+export interface ClasificacionConversacion {
+  intencion: IntencionConversacion
+  severidad: SeveridadAlerta
+  confianza: number
+  debeResponder: boolean
+  debeAlertarTelegram: boolean
+  debeAlertarWhatsApp: boolean
+  debePausarPorHumano: boolean
+  razon: string
+}
+
+export interface RevisionRespuestaFlora {
+  approved: boolean
+  mensaje?: string
+  razon: string
+  riesgo: 'bajo' | 'medio' | 'alto'
+  debeAlertarTelegram: boolean
+  debeAlertarWhatsApp: boolean
+}
+
+function extraerJsonObjeto(texto: string): string {
+  const limpio = texto.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
+  const inicio = limpio.indexOf('{')
+  const fin = limpio.lastIndexOf('}')
+  return inicio >= 0 && fin > inicio ? limpio.slice(inicio, fin + 1) : limpio
+}
+
+function normalizarBoolean(valor: unknown, fallback: boolean): boolean {
+  return typeof valor === 'boolean' ? valor : fallback
+}
+
+function normalizarConfianza(valor: unknown): number {
+  const n = Number(valor)
+  if (!Number.isFinite(n)) return 0.5
+  return Math.max(0, Math.min(1, n))
+}
+
 export type ClasificacionImagenVenta = 'comprobante' | 'referencia' | 'otra' | 'incierto'
 
 interface ImagenCliente {
@@ -191,6 +245,134 @@ export async function clasificarImagenVenta(
   } catch (error) {
     console.warn('[ai.ts] Error clasificando imagen:', error instanceof Error ? error.message : error)
     return { tipo: 'incierto', razon: 'error vision' }
+  }
+}
+
+export async function clasificarConversacion(
+  historial: MensajeChat[],
+  mensajeCliente: string,
+  contextoOperativo: string
+): Promise<ClasificacionConversacion> {
+  const historialReciente = historial
+    .slice(-30)
+    .map(m => `${m.role === 'user' ? 'cliente' : 'flora/equipo'}: ${m.content}`)
+    .join('\n')
+    .slice(-9000)
+
+  const prompt = [
+    'Eres un clasificador operativo para un bot de floreria llamado Flora.',
+    'Analiza la conversacion completa reciente y el ultimo mensaje. Ignora mensajes de dias/semanas anteriores si ya no son relevantes para la solicitud actual.',
+    'Responde SOLO JSON valido, sin markdown.',
+    'Formato exacto: {"intencion":"saludo|consulta_producto|cotizacion|envio|pago_comprobante|venta|cancelacion|queja|atencion_humana|seguimiento|off_topic|incierto","severidad":"ninguna|baja|media|alta|critica","confianza":0.0,"debeResponder":true,"debeAlertarTelegram":false,"debeAlertarWhatsApp":false,"debePausarPorHumano":false,"razon":"max 160 caracteres"}.',
+    'Reglas: no marques venta si solo hay interes o un ok ambiguo. No marques pago_comprobante sin contexto de pago o evidencia clara. Cotizacion/envio normalmente es severidad media si requiere equipo. Queja/cancelacion/atencion_humana son alta o critica.',
+    '',
+    `Contexto operativo:\n${contextoOperativo || 'Sin contexto'}`,
+    '',
+    `Historial reciente:\n${historialReciente || 'Sin historial'}`,
+    '',
+    `Ultimo mensaje del cliente:\n${mensajeCliente}`,
+  ].join('\n')
+
+  try {
+    const completion = await conRetry(async () => {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10_000)
+      try {
+        return await client.chat.completions.create(
+          {
+            model: REVIEW_MODEL,
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 220,
+            temperature: 0,
+          },
+          { signal: controller.signal }
+        )
+      } finally {
+        clearTimeout(timeoutId)
+      }
+    }, 2)
+
+    const parsed = JSON.parse(extraerJsonObjeto(completion.choices[0]?.message?.content || '')) as Partial<ClasificacionConversacion>
+    const intenciones: IntencionConversacion[] = ['saludo', 'consulta_producto', 'cotizacion', 'envio', 'pago_comprobante', 'venta', 'cancelacion', 'queja', 'atencion_humana', 'seguimiento', 'off_topic', 'incierto']
+    const severidades: SeveridadAlerta[] = ['ninguna', 'baja', 'media', 'alta', 'critica']
+    const intencion = intenciones.includes(parsed.intencion as IntencionConversacion) ? parsed.intencion as IntencionConversacion : 'incierto'
+    const severidad = severidades.includes(parsed.severidad as SeveridadAlerta) ? parsed.severidad as SeveridadAlerta : 'baja'
+    return {
+      intencion,
+      severidad,
+      confianza: normalizarConfianza(parsed.confianza),
+      debeResponder: normalizarBoolean(parsed.debeResponder, true),
+      debeAlertarTelegram: normalizarBoolean(parsed.debeAlertarTelegram, severidad === 'alta' || severidad === 'critica'),
+      debeAlertarWhatsApp: normalizarBoolean(parsed.debeAlertarWhatsApp, severidad === 'critica'),
+      debePausarPorHumano: normalizarBoolean(parsed.debePausarPorHumano, false),
+      razon: String(parsed.razon || '').slice(0, 180),
+    }
+  } catch (error) {
+    console.warn('[ai.ts] Error clasificando conversacion:', error instanceof Error ? error.message : error)
+    return { intencion: 'incierto', severidad: 'baja', confianza: 0, debeResponder: true, debeAlertarTelegram: false, debeAlertarWhatsApp: false, debePausarPorHumano: false, razon: 'fallback por error' }
+  }
+}
+
+export async function revisarRespuestaFlora(
+  historial: MensajeChat[],
+  mensajeCliente: string,
+  respuestaFlora: string,
+  contextoOperativo: string
+): Promise<RevisionRespuestaFlora> {
+  const historialReciente = historial
+    .slice(-30)
+    .map(m => `${m.role === 'user' ? 'cliente' : 'flora/equipo'}: ${m.content}`)
+    .join('\n')
+    .slice(-9000)
+
+  const prompt = [
+    'Eres revisor de calidad de Flora, asistente de una floreria.',
+    'Evalua si la respuesta propuesta es la mejor para el ultimo mensaje considerando el historial reciente. Ignora historial viejo que no aplique al pedido actual.',
+    'No apruebes respuestas que inventen precios, disponibilidad, envio, pagos, promesas, compensaciones o que ignoren una cotizacion humana reciente.',
+    'Si hay un precio dado por el equipo en el historial reciente, la respuesta debe usarlo o reconocerlo; no debe pedir confirmarlo otra vez salvo que falten datos.',
+    'Responde SOLO JSON valido: {"approved":true,"mensaje":"respuesta corregida opcional","razon":"max 160 caracteres","riesgo":"bajo|medio|alto","debeAlertarTelegram":false,"debeAlertarWhatsApp":false}.',
+    '',
+    `Contexto operativo:\n${contextoOperativo || 'Sin contexto'}`,
+    '',
+    `Historial reciente:\n${historialReciente || 'Sin historial'}`,
+    '',
+    `Ultimo mensaje del cliente:\n${mensajeCliente}`,
+    '',
+    `Respuesta propuesta de Flora:\n${respuestaFlora}`,
+  ].join('\n')
+
+  try {
+    const completion = await conRetry(async () => {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 12_000)
+      try {
+        return await client.chat.completions.create(
+          {
+            model: REVIEW_MODEL,
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 350,
+            temperature: 0,
+          },
+          { signal: controller.signal }
+        )
+      } finally {
+        clearTimeout(timeoutId)
+      }
+    }, 2)
+
+    const parsed = JSON.parse(extraerJsonObjeto(completion.choices[0]?.message?.content || '')) as Partial<RevisionRespuestaFlora>
+    const riesgo = parsed.riesgo === 'medio' || parsed.riesgo === 'alto' ? parsed.riesgo : 'bajo'
+    return {
+      approved: normalizarBoolean(parsed.approved, true),
+      mensaje: parsed.mensaje ? String(parsed.mensaje).trim().slice(0, 1200) : undefined,
+      razon: String(parsed.razon || '').slice(0, 180),
+      riesgo,
+      debeAlertarTelegram: normalizarBoolean(parsed.debeAlertarTelegram, riesgo === 'alto'),
+      debeAlertarWhatsApp: normalizarBoolean(parsed.debeAlertarWhatsApp, false),
+    }
+  } catch (error) {
+    console.warn('[ai.ts] Error revisando respuesta:', error instanceof Error ? error.message : error)
+    return { approved: true, razon: 'fallback por error', riesgo: 'medio', debeAlertarTelegram: false, debeAlertarWhatsApp: false }
   }
 }
 
