@@ -47,10 +47,17 @@ function releaseSlot(): void {
   else activeRequests--
 }
 
+const API_CALL_TIMEOUT_MS = 30_000
+
 async function withLimit<T>(fn: () => Promise<T>): Promise<T> {
   await concurrencySlot()
   try {
-    return await fn()
+    return await Promise.race([
+      fn(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`[ai.ts] ⏱️ Timeout ${API_CALL_TIMEOUT_MS}ms`)), API_CALL_TIMEOUT_MS)
+      ),
+    ])
   } finally {
     releaseSlot()
   }
