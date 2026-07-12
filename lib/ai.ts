@@ -281,7 +281,7 @@ export async function clasificarImagenVenta(
       try {
         const res = await fetch('https://models.inference.ai.azure.com/chat/completions', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'api-key': process.env.GITHUB_TOKEN! },
+          headers: { 'Content-Type': 'application/json', 'api-key': process.env.GITHUB_VISION_TOKEN || process.env.GITHUB_TOKEN! },
           body,
           signal: controller.signal,
         })
