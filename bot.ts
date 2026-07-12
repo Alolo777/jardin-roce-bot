@@ -1423,11 +1423,8 @@ async function procesarMediaAcumulado(clienteId: string, telefono: string, texto
   let esReferencia = !esComprobante && (quiereCotizarTurno || (!pagoEnTurno && !pagoReciente))
 
   const tieneImagen = mediaAcumulado.some(m => m.mimetype.startsWith('image/'))
-  const textoClaroDePago = pagoEnTurno
-  const textoClaroDeReferencia = quiereCotizarTurno && !pagoEnTurno
-  const clasificacionAmbigua = tieneImagen && !textoClaroDePago && !textoClaroDeReferencia && (esperaComprobante || pagoReciente || esComprobante)
 
-  if (clasificacionAmbigua) {
+  if (tieneImagen) {
     const pedido = PEDIDO_EN_CURSO.get(clienteId)
     const contextoVision = [
       `estado_flujo: ${pedido?.estadoFlujo ?? 'sin_pedido'}`,
@@ -1436,7 +1433,7 @@ async function procesarMediaAcumulado(clienteId: string, telefono: string, texto
       `texto_turno: ${textoTurno || 'sin texto'}`,
     ].join('\n')
     const vision = await clasificarImagenVenta(historial, contextoVision, mediaAcumulado)
-    console.log(`[bot] 👁️ Clasificación imagen ${telefono}: ${vision.tipo} (${vision.razon})`)
+    console.log(`[bot] 👁️ Visión clasifica ${telefono}: ${vision.tipo} (${vision.razon})`)
     if (vision.tipo === 'comprobante') {
       esComprobante = true
       esReferencia = false
@@ -1806,6 +1803,14 @@ async function procesarMensaje(msg: any): Promise<void> {
     // ── Saludo dinámico en primer mensaje ─────────────────────────
     const historialCompleto = await obtenerHistorial(telefono)
     const historialTexto = historialCompleto.map(m => m.content).join('\n').toLowerCase()
+
+    // ── Evitar duplicar si el equipo humano ya respondió ────────────
+    const ultimoAssistant = [...historialCompleto].reverse().find(m => m.role === 'assistant')
+    if (ultimoAssistant && ultimoAssistant.content.startsWith('[Agente:')) {
+      console.log(`[bot] 👤 El equipo ya respondió a ${clienteId} — Flora no duplica`)
+      return
+    }
+
     const intervencionHumana = obtenerIntervencionHumanaReciente(clienteId)
     if (intervencionHumana) {
       contextoExtra +=

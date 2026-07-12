@@ -14,6 +14,39 @@ const client = new OpenAI({
 const MODEL = process.env.GITHUB_MODEL ?? 'gpt-4o'
 const REVIEW_MODEL = process.env.GITHUB_REVIEW_MODEL ?? MODEL
 
+// ─── Semáforo global: máximo 2 llamadas concurrentes a la API ───────────────
+const MAX_CONCURRENT = 2
+let activeRequests = 0
+const requestQueue: Array<() => void> = []
+
+async function concurrencySlot(): Promise<void> {
+  if (activeRequests < MAX_CONCURRENT) {
+    activeRequests++
+    return
+  }
+  return new Promise<void>(resolve => {
+    requestQueue.push(() => {
+      activeRequests++
+      resolve()
+    })
+  })
+}
+
+function releaseSlot(): void {
+  const next = requestQueue.shift()
+  if (next) next()
+  else activeRequests--
+}
+
+async function withLimit<T>(fn: () => Promise<T>): Promise<T> {
+  await concurrencySlot()
+  try {
+    return await fn()
+  } finally {
+    releaseSlot()
+  }
+}
+
 // ─── Caché del System Prompt (TTL: 60 segundos) ─────────────────────────────
 interface CachePrompt {
   valor: string
@@ -92,15 +125,18 @@ async function conRetry<T>(fn: () => Promise<T>, maxIntentos = 3): Promise<T> {
   let ultimoError: unknown
   for (let intento = 0; intento < maxIntentos; intento++) {
     try {
-      return await fn()
+      return await withLimit(fn)
     } catch (error) {
       ultimoError = error
       if (intento === maxIntentos - 1) break
       const espera = 500 * 2 ** intento + Math.floor(Math.random() * 300)
-      console.warn(
-        `[ai.ts] Error en LLM (intento ${intento + 1}/${maxIntentos}), reintentando en ${espera}ms:`,
-        error instanceof Error ? error.message : error
-      )
+      const msg = error instanceof Error ? error.message : String(error)
+      if (!msg.includes('429') && !msg.includes('Rate limit')) {
+        console.warn(
+          `[ai.ts] Error en LLM (intento ${intento + 1}/${maxIntentos}), reintentando en ${espera}ms:`,
+          msg
+        )
+      }
       await new Promise(resolve => setTimeout(resolve, espera))
     }
   }
@@ -398,7 +434,7 @@ export async function getAIResponse(
       try {
         return await client.chat.completions.create(
           {
-            model: MODEL,
+            model: REVIEW_MODEL,
             messages: [
               { role: 'system', content: systemPromptFinal },
               ...historial,
