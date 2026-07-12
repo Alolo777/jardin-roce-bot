@@ -1425,6 +1425,7 @@ async function procesarMediaAcumulado(clienteId: string, telefono: string, texto
   const tieneImagen = mediaAcumulado.some(m => m.mimetype.startsWith('image/'))
 
   if (tieneImagen) {
+    console.log(`[bot] 👁️ Enviando ${mediaAcumulado.length} imagen(es) a visión IA para ${telefono}...`)
     const pedido = PEDIDO_EN_CURSO.get(clienteId)
     const contextoVision = [
       `estado_flujo: ${pedido?.estadoFlujo ?? 'sin_pedido'}`,

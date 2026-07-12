@@ -16,6 +16,7 @@ const REVIEW_MODEL = process.env.GITHUB_REVIEW_MODEL ?? MODEL
 
 // ─── Semáforo global: máximo 2 llamadas concurrentes a la API ───────────────
 const MAX_CONCURRENT = 2
+const SLOT_TIMEOUT_MS = 30_000
 let activeRequests = 0
 const requestQueue: Array<() => void> = []
 
@@ -24,11 +25,19 @@ async function concurrencySlot(): Promise<void> {
     activeRequests++
     return
   }
-  return new Promise<void>(resolve => {
-    requestQueue.push(() => {
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const idx = requestQueue.indexOf(cb)
+      if (idx >= 0) requestQueue.splice(idx, 1)
+      console.warn(`[ai.ts] ⚠️ Timeout esperando slot (${SLOT_TIMEOUT_MS}ms) — forzando request`)
+      resolve()
+    }, SLOT_TIMEOUT_MS)
+    const cb = () => {
+      clearTimeout(timer)
       activeRequests++
       resolve()
-    })
+    }
+    requestQueue.push(cb)
   })
 }
 
