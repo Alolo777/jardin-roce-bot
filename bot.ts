@@ -1805,15 +1805,20 @@ async function procesarMensaje(msg: any): Promise<void> {
     const historialCompleto = await obtenerHistorial(telefono)
     const historialTexto = historialCompleto.map(m => m.content).join('\n').toLowerCase()
 
-    // ── Evitar duplicar si el equipo humano ya respondió ────────────
+    // ── Informar a la IA si el equipo humano ya intervino ────────────
     const ultimoAssistant = [...historialCompleto].reverse().find(m => m.role === 'assistant')
-    if (ultimoAssistant && ultimoAssistant.content.startsWith('[Agente:')) {
-      console.log(`[bot] 👤 El equipo ya respondió a ${clienteId} — Flora no duplica`)
-      return
+    const equipoRespondio = ultimoAssistant && ultimoAssistant.content.startsWith('[Agente:')
+    if (equipoRespondio) {
+      const textoAgente = ultimoAssistant.content.replace(/^\[Agente:\s*|\]$/g, '').trim()
+      contextoExtra +=
+        `\n\n[EL EQUIPO HUMANO RESPONDIÓ] El equipo ya habló con el cliente. ` +
+        `Su último mensaje fue: "${textoAgente.replace(/"/g, "'")}". ` +
+        `Flora puede continuar la conversación con normalidad, respetando lo dicho por el equipo. ` +
+        `Si el equipo dio un precio, úsalo como confirmado. No lo contradigas ni preguntes lo mismo.`
     }
 
     const intervencionHumana = obtenerIntervencionHumanaReciente(clienteId)
-    if (intervencionHumana) {
+    if (intervencionHumana && !equipoRespondio) {
       contextoExtra +=
         `\n\n[INTERVENCION HUMANA RECIENTE] ` +
         `El equipo respondió hace ${Math.round(intervencionHumana.haceMs / 1000)} segundos: "${intervencionHumana.texto.replace(/"/g, "'")}". ` +
