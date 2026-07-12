@@ -258,38 +258,46 @@ export async function clasificarImagenVenta(
 
   try {
     console.time('[ai.ts] Vision classify')
-    const completion = await conRetry(async () => {
+    const body = JSON.stringify({
+      model: REVIEW_MODEL,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            ...imagenes.slice(0, 2).map(img => ({
+              type: 'image_url',
+              image_url: { url: `data:${img.mimetype || 'image/jpeg'};base64,${img.base64}` },
+            })),
+          ],
+        },
+      ],
+      max_tokens: 120,
+      temperature: 0,
+    })
+    const raw = await conRetry(async () => {
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 12_000)
+      const timeoutId = setTimeout(() => controller.abort(), 25_000)
       try {
-        return await client.chat.completions.create(
-          {
-            model: MODEL,
-            messages: [
-              {
-                role: 'user',
-                content: [
-                  { type: 'text', text: prompt },
-                  ...imagenes.slice(0, 2).map(img => ({
-                    type: 'image_url',
-                    image_url: { url: `data:${img.mimetype || 'image/jpeg'};base64,${img.base64}` },
-                  })),
-                ],
-              },
-            ] as any,
-            max_tokens: 120,
-            temperature: 0,
-          },
-          { signal: controller.signal }
-        )
+        const res = await fetch('https://models.inference.ai.azure.com/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'api-key': process.env.GITHUB_TOKEN! },
+          body,
+          signal: controller.signal,
+        })
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '')
+          throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`)
+        }
+        return (await res.json()) as { choices: { message: { content: string } }[] }
       } finally {
         clearTimeout(timeoutId)
       }
     }, 2)
     console.timeEnd('[ai.ts] Vision classify')
 
-    const raw = completion.choices[0]?.message?.content?.trim() || ''
-    const parsed = JSON.parse(raw) as { tipo?: string; razon?: string }
+    const texto = raw.choices?.[0]?.message?.content?.trim() || ''
+    const parsed = JSON.parse(texto) as { tipo?: string; razon?: string }
     const tipo = parsed.tipo === 'comprobante' || parsed.tipo === 'referencia' || parsed.tipo === 'otra' || parsed.tipo === 'incierto'
       ? parsed.tipo
       : 'incierto'
