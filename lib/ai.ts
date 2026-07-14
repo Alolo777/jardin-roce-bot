@@ -3,6 +3,7 @@
 
 import OpenAI from 'openai'
 import { supabaseAdmin } from './supabase'
+import { callGeminiText, callGeminiVision } from './gemini-ai'
 import type { AIResponse, VentaCerrada } from './types'
 
 // ─── Cliente OpenAI apuntando a GitHub Models ───────────────────────────────
@@ -60,6 +61,26 @@ async function withLimit<T>(fn: () => Promise<T>): Promise<T> {
     ])
   } finally {
     releaseSlot()
+  }
+}
+
+async function callWithFallback<T>(
+  githubFn: () => Promise<T>,
+  geminiFn: () => Promise<T>,
+  label: string
+): Promise<T> {
+  try {
+    return await githubFn()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.warn(`[ai.ts] 🟡 Fallback → Gemini para "${label}": ${msg}`)
+    try {
+      return await geminiFn()
+    } catch (geminiErr) {
+      const gmsg = geminiErr instanceof Error ? geminiErr.message : String(geminiErr)
+      console.error(`[ai.ts] 🔴 Gemini también falló para "${label}": ${gmsg}`)
+      throw geminiErr
+    }
   }
 }
 
@@ -258,46 +279,55 @@ export async function clasificarImagenVenta(
 
   try {
     console.time('[ai.ts] Vision classify')
-    const body = JSON.stringify({
-      model: REVIEW_MODEL,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: prompt },
-            ...imagenes.slice(0, 2).map(img => ({
-              type: 'image_url',
-              image_url: { url: `data:${img.mimetype || 'image/jpeg'};base64,${img.base64}` },
-            })),
+
+    const rawTexto = await callWithFallback(
+      async () => {
+        const body = JSON.stringify({
+          model: REVIEW_MODEL,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: prompt },
+                ...imagenes.slice(0, 2).map(img => ({
+                  type: 'image_url',
+                  image_url: { url: `data:${img.mimetype || 'image/jpeg'};base64,${img.base64}` },
+                })),
+              ],
+            },
           ],
-        },
-      ],
-      max_tokens: 120,
-      temperature: 0,
-    })
-    const raw = await conRetry(async () => {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 25_000)
-      try {
-        const res = await fetch('https://models.inference.ai.azure.com/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'api-key': process.env.GITHUB_VISION_TOKEN || process.env.GITHUB_TOKEN! },
-          body,
-          signal: controller.signal,
+          max_tokens: 120,
+          temperature: 0,
         })
-        if (!res.ok) {
-          const errText = await res.text().catch(() => '')
-          throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`)
-        }
-        return (await res.json()) as { choices: { message: { content: string } }[] }
-      } finally {
-        clearTimeout(timeoutId)
-      }
-    }, 2)
+        const raw = await conRetry(async () => {
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 25_000)
+          try {
+            const res = await fetch('https://models.inference.ai.azure.com/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'api-key': process.env.GITHUB_VISION_TOKEN || process.env.GITHUB_TOKEN! },
+              body,
+              signal: controller.signal,
+            })
+            if (!res.ok) {
+              const errText = await res.text().catch(() => '')
+              throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`)
+            }
+            return (await res.json()) as { choices: { message: { content: string } }[] }
+          } finally {
+            clearTimeout(timeoutId)
+          }
+        }, 2)
+        return raw.choices?.[0]?.message?.content?.trim() || ''
+      },
+      async () => {
+        return await callGeminiVision(prompt, imagenes)
+      },
+      'Vision classify'
+    )
     console.timeEnd('[ai.ts] Vision classify')
 
-    const texto = raw.choices?.[0]?.message?.content?.trim() || ''
-    const parsed = JSON.parse(texto) as { tipo?: string; razon?: string }
+    const parsed = JSON.parse(rawTexto) as { tipo?: string; razon?: string }
     const tipo = parsed.tipo === 'comprobante' || parsed.tipo === 'referencia' || parsed.tipo === 'otra' || parsed.tipo === 'incierto'
       ? parsed.tipo
       : 'incierto'
@@ -334,25 +364,34 @@ export async function clasificarConversacion(
   ].join('\n')
 
   try {
-    const completion = await conRetry(async () => {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10_000)
-      try {
-        return await client.chat.completions.create(
-          {
-            model: REVIEW_MODEL,
-            messages: [{ role: 'user', content: prompt }],
-            max_tokens: 220,
-            temperature: 0,
-          },
-          { signal: controller.signal }
-        )
-      } finally {
-        clearTimeout(timeoutId)
-      }
-    }, 2)
+    const rawJson = await callWithFallback(
+      async () => {
+        const completion = await conRetry(async () => {
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 10_000)
+          try {
+            return await client.chat.completions.create(
+              {
+                model: REVIEW_MODEL,
+                messages: [{ role: 'user', content: prompt }],
+                max_tokens: 220,
+                temperature: 0,
+              },
+              { signal: controller.signal }
+            )
+          } finally {
+            clearTimeout(timeoutId)
+          }
+        }, 2)
+        return completion.choices[0]?.message?.content || ''
+      },
+      async () => {
+        return await callGeminiText(prompt, { maxTokens: 220, temperature: 0 })
+      },
+      'clasificarConversacion'
+    )
 
-    const parsed = JSON.parse(extraerJsonObjeto(completion.choices[0]?.message?.content || '')) as Partial<ClasificacionConversacion>
+    const parsed = JSON.parse(extraerJsonObjeto(rawJson)) as Partial<ClasificacionConversacion>
     const intenciones: IntencionConversacion[] = ['saludo', 'consulta_producto', 'cotizacion', 'envio', 'pago_comprobante', 'venta', 'cancelacion', 'queja', 'atencion_humana', 'seguimiento', 'off_topic', 'incierto']
     const severidades: SeveridadAlerta[] = ['ninguna', 'baja', 'media', 'alta', 'critica']
     const intencion = intenciones.includes(parsed.intencion as IntencionConversacion) ? parsed.intencion as IntencionConversacion : 'incierto'
@@ -402,25 +441,34 @@ export async function revisarRespuestaFlora(
   ].join('\n')
 
   try {
-    const completion = await conRetry(async () => {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 12_000)
-      try {
-        return await client.chat.completions.create(
-          {
-            model: REVIEW_MODEL,
-            messages: [{ role: 'user', content: prompt }],
-            max_tokens: 350,
-            temperature: 0,
-          },
-          { signal: controller.signal }
-        )
-      } finally {
-        clearTimeout(timeoutId)
-      }
-    }, 2)
+    const rawJson = await callWithFallback(
+      async () => {
+        const completion = await conRetry(async () => {
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 12_000)
+          try {
+            return await client.chat.completions.create(
+              {
+                model: REVIEW_MODEL,
+                messages: [{ role: 'user', content: prompt }],
+                max_tokens: 350,
+                temperature: 0,
+              },
+              { signal: controller.signal }
+            )
+          } finally {
+            clearTimeout(timeoutId)
+          }
+        }, 2)
+        return completion.choices[0]?.message?.content || ''
+      },
+      async () => {
+        return await callGeminiText(prompt, { maxTokens: 350, temperature: 0 })
+      },
+      'revisarRespuestaFlora'
+    )
 
-    const parsed = JSON.parse(extraerJsonObjeto(completion.choices[0]?.message?.content || '')) as Partial<RevisionRespuestaFlora>
+    const parsed = JSON.parse(extraerJsonObjeto(rawJson)) as Partial<RevisionRespuestaFlora>
     const riesgo = parsed.riesgo === 'medio' || parsed.riesgo === 'alto' ? parsed.riesgo : 'bajo'
     return {
       approved: normalizarBoolean(parsed.approved, true),
@@ -451,34 +499,46 @@ export async function getAIResponse(
     }
 
     console.time('[ai.ts] LLM call')
-    const completion = await conRetry(async () => {
-      const controller = new AbortController()
-      const timeoutId  = setTimeout(() => controller.abort(), 15_000)
-
-      try {
-        return await client.chat.completions.create(
-          {
-            model: REVIEW_MODEL,
-            messages: [
-              { role: 'system', content: systemPromptFinal },
-              ...historial,
-            ],
-            max_tokens: 800,
-            temperature: 0.7,
-          },
-          { signal: controller.signal }
-        )
-      } finally {
-        clearTimeout(timeoutId)
-      }
-    })
+    const respuestaRaw = await callWithFallback(
+      async () => {
+        const completion = await conRetry(async () => {
+          const controller = new AbortController()
+          const timeoutId  = setTimeout(() => controller.abort(), 15_000)
+          try {
+            return await client.chat.completions.create(
+              {
+                model: REVIEW_MODEL,
+                messages: [
+                  { role: 'system', content: systemPromptFinal },
+                  ...historial,
+                ],
+                max_tokens: 800,
+                temperature: 0.7,
+              },
+              { signal: controller.signal }
+            )
+          } finally {
+            clearTimeout(timeoutId)
+          }
+        })
+        const contenido = completion.choices[0]?.message?.content?.trim()
+        return contenido && contenido.length > 0
+          ? contenido
+          : 'Lo siento, no pude procesar tu mensaje. ¿Puedes repetirlo? 🌸'
+      },
+      async () => {
+        const historialTexto = historial
+          .map(m => `${m.role === 'user' ? 'cliente' : 'flora'}: ${m.content}`)
+          .join('\n')
+        const prompt = `${systemPromptFinal}\n\n--- Conversación ---\n${historialTexto}`
+        const texto = await callGeminiText(prompt, { maxTokens: 800, temperature: 0.7 })
+        return texto && texto.length > 0
+          ? texto
+          : 'Lo siento, no pude procesar tu mensaje. ¿Puedes repetirlo? 🌸'
+      },
+      'getAIResponse'
+    )
     console.timeEnd('[ai.ts] LLM call')
-
-    // Fallback robusto: cubre tanto null/undefined como string vacío o solo espacios.
-    const contenido = completion.choices[0]?.message?.content?.trim()
-    const respuestaRaw = contenido && contenido.length > 0
-      ? contenido
-      : 'Lo siento, no pude procesar tu mensaje. ¿Puedes repetirlo? 🌸'
 
     // Detectar si hay un token de venta cerrada
     const ventaCerrada = parsearTokenVenta(respuestaRaw)
