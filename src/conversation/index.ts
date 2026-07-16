@@ -1,0 +1,16 @@
+export {
+  variantesTelefono,
+  jidToTelefono,
+  extraerTelefono,
+  obtenerClienteId,
+  obtenerHistorial,
+  agregarAlHistorial,
+  obtenerMensajeId,
+  marcarMensajeProcesado,
+  yaProcesadoRecientemente,
+  normalizarTexto,
+  limpiarCachesConversacion,
+  CACHE_CLIENTE_UUID,
+  MENSAJES_PROCESADOS,
+  MAX_TURNOS_HISTORIAL,
+} from './conversation.service'
