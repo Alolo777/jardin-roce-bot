@@ -37,6 +37,26 @@ Versión: 2.0.4
 
 **Pendiente:** M10d (conectar los 6 validadores a bot.ts para reemplazar los bloques inline de contextoExtra).
 
+### M10d — Conectar validadores a bot.ts (Julio 2026)
+
+**Archivo modificado:** `bot.ts`
+- Importados `validarHorario`, `obtenerTextoCuenta`, `validarSucursal`, `obtenerTextoConfirmacionSucursal`, `buscarEnvio`, `pareceConsultaEnvio`, `evaluarCancelacion`, `evaluarQueja`
+- `getContextoHorario()` reemplazado por `validarHorario().mensajeBackend`
+- Bloque CANCELACIÓN usa `evaluarCancelacion()`
+- Bloque QUEJA usa `evaluarQueja()`
+- Bloque ENVÍO usa `buscarEnvio()` y `pareceConsultaEnvio()`
+- Texto BBVA inline reemplazado por `obtenerTextoCuenta()`
+- Texto dirección sucursal inline reemplazado por `obtenerTextoConfirmacionSucursal(validarSucursal(...))`
+- Eliminado import muerto `getContextoHorario`
+
+**Resultado:** Las reglas de horario, pago, sucursal, envío, cancelación y queja ahora viven en `src/validators/*.ts`. El LLM recibe instrucciones ya decididas por el backend (DEC-018).
+
+**Impacto:** Compatible. Rollback: revertir ediciones de bot.ts.
+
+---
+
+**Pendiente:** M10d (conectar los 6 validadores a bot.ts para reemplazar los bloques inline de contextoExtra).
+
 ---
 
 **Pendiente:** M10c (cancelación + queja) y M10d (conectar a bot.ts).

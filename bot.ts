@@ -44,7 +44,7 @@ import {
   MENSAJES_PROCESADOS,
 } from './src/conversation/conversation.service'
 import { parseNombre, pareceNombreCliente, parseFecha, extraerFecha, parseHora, extraerHora, parseSucursal, parsePrecio, parseDireccion, limpiarTelefono } from './parser'
-import { getContenidoMensaje, getMessageBody, getMensajeTexto, getMessageType, hasQuotedMsg, getQuotedText, descargarMedia, jidANumero, ahoraCdmx, estaEnHorario, getFechaActual, getContextoHorario } from './src/whatsapp/message-utils'
+import { getContenidoMensaje, getMessageBody, getMensajeTexto, getMessageType, hasQuotedMsg, getQuotedText, descargarMedia, jidANumero, ahoraCdmx, estaEnHorario, getFechaActual } from './src/whatsapp/message-utils'
 import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema, clasificarTipoCaso, limpiarCachesCasos } from './src/casos/caso.service'
 import { crearPedido, obtenerPedido, transitar, transitarDesdeFlujo, archivarPedido, cancelarPedido, limpiarCachesPedidos } from './src/pedidos/pedido.service'
 import { analizarIntencion, Decision } from './src/decision/decision.engine'
@@ -56,6 +56,12 @@ import { notificarEmpleadosWhatsApp, enviarFotoEmpleadosWhatsApp } from './src/w
 import { detectarCancelacion, detectarQueja, detectarEvento, detectarInteresCompra } from './src/decision/intent-detector'
 import { FRUSTRACION_NOTIFICADA, ATENCION_HUMANA_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, RECLAMACION_NOTIFICADA, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, ALERTAS_DEDUP, ULTIMA_INTERVENCION_HUMANA, RATE_TIMESTAMPS, FOTOS_DISPONIBLES_TTL_MS, INTERVENCION_HUMANA_TTL_MS, limpiarCachesEstado, debeNotificarAtencionHumana, debeNotificarReclamacion, debeEnviarAlertaDedup, registrarIntervencionHumana, obtenerIntervencionHumanaReciente, extraerPrecioRespuesta, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, RATE_AVISADOS, estaRateLimited } from './src/whatsapp/bot-state'
 import { cargarEstado, guardarEstado, iniciarPersistenciaPeriodica } from './src/whatsapp/bot-state-persistence'
+import { validarHorario } from './src/validators/horario.validator'
+import { obtenerTextoCuenta, determinarInstruccionPago } from './src/validators/pago.validator'
+import { validarSucursal, obtenerTextoConfirmacionSucursal } from './src/validators/sucursal.validator'
+import { buscarEnvio, pareceConsultaEnvio } from './src/validators/envio.validator'
+import { evaluarCancelacion } from './src/validators/cancelacion.validator'
+import { evaluarQueja } from './src/validators/queja.validator'
 
 // ════════════════════════════════════════════════════════════════
 // DETECCIÓN DE FRUSTRACIÓN
@@ -1236,7 +1242,7 @@ async function procesarMensaje(msg: any): Promise<void> {
     }
 
     const intencion     = detectarIntencion(textoCliente, clienteId)
-    const horario       = getContextoHorario()
+    const horario       = validarHorario().mensajeBackend
     const pedidoEngine = obtenerPedido(clienteId)
     const contextoPrompt = construirContextoPrompt({
       decision,
@@ -1365,7 +1371,7 @@ async function procesarMensaje(msg: any): Promise<void> {
     if (confirmaCorto && /env[ií]o a esa zona cuesta|costo.*env[ií]o|cuesta \$/.test(historialTexto)) {
       contextoExtra +=
         `\n\n[CLIENTE ACEPTÓ EL COSTO DE ENVÍO] ` +
-        `INSTRUCCION: Para entrega a domicilio, pide el nombre para apartarlo y comparte la cuenta BBVA. ` +
+        `INSTRUCCION: Para entrega a domicilio, pide el nombre para apartarlo y comparte la cuenta (${obtenerTextoCuenta()}). ` +
         `NO ofrezcas efectivo/tarjeta al recoger porque el cliente pidió envío. ` +
         `Pregunta una sola cosa si falta: "¿A qué nombre lo aparto?".`
     }
@@ -1396,13 +1402,11 @@ async function procesarMensaje(msg: any): Promise<void> {
     }
 
     // ── GOOGLE MAPS / ZONAS DE ENVÍO ──────────────────────────────
-    const mencionaEnvio = /\b(env[ií]o|env[ií]ar|domicilio|entrega|mandar|llevar|reparto)\b/i.test(textoCliente)
-    const dirParsed = parseDireccion(textoCliente)
-    const mencionaDireccion = dirParsed.confianza !== 'ninguna'
-    const pareceEnvio = mencionaEnvio || mencionaDireccion || detectarLinkMaps(textoCliente)
+    const pareceEnvio = pareceConsultaEnvio(textoCliente)
+    const clienteDaDir = parseDireccion(textoCliente).confianza !== 'ninguna'
 
     if (pareceEnvio) {
-      if ((mencionaDireccion || detectarLinkMaps(textoCliente)) && tieneArregloVerificado(clienteId)) {
+      if ((clienteDaDir || detectarLinkMaps(textoCliente)) && tieneArregloVerificado(clienteId)) {
         const pedido = pedidoActual(clienteId)
         pedido.direccion = limpiarDireccionCliente(textoCliente)
         pedido.esperandoPrecioEnvio = true
@@ -1414,7 +1418,7 @@ async function procesarMensaje(msg: any): Promise<void> {
         `Menciona que el equipo le contactará pronto. Máximo 3 líneas.`
     }
 
-    const resultadoEnvio = pareceEnvio ? await buscarPrecioEnvio(textoCliente).catch(() => null) : null
+    const resultadoEnvio = pareceEnvio ? await buscarEnvio(textoCliente).catch(() => null) : null
 
     const envioCooldown = ENVIO_NOTIFICADO.get(clienteId) ?? 0
     const puedeNotificarEnvio = Date.now() - envioCooldown > 30 * 60_000
@@ -1462,13 +1466,9 @@ async function procesarMensaje(msg: any): Promise<void> {
     }
 
     // ── CANCELACIÓN ─────────────────────────────────────────────
-    const cancelacionDetectada = detectarCancelacion(textoCliente) || (clasificacionIA.intencion === 'cancelacion' && clasificacionIA.confianza >= 0.65)
-    const cancelacionDescartadaPorIA = detectarCancelacion(textoCliente) && clasificacionIA.confianza >= 0.75 && clasificacionIA.intencion !== 'cancelacion'
-    if (cancelacionDetectada && !cancelacionDescartadaPorIA) {
-      contextoExtra +=
-        `\n\n[CLIENTE QUIERE CANCELAR UN PEDIDO]` +
-        `\nINSTRUCCION: Responde con empatía. Di que notificarás al equipo. ` +
-        `NO prometas reembolsos ni descuentos. El sistema notificará automáticamente al administrador.`
+    const evalCancel = evaluarCancelacion(textoCliente, clasificacionIA)
+    if (evalCancel.detectada && !evalCancel.descartadaPorIA) {
+      contextoExtra += `\n\n[CLIENTE QUIERE CANCELAR UN PEDIDO]\n${evalCancel.instruccion}`
       if ((clasificacionIA.severidad === 'alta' || clasificacionIA.severidad === 'critica' || clasificacionIA.intencion === 'cancelacion') && debeNotificarReclamacion(clienteId, 'cancelacion')) {
         const telefonoReal = await numeroRealPromise
         const referencia = PEDIDO_EN_CURSO.get(clienteId)?.arreglo?.nombre ?? ARREGLO_ELEGIDO.get(clienteId)?.nombre ?? null
@@ -1479,13 +1479,9 @@ async function procesarMensaje(msg: any): Promise<void> {
     }
 
     // ── QUEJA ────────────────────────────────────────────────────
-    const quejaDetectada = detectarQueja(textoCliente) || (clasificacionIA.intencion === 'queja' && clasificacionIA.confianza >= 0.65)
-    const quejaDescartadaPorIA = detectarQueja(textoCliente) && clasificacionIA.confianza >= 0.75 && clasificacionIA.intencion !== 'queja'
-    if (quejaDetectada && !quejaDescartadaPorIA) {
-      contextoExtra +=
-        `\n\n[CLIENTE TIENE UNA QUEJA O RECLAMO]` +
-        `\nINSTRUCCION: Responde con empatía. Pide disculpas y di que lo reportas al equipo. ` +
-        `NO ofrezcas compensaciones ni descuentos. El sistema notificará automáticamente.`
+    const evalQueja = evaluarQueja(textoCliente, clasificacionIA)
+    if (evalQueja.detectada && !evalQueja.descartadaPorIA) {
+      contextoExtra += `\n\n[CLIENTE TIENE UNA QUEJA O RECLAMO]\n${evalQueja.instruccion}`
       if ((clasificacionIA.severidad === 'alta' || clasificacionIA.severidad === 'critica' || clasificacionIA.intencion === 'queja') && debeNotificarReclamacion(clienteId, 'queja')) {
         const telefonoReal = await numeroRealPromise
         const referencia = PEDIDO_EN_CURSO.get(clienteId)?.arreglo?.nombre ?? ARREGLO_ELEGIDO.get(clienteId)?.nombre ?? null
@@ -1637,7 +1633,7 @@ async function procesarMensaje(msg: any): Promise<void> {
       }
       contextoExtra +=
         `\n\n[CLIENTE RECOGE EN SUCURSAL] ` +
-        `INSTRUCCION: Confirma dirección: Av. Hidalgo 12, Apizaco Centro. ` +
+        `INSTRUCCION: ${obtenerTextoConfirmacionSucursal(validarSucursal(textoCliente))} ` +
         `Pregunta en qué horario pasará y comparte la cuenta BBVA por si quiere adelantar el pago. ` +
         `El equipo preparará su pedido.`
     }
@@ -1711,7 +1707,7 @@ async function procesarMensaje(msg: any): Promise<void> {
       const zonasPrompt = formatearZonasParaPrompt(zonas)
       if (zonasPrompt) contextoExtra += `\n\nZonas de envío disponibles:\n${zonasPrompt}`
 
-      contextoExtra += `\n\nForma de pago:\nBBVA | 4152314097305273 | Devi América Cerenil\n` +
+      contextoExtra += `\n\nForma de pago:\n${obtenerTextoCuenta()}\n` +
         `(Pregunta el nombre para apartarlo)`
 
       const respuestaIA = await getAIResponse(

@@ -358,6 +358,6 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 
 **Ventajas:** Reglas en un solo lugar, testeables, sin depender del LLM. Corrige parcialmente Error #3 (horarios) y #7 (reglas en prompt).
 
-**Desventajas:** `bot.ts` aún no usa estos validadores (pendiente M10d). El prompt de Supabase sigue teniendo reglas legacy hasta M10d.
+**Desventajas:** El prompt de Supabase (`configuracion_bot.system_prompt`) aún puede contener reglas legacy redundantes; se recomienda limpiarlo manualmente vía `/admin/prompt` para evitar duplicidad con los validadores.
 
-**Pendiente:** M10d conectará los validadores a `bot.ts` y simplificará `contextoExtra`.
+**Estado:** Completado (M10a-d). Los 6 validadores están conectados a `bot.ts`.
