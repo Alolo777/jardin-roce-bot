@@ -1,4 +1,4 @@
-import { EstadoPedido, PedidoActual } from '../../models/types'
+import { EstadoPedido, PedidoActual } from '../models/types'
 import { eventBus } from '../events/event-bus'
 import { EventType } from '../events/types'
 

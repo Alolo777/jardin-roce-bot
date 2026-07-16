@@ -48,7 +48,7 @@ import { getContenidoMensaje, getMessageBody, getMensajeTexto, getMessageType, h
 import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema, clasificarTipoCaso, limpiarCachesCasos } from './src/casos/caso.service'
 import { crearPedido, obtenerPedido, transitar, transitarDesdeFlujo, archivarPedido, cancelarPedido, limpiarCachesPedidos } from './src/pedidos/pedido.service'
 import { analizarIntencion, Decision } from './src/decision/decision.engine'
-import { Intencion } from './models/types'
+import { Intencion } from './src/models/types'
 import { construirContextoPrompt } from './src/openai/prompt.builder'
 import { cargarIgnorados, MENSAJES_RESCATADOS } from './src/whatsapp/preferences.service'
 import { obtenerNumeroReal, setBaileysKeys, limpiarCacheNumeros } from './src/whatsapp/contact.service'

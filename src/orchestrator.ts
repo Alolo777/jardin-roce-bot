@@ -2,7 +2,7 @@ import { analizarIntencion, Decision } from './decision/decision.engine'
 import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema, clasificarTipoCaso } from './casos/caso.service'
 import { crearPedido, obtenerPedido } from './pedidos/pedido.service'
 import { construirContextoPrompt } from './openai/prompt.builder'
-import { Caso, PedidoActual } from '../models/types'
+import { Caso, PedidoActual } from './models/types'
 
 export interface MensajeEntrante {
   texto: string

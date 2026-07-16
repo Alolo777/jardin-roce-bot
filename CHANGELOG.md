@@ -37,6 +37,21 @@ Versión: 2.0.4
 
 **Pendiente:** M10d (conectar los 6 validadores a bot.ts para reemplazar los bloques inline de contextoExtra).
 
+### Fix — models/ → src/models/ (build Vercel #4) (Julio 2026)
+
+**Error:** `./bot.ts:51 Type error: Cannot find module './models/types'`
+
+**Causa:** Next.js/Vercel no resuelve imports relativos a directorios raíz fuera de `src/`.
+
+**Cambios:**
+- Movido `models/` → `src/models/`
+- `bot.ts` import: `'./models/types'` → `'./src/models/types'`
+- Ajustadas rutas relativas en `src/decision`, `src/casos`, `src/openai`, `src/pedidos` (`../../models` → `../models`) y `src/orchestrator.ts` (`../models` → `./models`).
+
+**Impacto:** Compatible. Rollback: revertir movimiento.
+
+---
+
 ### Fix — parser/ → src/parser/ (build Vercel #3) (Julio 2026)
 
 **Error:** `./bot.ts:46 Type error: Cannot find module './parser'`

@@ -1,5 +1,5 @@
 import { Decision } from '../decision/decision.engine'
-import { Caso, PedidoActual, EstadoPedido } from '../../models/types'
+import { Caso, PedidoActual, EstadoPedido } from '../models/types'
 
 export interface ContextoPrompt {
   decision: Decision

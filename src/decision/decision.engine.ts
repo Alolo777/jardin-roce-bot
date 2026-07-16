@@ -1,4 +1,4 @@
-import { Intencion, TipoCaso, Prioridad } from '../../models/types'
+import { Intencion, TipoCaso, Prioridad } from '../models/types'
 
 export interface Decision {
   intencion: Intencion

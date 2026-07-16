@@ -1,4 +1,4 @@
-import { Caso, EstadoCaso, TipoCaso, Prioridad } from '../../models/types'
+import { Caso, EstadoCaso, TipoCaso, Prioridad } from '../models/types'
 import { eventBus } from '../events/event-bus'
 import { EventType } from '../events/types'
 
