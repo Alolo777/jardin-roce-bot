@@ -37,6 +37,20 @@ Versión: 2.0.4
 
 **Pendiente:** M10d (conectar los 6 validadores a bot.ts para reemplazar los bloques inline de contextoExtra).
 
+### M11b — Verificación Event Engine 100% (Julio 2026)
+
+**Resultado de investigación:**
+- `src/events/telegram.subscriber.ts` suscribe 25 eventos del `eventBus`.
+- `bot.ts` emite eventos para ORDER_CREATED, HUMAN_REQUIRED, CUSTOMER_ANGRY, PHOTO_*, PAYMENT_*, ZONA_AMBIGUA, CANCELACION, COTIZACION, ENVIO, CASE_*, BOT_* y más.
+- `bot.ts` NO contiene llamadas directas a `lib/telegram`: Telegram depende exclusivamente de eventos (cumple AGENTS.md Error #6 y Parte 3).
+- Las `notificarEmpleadosWhatsApp(sock, ...)` en bot.ts son canal WhatsApp a empleados, NO Telegram; quedan fuera del Event Engine.
+
+**Decisión:** M11b se cierra como verificación. La reducción de `bot.ts` a < 500 líneas se difiere a Fase 10 (Optimización) por ser refactor masiva de alto riesgo en producción.
+
+**Impacto:** Sin cambios de código. Rollback: N/A.
+
+---
+
 ### Fix — type-check lib/ai.ts y lib/googleSheets.ts (build Vercel #6) (Julio 2026)
 
 **Errores:**

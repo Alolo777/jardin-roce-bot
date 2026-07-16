@@ -13,12 +13,13 @@
 | Persistencia Supabase | 100% | ✅ |
 | Prompt Builder | 100% | ✅ |
 | Event Engine | 98% | 🟢 |
-| Telegram Engine | 60% | 🟡 |
+| Telegram Engine | 100% | ✅ |
 | Parsers | 100% | ✅ |
 | Modelos/Tipos | 100% | ✅ |
 
-**Progreso global estimado: ~96%**
-**bot.ts actual: ~2442 líneas (pendiente de extracción progresiva)**
+**Progreso global estimado: ~98%**
+**bot.ts actual: ~2442 líneas (reducción diferida a Fase 10 — Optimización)**
+**Nota M11b:** Telegram verificado 100% basado en Event Engine. No hay llamadas directas a `lib/telegram` desde `bot.ts`.
 
 ## Errores de la Versión Anterior
 
@@ -26,10 +27,10 @@
 |---|---|
 | #1 — Parser de nombre consume texto adicional | ✅ Resuelto |
 | #2 — Sucursal por defecto incorrecta | ✅ Resuelto |
-| #3 — LLM confirmaba horarios | 🟡 En progreso (M10a: validador creado, falta conectar) |
+| #3 — LLM confirmaba horarios | ✅ Resuelto (M10a: validador + conexión en M10d) |
 | #4 — Pedidos dependían de token VENTA_CERRADA | ✅ Resuelto |
 | #5 — Conversación y pedido misma entidad | ⏳ Pendiente (P2.1 iniciado) |
-| #6 — Telegram dependía del LLM | ⏳ Pendiente (eventos creados, migración parcial) |
+| #6 — Telegram dependía del LLM | ✅ Resuelto (verificado M11b: 100% eventos) |
 | #7 — Reglas de negocio en el prompt | 🟢 Resuelto (validadores TS creados y conectados en M10a-d) |
 
 ## Fases de Migración (Parte 4.1)
@@ -102,9 +103,9 @@
 - [x] M10c: cancelacion.validator.ts + queja.validator.ts
 - [x] M10d: Simplificar contextoExtra en bot.ts usando validadores
 - [x] M11a: Dashboard Panel de Operaciones (app/admin/operaciones)
-- [ ] Migrar llamadas restantes a Telegram desde bot.ts a eventos
-- [ ] Extraer lógica legacy de pedidos de bot.ts hacia el Order Engine
-- [ ] Reducir bot.ts progresivamente (< 500 líneas objetivo)
+- [x] M11b: Verificar Event Engine 100% (Telegram ya depende solo de eventos; verificado)
+- [ ] Extraer lógica legacy de pedidos de bot.ts hacia el Order Engine (diferido a Fase 10)
+- [ ] Reducir bot.ts progresivamente (< 500 líneas objetivo) (diferido a Fase 10 — Optimización)
 
 ## Completado
 

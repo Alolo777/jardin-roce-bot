@@ -217,6 +217,27 @@
 
 ---
 
+## DEC-019: Cierre de M11b y diferimiento de reducción de bot.ts
+
+**Fecha:** 2026-07-16
+**Estado:** Aceptada
+
+**Motivo:** Se verificó que Telegram ya depende 100% del Event Engine (`telegram.subscriber.ts` suscribe 25 eventos; `bot.ts` no tiene llamadas directas a `lib/telegram`). El sub-objetivo restante de M11b era reducir `bot.ts` a < 500 líneas (extrayendo lógica legacy de pedidos).
+
+**Alternativas consideradas:**
+1. Extraer todo `bot.ts` a módulos en una sola fase
+2. Extraer bloques acotados progresivamente
+3. Cerrar M11b como verificación y diferir la reducción a Fase 10
+
+**Resultado:** Se eligió la opción 3. La reducción masiva de `bot.ts` (2442 → <500 líneas) es refactor destructiva de alto riesgo en producción y contradice la Fase 4.1 ("Nunca realizar una refactorización masiva").
+
+**Ventajas:** No se pone en riesgo el canal WhatsApp en producción. Se respeta el protocolo de migración incremental.
+
+**Desventajas:** `bot.ts` sigue siendo grande hasta Fase 10.
+
+**Pendiente:** Reducción progresiva de `bot.ts` en Fase 10 (Optimización), módulo por módulo y reversible.
+
+
 ## DEC-008: Servidor Express único en api/server.ts
 
 **Fecha:** 2026-07-16
