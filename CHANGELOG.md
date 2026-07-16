@@ -340,6 +340,21 @@ Rollback: Sí — restaurar el bloque eliminado.
 
 ---
 
+### M7 — Helper functions de dedup movidas a bot-state.ts (Julio 2026)
+
+**Archivos modificados:**
+- `src/whatsapp/bot-state.ts` — +6 funciones exportadas
+- `bot.ts` — eliminadas ~50 líneas de funciones, actualizado import
+
+**Funciones movidas:**
+- `debeNotificarAtencionHumana`, `debeNotificarReclamacion`, `debeEnviarAlertaDedup`, `registrarIntervencionHumana`, `obtenerIntervencionHumanaReciente`, `extraerPrecioRespuesta`
+
+**Métrica:** bot.ts: 2502 → 2453 líneas (-49)
+**Impacto:** Compatible.
+**Rollback:** Sí.
+
+---
+
 ### M6 — Maps de estado global extraídos a src/whatsapp/bot-state.ts (Julio 2026)
 
 **Archivos creados:**

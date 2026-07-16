@@ -9,7 +9,7 @@
 | Decision Engine | 100% | ✅ |
 | Case Engine | 100% | ✅ |
 | Order Engine | 100% | ✅ |
-| WhatsApp Services | 65% | 🟡 |
+| WhatsApp Services | 75% | 🟡 |
 | Prompt Builder | 100% | ✅ |
 | Event Engine | 98% | 🟢 |
 | Telegram Engine | 60% | 🟡 |
