@@ -544,7 +544,7 @@ export async function getAIResponse(
     const ventaCerrada = parsearTokenVenta(respuestaRaw)
 
     // Limpiar el token del mensaje que verá el cliente
-    const mensajeLimpio = ventaCerrada
+    const mensajeLimpio = ventaCerrada && ventaCerrada.rawToken
       ? respuestaRaw.replace(ventaCerrada.rawToken, '').trim()
       : respuestaRaw
 

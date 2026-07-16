@@ -22,7 +22,7 @@ export async function getCatalogoFlores() {
       range: 'A1:O500', 
     });
 
-    const rows = response.data.values;
+    const rows: any[][] = (response.data.values as any[][]) ?? [];
     if (!rows || rows.length === 0) {
       console.log('La hoja existe, pero está vacía.');
       return [];
@@ -30,7 +30,7 @@ export async function getCatalogoFlores() {
 
     const headers = rows[0]; 
     
-    const catalogo = rows.slice(1).map((row) => {
+    const catalogo = rows.slice(1).map((row: any[]) => {
       const producto: any = {};
       headers.forEach((header: string, index: number) => {
         producto[header] = row[index] || '';
@@ -45,7 +45,7 @@ export async function getCatalogoFlores() {
 
     // 💡 TRUCO 2: Filtro relajado. Limpia espacios en blanco (.trim) 
     // y revisa si es "SI" o "SÍ" (con o sin acento) y si está en mayúscula o minúscula (.toUpperCase).
-    const productosListosParaVender = catalogo.filter((p) => {
+    const productosListosParaVender = catalogo.filter((p: any) => {
       const activo = p['Activo']?.trim().toUpperCase();
       const disponible = p['Disponible']?.trim().toUpperCase();
       

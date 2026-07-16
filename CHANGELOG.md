@@ -37,6 +37,22 @@ Versión: 2.0.4
 
 **Pendiente:** M10d (conectar los 6 validadores a bot.ts para reemplazar los bloques inline de contextoExtra).
 
+### Fix — type-check lib/ai.ts y lib/googleSheets.ts (build Vercel #6) (Julio 2026)
+
+**Errores:**
+- `lib/ai.ts:548`: `replace(ventaCerrada.rawToken)` con `rawToken` posiblemente `undefined`.
+- `lib/ai.ts:551`: `return { mensaje, ventaCerrada }` no compatible con `AIResponse`.
+- `lib/googleSheets.ts:33,48`: parámetros implícitamente `any` (TS7006).
+
+**Cambios:**
+- `lib/ai.ts`: `replace` solo si `ventaCerrada?.rawToken` existe.
+- `lib/types.ts`: `AIResponse` ahora incluye `ventaCerrada?: VentaCerrada | null`.
+- `lib/googleSheets.ts`: tipado explícito de `rows` y parámetros de `map`/`filter`.
+
+**Impacto:** Compatible. No altera flujo de venta. Rollback: revertir tipos.
+
+---
+
 ### Fix — VentaCerrada.rawToken opcional (build Vercel #5) (Julio 2026)
 
 **Error:** `./bot.ts:738 Type error: Property 'rawToken' is missing in type ... but required in type 'VentaCerrada'.`

@@ -33,6 +33,7 @@ export interface NumeroIgnorado {
 
 export interface AIResponse {
   mensaje: string
+  ventaCerrada?: VentaCerrada | null
 }
 
 export interface HistorialPrompt {
