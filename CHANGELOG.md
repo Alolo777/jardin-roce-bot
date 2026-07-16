@@ -37,6 +37,20 @@ Versión: 2.0.4
 
 **Pendiente:** M10d (conectar los 6 validadores a bot.ts para reemplazar los bloques inline de contextoExtra).
 
+### Fix — api/ → src/api/ (build Vercel #2) (Julio 2026)
+
+**Error:** `./bot.ts:29:29 Cannot find module './api/server'`
+
+**Causa:** Next.js/Vercel no resuelve imports relativos a directorios raíz fuera de `src/` al compilar `bot.ts`.
+
+**Cambios:**
+- Movido `api/server.ts` → `src/api/server.ts`
+- `bot.ts` import actualizado: `'./api/server'` → `'./src/api/server'`
+
+**Impacto:** Compatible. Rollback: revertir movimiento.
+
+---
+
 ### M10d — Conectar validadores a bot.ts (Julio 2026)
 
 **Archivo modificado:** `bot.ts`

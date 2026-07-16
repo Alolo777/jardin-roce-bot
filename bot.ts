@@ -26,7 +26,7 @@ import { EventType } from './src/events/types'
 import { subscribeTelegramEvents } from './src/events/telegram.subscriber'
 import { supabaseAdmin } from './lib/supabase'
 import type { VentaCerrada } from './lib/types'
-import { startServer } from './api/server'
+import { startServer } from './src/api/server'
 import {
   MAX_TURNOS_HISTORIAL,
   variantesTelefono,
