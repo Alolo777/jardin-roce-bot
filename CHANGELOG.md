@@ -4,6 +4,24 @@
 
 Versión: 2.0.4
 
+### M9 — Persistencia Supabase para bot-state (Julio 2026)
+
+**Archivos creados:**
+- `supabase_migration_bot_cache.sql` — tabla `bot_cache` (key PK, value JSONB, updated_at)
+- `src/whatsapp/bot-state-persistence.ts` — servicio cargar/guardar/iniciarPersistenciaPeriodica
+
+**Archivos modificados:**
+- `bot.ts` — +import, +cargarEstado() + iniciarPersistenciaPeriodica() en startup, +guardarEstado() en gracefulShutdown
+
+**Qué persiste:** ULTIMA_INTERVENCION_HUMANA, ALERTAS_DEDUP, RATE_TIMESTAMPS, FRUSTRACION_NOTIFICADA, ATENCION_HUMANA_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, RECLAMACION_NOTIFICADA, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES
+
+**Estrategia:** Carga al inicio. Guarda cada 5 min (setInterval). Guarda en SIGINT/SIGTERM.
+
+**Impacto:** Compatible. Necesita ejecutar migration SQL en Supabase.
+**Rollback:** Sí.
+
+---
+
 ### M8 — Rate limiter a bot-state.ts
 
 **Archivos modificados:**

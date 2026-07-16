@@ -55,6 +55,7 @@ import { obtenerNumeroReal, setBaileysKeys, limpiarCacheNumeros } from './src/wh
 import { notificarEmpleadosWhatsApp, enviarFotoEmpleadosWhatsApp } from './src/whatsapp/notification.service'
 import { detectarCancelacion, detectarQueja, detectarEvento, detectarInteresCompra } from './src/decision/intent-detector'
 import { FRUSTRACION_NOTIFICADA, ATENCION_HUMANA_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, RECLAMACION_NOTIFICADA, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, ALERTAS_DEDUP, ULTIMA_INTERVENCION_HUMANA, RATE_TIMESTAMPS, FOTOS_DISPONIBLES_TTL_MS, INTERVENCION_HUMANA_TTL_MS, limpiarCachesEstado, debeNotificarAtencionHumana, debeNotificarReclamacion, debeEnviarAlertaDedup, registrarIntervencionHumana, obtenerIntervencionHumanaReciente, extraerPrecioRespuesta, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, RATE_AVISADOS, estaRateLimited } from './src/whatsapp/bot-state'
+import { cargarEstado, guardarEstado, iniciarPersistenciaPeriodica } from './src/whatsapp/bot-state-persistence'
 
 // ════════════════════════════════════════════════════════════════
 // DETECCIÓN DE FRUSTRACIÓN
@@ -2395,6 +2396,8 @@ const startupWatchdog = setInterval(() => {
 }, 30_000)
 startupWatchdog.unref()
 
+cargarEstado().catch(() => {})
+iniciarPersistenciaPeriodica()
 iniciarBaileys().catch((err) => { console.error('❌ Error:', err); registrarCrash(); process.exit(1) })
 
 async function gracefulShutdown(signal: string): Promise<void> {
@@ -2404,6 +2407,12 @@ async function gracefulShutdown(signal: string): Promise<void> {
     process.exit(1)
   }, 10_000)
   timer.unref()
+
+  try {
+    await guardarEstado()
+  } catch (e) {
+    console.error('[shutdown] Error guardando estado:', e)
+  }
 
   try {
     if (sock) sock.end(undefined)

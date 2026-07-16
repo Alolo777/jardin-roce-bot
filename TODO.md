@@ -9,15 +9,16 @@
 | Decision Engine | 100% | ✅ |
 | Case Engine | 100% | ✅ |
 | Order Engine | 100% | ✅ |
-| WhatsApp Services | 80% | 🟢 |
+| WhatsApp Services | 85% | 🟢 |
+| Persistencia Supabase | 100% | ✅ |
 | Prompt Builder | 100% | ✅ |
 | Event Engine | 98% | 🟢 |
 | Telegram Engine | 60% | 🟡 |
 | Parsers | 100% | ✅ |
 | Modelos/Tipos | 100% | ✅ |
 
-**Progreso global estimado: ~89%**
-**bot.ts actual: ~2438 líneas (pendiente de extracción progresiva)**
+**Progreso global estimado: ~91%**
+**bot.ts actual: ~2439 líneas (pendiente de extracción progresiva)**
 
 ## Errores de la Versión Anterior
 
@@ -131,4 +132,8 @@ Tras el commit/push, probar flujo completo en producción. Luego continuar extra
 
 ## Bloqueados
 
-- Ninguno
+- [ ] `supabase_migration_bot_cache.sql` — pendiente de ejecutar en Supabase SQL Editor antes del próximo deploy
+
+## Notas para Producción
+
+- M9 requiere ejecutar `supabase_migration_bot_cache.sql` en Supabase SQL Editor antes del próximo reinicio del bot.
