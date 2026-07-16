@@ -54,6 +54,7 @@ import { cargarIgnorados, MENSAJES_RESCATADOS } from './src/whatsapp/preferences
 import { obtenerNumeroReal, setBaileysKeys, limpiarCacheNumeros } from './src/whatsapp/contact.service'
 import { notificarEmpleadosWhatsApp, enviarFotoEmpleadosWhatsApp } from './src/whatsapp/notification.service'
 import { detectarCancelacion, detectarQueja, detectarEvento, detectarInteresCompra } from './src/decision/intent-detector'
+import { FRUSTRACION_NOTIFICADA, ATENCION_HUMANA_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, RECLAMACION_NOTIFICADA, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, ALERTAS_DEDUP, ULTIMA_INTERVENCION_HUMANA, RATE_TIMESTAMPS, FOTOS_DISPONIBLES_TTL_MS, INTERVENCION_HUMANA_TTL_MS, limpiarCachesEstado } from './src/whatsapp/bot-state'
 
 // ════════════════════════════════════════════════════════════════
 // DETECCIÓN DE FRUSTRACIÓN
@@ -67,17 +68,7 @@ const KW_FRUSTRACION = [
   'cuando me van a contestar', 'tardaste mucho', 'porque tardaste',
 ]
 
-const FRUSTRACION_NOTIFICADA = new Map<string, number>()
-const ATENCION_HUMANA_NOTIFICADA = new Map<string, number>()
-const INTERES_COMPRA_NOTIFICADO = new Map<string, number>()
-const RECLAMACION_NOTIFICADA = new Map<string, number>()
-const ENVIO_NOTIFICADO = new Map<string, number>()
-const FOTOS_NOTIFICADO = new Map<string, number>()
-const FOTOS_DISPONIBLES_RECIENTES = new Map<string, number>()
-const ALERTAS_DEDUP = new Map<string, number>()
-const ULTIMA_INTERVENCION_HUMANA = new Map<string, { ts: number; texto: string; precio?: number }>()
-const FOTOS_DISPONIBLES_TTL_MS = 2 * 60 * 60_000
-const INTERVENCION_HUMANA_TTL_MS = 10 * 60_000
+
 
 function detectarFrustracion(texto: string): boolean {
   const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -260,8 +251,7 @@ setInterval(() => {
     limpiarCachesCasos()
     limpiarCachesPedidos()
     limpiarCacheNumeros()
-    FRUSTRACION_NOTIFICADA.clear()
-    RATE_TIMESTAMPS.clear()
+    limpiarCachesEstado()
     MENSAJES_RESCATADOS.clear()
     console.log('[RAM] 🧹 Cachés limpiadas')
   }
@@ -293,7 +283,6 @@ const MAX_LONGITUD_MENSAJE      = 1000
 const TIPOS_MEDIA_NO_SOPORTADOS = new Set(['image', 'video', 'audio', 'ptt', 'document', 'sticker'])
 const RATE_LIMIT_MAX            = 8
 const RATE_LIMIT_WINDOW_MS      = 30_000
-const RATE_TIMESTAMPS           = new Map<string, number[]>()
 const RATE_AVISADOS             = new Set<string>()
 
 function estaRateLimited(id: string): boolean {
