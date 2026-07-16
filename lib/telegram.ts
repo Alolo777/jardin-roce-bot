@@ -480,6 +480,54 @@ export async function enviarAlertaEmpleadoEnvio(
 }
 
 // ════════════════════════════════════════════════════════════════
+// 14B. ALERTAS DE PAGO
+// ════════════════════════════════════════════════════════════════
+
+export async function enviarAlertaPagoRecibido(
+  numeroCliente: string,
+  cliente: string,
+  producto: string,
+  total: number,
+  metodoPago: string
+): Promise<void> {
+  const msg = [
+    '💰 *PAGO RECIBIDO*',
+    '',
+    `👤 *Cliente:* ${esc(cliente)}`,
+    `📱 *Teléfono:* ${formatearNumero(numeroCliente)}`,
+    `🌸 *Producto:* ${esc(producto || '—')}`,
+    `💵 *Total:* $${(total || 0).toFixed(2)}`,
+    `💳 *Método:* ${esc(metodoPago)}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+  ].join('\n')
+  await enviar(msg)
+}
+
+export async function enviarAlertaPagoPendiente(
+  numeroCliente: string,
+  cliente: string,
+  producto: string,
+  total: number,
+  sucursal: string,
+  metodoPago: string
+): Promise<void> {
+  const msg = [
+    '⏳ *PAGO PENDIENTE*',
+    '',
+    `👤 *Cliente:* ${esc(cliente)}`,
+    `📱 *Teléfono:* ${formatearNumero(numeroCliente)}`,
+    `🌸 *Producto:* ${esc(producto || '—')}`,
+    `💵 *Total:* $${(total || 0).toFixed(2)}`,
+    `📍 *Sucursal:* ${esc(sucursal || '—')}`,
+    `💳 *Método:* ${esc(metodoPago)}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '⚠️ *Esperando confirmación de pago*',
+  ].join('\n')
+  await enviar(msg)
+}
+
+// ════════════════════════════════════════════════════════════════
 // 15. ENVIAR FOTO (BASE64) A TELEGRAM
 // ════════════════════════════════════════════════════════════════
 

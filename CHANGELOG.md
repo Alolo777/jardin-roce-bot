@@ -315,3 +315,25 @@ Rollback: Sí — restaurar el bloque eliminado.
 - bot.ts: 2844 → 2500 líneas (~344 líneas menos)
 - Archivos en `src/`: 17 archivos en 7 directorios
 - Compilación: limpia (0 errores TypeScript)
+
+---
+
+### M1 — Notificaciones de Pago a Telegram (Julio 2026)
+
+**Archivos modificados:**
+- `lib/telegram.ts` — +2 funciones: `enviarAlertaPagoRecibido` y `enviarAlertaPagoPendiente`
+- `events/telegram.subscriber.ts` — +2 suscripciones a `PAYMENT_RECEIVED` y `PAYMENT_PENDING`
+
+**Cambios:**
+- `PAYMENT_RECEIVED` se emitía desde bot.ts:1914 pero nunca llegaba a Telegram → ahora envía alerta con formato 💰
+- `PAYMENT_PENDING` se emitía desde bot.ts:1932 pero nunca llegaba a Telegram → ahora envía alerta con formato ⏳
+- Las nuevas funciones siguen el mismo patrón que las alerts existentes (esc, formatearNumero, horaActual)
+
+**Eventos Telegram antes/después:**
+| EventType | Antes | Después |
+|---|---|---|
+| PAYMENT_RECEIVED | Emitido, no suscrito | ✅ Suscrito |
+| PAYMENT_PENDING | Emitido, no suscrito | ✅ Suscrito |
+
+**Impacto:** Compatible — solo se agregan notificaciones, no se modifica lógica existente.
+**Rollback:** Sí — revertir cambios en ambos archivos.

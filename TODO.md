@@ -11,12 +11,12 @@
 | Order Engine | 100% | ✅ |
 | WhatsApp Services | 60% | 🟡 |
 | Prompt Builder | 100% | ✅ |
-| Event Engine | 70% | 🟡 |
+| Event Engine | 75% | 🟡 |
 | Telegram Engine | 60% | 🟡 |
 | Parsers | 100% | ✅ |
 | Modelos/Tipos | 100% | ✅ |
 
-**Progreso global estimado: ~78%**
+**Progreso global estimado: ~79%**
 **bot.ts actual: ~2500 líneas (pendiente de extracción progresiva)**
 
 ## Errores de la Versión Anterior
@@ -74,8 +74,13 @@
 - [x] Pendiente: migrar reglas de negocio del prompt de Supabase a TypeScript
 
 ### Fase 8 — Event Engine completo
-- [ ] Todo evento importante emite notificación
-- [ ] Auditoría de eventos faltantes en bot.ts
+- [x] PAYMENT_RECEIVED → Telegram ✅
+- [x] PAYMENT_PENDING → Telegram ✅
+- [ ] CASE_CREATED emitido desde caso.service.ts
+- [ ] CASE_ARCHIVED emitido desde caso.service.ts
+- [ ] ORDER_UPDATED emitido desde pedido.service.ts
+- [ ] ORDER_READY emitido desde pedido.service.ts
+- [ ] ORDER_DELIVERED emitido desde pedido.service.ts
 
 ### Fase 9 — Telegram Engine completo
 - [x] Telegram solo depende de eventos (fotos)

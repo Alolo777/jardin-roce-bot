@@ -279,3 +279,22 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 **Ventajas:** Funciones testeables sin depender del estado global de bot.ts. Reducción de ~300 líneas en bot.ts. Cada archivo con una sola responsabilidad.
 
 **Desventajas:** Los llamadores de `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` deben pasar explícitamente `sock`.
+
+---
+
+## DEC-015: PAYMENT_RECEIVED y PAYMENT_PENDING suscritos a Telegram
+
+**Fecha:** 2026-07-16
+**Estado:** Aceptada
+
+**Motivo:** Ambos eventos se emitían desde bot.ts pero ningún suscriptor los reenviaba a Telegram. Los pagos recibidos y pendientes no se notificaban al equipo por este canal.
+
+**Alternativas consideradas:**
+1. Reutilizar `enviarAlertaVentaCerrada` para ambos casos
+2. Crear funciones dedicadas con formato específico
+
+**Resultado:** Se crearon dos funciones dedicadas en `lib/telegram.ts` (`enviarAlertaPagoRecibido` y `enviarAlertaPagoPendiente`) con formato propio. Ambas suscritas en `events/telegram.subscriber.ts`.
+
+**Ventajas:** Mensajes claros y diferenciados para pago recibido vs pendiente. Siguen el patrón existente de alerts.
+
+**Desventajas:** Ninguna.
