@@ -11,12 +11,12 @@
 | Order Engine | 100% | ✅ |
 | WhatsApp Services | 60% | 🟡 |
 | Prompt Builder | 100% | ✅ |
-| Event Engine | 90% | 🟢 |
+| Event Engine | 92% | 🟢 |
 | Telegram Engine | 60% | 🟡 |
 | Parsers | 100% | ✅ |
 | Modelos/Tipos | 100% | ✅ |
 
-**Progreso global estimado: ~83%**
+**Progreso global estimado: ~84%**
 **bot.ts actual: ~2500 líneas (pendiente de extracción progresiva)**
 
 ## Errores de la Versión Anterior

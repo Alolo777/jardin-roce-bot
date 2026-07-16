@@ -1508,6 +1508,11 @@ async function procesarMensaje(msg: any): Promise<void> {
     } else if (resultadoEnvio && 'ambiguo' in resultadoEnvio && resultadoEnvio.ambiguo) {
       const telefonoReal = await numeroRealPromise
       registrarZonaAmbigua(textoCliente, telefonoReal, resultadoEnvio.candidatos).catch(() => {})
+      eventBus.emit(EventType.ZONA_AMBIGUA, {
+        telefono: telefonoReal,
+        descripcion: textoCliente,
+        candidatos: resultadoEnvio.candidatos,
+      })
       if (puedeNotificarEnvio) {
         ENVIO_NOTIFICADO.set(clienteId, Date.now())
         notificarEmpleadosWhatsApp(sock,

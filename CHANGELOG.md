@@ -340,6 +340,20 @@ Rollback: Sí — restaurar el bloque eliminado.
 
 ---
 
+### M4 — ZONA_AMBIGUA emitido a Telegram (Julio 2026)
+
+**Archivos modificados:**
+- `bot.ts` — +eventBus.emit(EventType.ZONA_AMBIGUA, ...) en bloque de envío ambiguo
+
+**Cambios:**
+- El suscriptor `ZONA_AMBIGUA` ya existía en Telegram pero nunca se disparaba
+- Ahora cuando se detecta una zona ambigua de envío, además de registrar en Supabase, se emite el evento
+
+**Impacto:** Compatible — la llamada a Supabase se mantiene.
+**Rollback:** Sí.
+
+---
+
 ### M3 — ORDER_READY emitido + ORDER_DELIVERED suscrito en Telegram (Julio 2026)
 
 **Archivos modificados:**
