@@ -37,6 +37,19 @@ Versión: 2.0.4
 
 **Pendiente:** M10d (conectar los 6 validadores a bot.ts para reemplazar los bloques inline de contextoExtra).
 
+### Fix — VentaCerrada.rawToken opcional (build Vercel #5) (Julio 2026)
+
+**Error:** `./bot.ts:738 Type error: Property 'rawToken' is missing in type ... but required in type 'VentaCerrada'.`
+
+**Causa:** `lib/types.ts` (remoto) marcaba `rawToken` como requerido en `VentaCerrada`. `ventaDesdeEstado` no lo proveía. Según AGENTS.md Error #4, el pedido no debe depender del token.
+
+**Cambios:**
+- `lib/types.ts`: `rawToken: string` → `rawToken?: string` (opcional).
+
+**Impacto:** Compatible. Rollback: revertir a requerido.
+
+---
+
 ### Fix — models/ → src/models/ (build Vercel #4) (Julio 2026)
 
 **Error:** `./bot.ts:51 Type error: Cannot find module './models/types'`

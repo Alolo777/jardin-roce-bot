@@ -3,7 +3,7 @@ export interface VentaCerrada {
   producto: string
   total: string
   direccion: string
-  rawToken: string
+  rawToken?: string
 }
 
 export interface ZonaEnvio {
@@ -32,8 +32,7 @@ export interface NumeroIgnorado {
 }
 
 export interface AIResponse {
-  mensaje: string               // Texto limpio para enviar al cliente
-  ventaCerrada: VentaCerrada | null  // Datos de venta si se detectó el token
+  mensaje: string
 }
 
 export interface HistorialPrompt {
