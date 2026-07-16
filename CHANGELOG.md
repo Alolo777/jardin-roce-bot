@@ -340,6 +340,25 @@ Rollback: Sí — restaurar el bloque eliminado.
 
 ---
 
+### M6 — Maps de estado global extraídos a src/whatsapp/bot-state.ts (Julio 2026)
+
+**Archivos creados:**
+- `src/whatsapp/bot-state.ts` — 10 Maps, 2 constantes, función limpiarCachesEstado()
+
+**Archivos modificados:**
+- `bot.ts` — eliminadas ~12 líneas de declaraciones, reemplazado .clear() inline por limpiarCachesEstado()
+
+**Cambios:**
+- `FRUSTRACION_NOTIFICADA`, `ATENCION_HUMANA_NOTIFICADA`, `INTERES_COMPRA_NOTIFICADO`, `RECLAMACION_NOTIFICADA`, `ENVIO_NOTIFICADO`, `FOTOS_NOTIFICADO`, `FOTOS_DISPONIBLES_RECIENTES`, `ALERTAS_DEDUP`, `ULTIMA_INTERVENCION_HUMANA`, `RATE_TIMESTAMPS` movidos a bot-state.ts
+- Mapas exportados con el mismo nombre → 0 cambios en las 37 referencias de bot.ts
+- Watchdog RAM ahora usa `limpiarCachesEstado()`
+
+**Métrica:** bot.ts: 2516 → 2502 líneas (-14)
+**Impacto:** Compatible.
+**Rollback:** Sí.
+
+---
+
 ### M5 — 6 eventos restantes emitidos y suscritos a Telegram (Julio 2026)
 
 **Archivos modificados:**
