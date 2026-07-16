@@ -259,6 +259,29 @@
 
 **Pendiente:** Unificar ciclo de vida de pedido y caso en Fase 10 si se requiere.
 
+---
+
+## DEC-021: Prompt alineado a la arquitectura de motores
+
+**Fecha:** 2026-07-16
+**Estado:** Aceptada
+
+**Motivo:** El system prompt anterior duplicaba reglas de negocio y dependía del token `[VENTA_CERRADA]` como fuente de verdad del pedido, contradiciendo el Error #4 (pedidos independientes del token) y el Error #7 (reglas en TS, no en prompt).
+
+**Alternativas consideradas:**
+1. Mantener el prompt anterior y solo parchar el token
+2. Mover TODAS las reglas de negocio al prompt (rechazada: Error #7)
+3. Reescribir el prompt para que obedezca las anotaciones del backend y trate el token como respaldo (elegida)
+
+**Resultado:** Nuevo prompt que (a) obedece primero las anotaciones inyectadas por `contextoExtra`; (b) documenta las anotaciones reales del backend; (c) declara que el precio de envío lo confirma una compañera del equipo (no el bot); (d) trata `[VENTA_CERRADA:...]` como respaldo opcional.
+
+**Ventajas:** Coherente con AGENTS.md Parte 3 (OpenAI solo redacta). Reduce riesgo de respuestas inventadas. El usuario mantiene cuenta BBVA y precios de flores en el prompt por preferencia.
+
+**Desventajas:** El prompt sigue teniendo algunas reglas de negocio (cuenta, precios) por decisión explícita del usuario; el backend ya las valida, así que es redundancia tolerada.
+
+**Nota:** El prompt de producción vive en Supabase (`configuracion_bot.system_prompt`) y se edita desde el Dashboard "Cerebro". El fallback en `lib/ai.ts` (`FALLBACK_SYSTEM_PROMPT`) se actualizó para coincidir.
+
+
 
 
 ## DEC-008: Servidor Express único en api/server.ts

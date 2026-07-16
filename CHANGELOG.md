@@ -37,6 +37,23 @@ Versión: 2.0.4
 
 **Pendiente:** M10d (conectar los 6 validadores a bot.ts para reemplazar los bloques inline de contextoExtra).
 
+### Prompt — Nuevo system prompt alineado a arquitectura (Julio 2026)
+
+**Cambios:**
+- `lib/ai.ts`: `FALLBACK_SYSTEM_PROMPT` reemplaza el fallback mínimo con el prompt completo alineado a la arquitectura de motores.
+- El prompt real de producción vive en Supabase (`configuracion_bot` clave `system_prompt`) y se actualiza desde el Dashboard "Cerebro"; este fallback cubre fallo de Supabase.
+
+**Ajustes de arquitectura aplicados al prompt:**
+- Obedece primero las anotaciones del backend (`[CASO ACTIVO]`, `[PEDIDO ACTIVO]`, `[CLIENTE PREGUNTA POR ENVÍO]`, etc.).
+- Token `[VENTA_CERRADA:...]` ahora es respaldo opcional (Error #4): el backend registra el pedido por su cuenta.
+- Refuerza que el precio de envío lo confirma UNA COMPAÑERA DEL EQUIPO, no el bot.
+- Documenta las anotaciones que inyecta `contextoExtra` (Error #5, fotos, intervención humana).
+- Mantiene cuenta BBVA y precios de flores editables desde el panel (decisión del usuario).
+
+**Impacto:** Compatible. Rollback: revertir fallback.
+
+---
+
 ### P2.1 — Error #5: conversación ≠ pedido (Julio 2026)
 
 **Problema (AGENTS.md Error #5):** El pedido en memoria (`obtenerPedido`) se reutilizaba aunque el caso cambiara de tema, mezclando datos antiguos (nombre, precio, arreglo, sucursal, fecha).

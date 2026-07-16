@@ -104,6 +104,7 @@
 - [x] M10d: Simplificar contextoExtra en bot.ts usando validadores
 - [x] M11a: Dashboard Panel de Operaciones (app/admin/operaciones)
 - [x] M11b: Verificar Event Engine 100% (Telegram ya depende solo de eventos; verificado)
+- [x] Prompt: system prompt alineado a arquitectura (fallback en lib/ai.ts + Dashboard "Cerebro")
 - [ ] Extraer lógica legacy de pedidos de bot.ts hacia el Order Engine (diferido a Fase 10)
 - [ ] Reducir bot.ts progresivamente (< 500 líneas objetivo) (diferido a Fase 10 — Optimización)
 
