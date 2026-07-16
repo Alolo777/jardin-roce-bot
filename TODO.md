@@ -17,7 +17,7 @@
 | Parsers | 100% | ✅ |
 | Modelos/Tipos | 100% | ✅ |
 
-**Progreso global estimado: ~93%**
+**Progreso global estimado: ~94%**
 **bot.ts actual: ~2446 líneas (pendiente de extracción progresiva)**
 
 ## Errores de la Versión Anterior
@@ -99,7 +99,7 @@
 ## Pendientes Inmediatos
 
 - [x] M10b: sucursal.validator.ts + envio.validator.ts
-- [ ] M10c: cancelacion.validator.ts + queja.validator.ts
+- [x] M10c: cancelacion.validator.ts + queja.validator.ts
 - [ ] M10d: Simplificar contextoExtra en bot.ts usando validadores
 - [ ] Migrar llamadas restantes a Telegram desde bot.ts a eventos
 - [ ] Extraer lógica legacy de pedidos de bot.ts hacia el Order Engine

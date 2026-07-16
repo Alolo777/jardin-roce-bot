@@ -336,3 +336,28 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 **Ventajas:** El equipo recibe notificación cuando un pedido está listo y cuando se entrega.
 
 **Desventajas:** Ninguna.
+
+## DEC-018: Validadores de reglas de negocio en TypeScript (M10a/b/c)
+
+**Fecha:** 2026-07-16
+**Estado:** Aceptada
+
+**Motivo:** El `contextoExtra` de `bot.ts` (líneas ~1250-1715) inyecta ~23 bloques de reglas de negocio como texto al LLM, violando AGENTS.md Error #7 y DEC-013. El LLM no debe decidir horarios, precios, sucursales, pagos ni compensaciones.
+
+**Alternativas consideradas:**
+1. Dejar las reglas en el prompt de Supabase (no, viola arquitectura)
+2. Validación solo por el revisor LLM (no, doble dependencia del modelo)
+
+**Resultado:** Se crearon validadores en `src/validators/` que devuelven datos estructurados y texto de instrucción para el backend:
+- `horario.validator.ts` (M10a): `validarHorario()` con constantes de apertura/cierre.
+- `pago.validator.ts` (M10a): `CUENTA_BBVA`, `determinarInstruccionPago()`, detectores de comprobante/cuenta.
+- `sucursal.validator.ts` (M10b): `validarSucursal()`, `clienteQuiereRecoger()`.
+- `envio.validator.ts` (M10b): `buscarEnvio()`, `pareceConsultaEnvio()`, caché de municipios/zonas.
+- `cancelacion.validator.ts` (M10c): `evaluarCancelacion()` → instrucción de empatía sin reembolsos.
+- `queja.validator.ts` (M10c): `evaluarQueja()` → instrucción de empatía sin compensaciones.
+
+**Ventajas:** Reglas en un solo lugar, testeables, sin depender del LLM. Corrige parcialmente Error #3 (horarios) y #7 (reglas en prompt).
+
+**Desventajas:** `bot.ts` aún no usa estos validadores (pendiente M10d). El prompt de Supabase sigue teniendo reglas legacy hasta M10d.
+
+**Pendiente:** M10d conectará los validadores a `bot.ts` y simplificará `contextoExtra`.

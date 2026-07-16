@@ -25,6 +25,22 @@ Versión: 2.0.4
 
 **Pendiente:** M10c (cancelación + queja) y M10d (conectar a bot.ts).
 
+### M10c — Validadores cancelación + queja (Julio 2026)
+
+**Archivos creados:**
+- `src/validators/cancelacion.validator.ts` — `evaluarCancelacion(texto, clasificacionIA)` devuelve `{ detectada, descartadaPorIA, instruccion }`
+- `src/validators/queja.validator.ts` — `evaluarQueja(texto, clasificacionIA)` devuelve `{ detectada, descartadaPorIA, instruccion }`
+
+**Reglas extraídas del prompt (contextoExtra en bot.ts):**
+- Cancelación: empatía, notificar equipo, NO reembolsos/descuentos
+- Queja: empatía, disculpas, reportar equipo, NO compensaciones/descuentos
+
+**Pendiente:** M10d (conectar los 6 validadores a bot.ts para reemplazar los bloques inline de contextoExtra).
+
+---
+
+**Pendiente:** M10c (cancelación + queja) y M10d (conectar a bot.ts).
+
 ---
 
 ### M9 — Persistencia Supabase para bot-state (Julio 2026)
