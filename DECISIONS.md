@@ -317,3 +317,22 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 **Ventajas:** El equipo ve en Telegram cada nuevo caso con tipo y prioridad, y cada archivo con motivo.
 
 **Desventajas:** Ninguna.
+
+---
+
+## DEC-017: ORDER_READY emitido y ORDER_DELIVERED suscrito a Telegram
+
+**Fecha:** 2026-07-16
+**Estado:** Aceptada
+
+**Motivo:** ORDER_READY nunca se emitía desde el Order Engine (faltaba en la transición a LISTO). ORDER_DELIVERED ya se emitía pero no tenía suscriptor en Telegram.
+
+**Alternativas consideradas:**
+1. Emitir ORDER_READY solo desde el subscriber (no, el emitter debe estar en el engine)
+2. Reutilizar `enviarAlertaPedidoApartado` para ambos
+
+**Resultado:** Se agregó `eventBus.emit(EventType.ORDER_READY, ...)` en `transitar()` cuando el estado pasa a LISTO. Se crearon `enviarAlertaPedidoListo` (✅) y `enviarAlertaPedidoEntregado` (🚚) en `lib/telegram.ts`. Ambas suscritas en el subscriber.
+
+**Ventajas:** El equipo recibe notificación cuando un pedido está listo y cuando se entrega.
+
+**Desventajas:** Ninguna.

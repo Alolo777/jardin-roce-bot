@@ -340,6 +340,29 @@ Rollback: Sí — restaurar el bloque eliminado.
 
 ---
 
+### M3 — ORDER_READY emitido + ORDER_DELIVERED suscrito en Telegram (Julio 2026)
+
+**Archivos modificados:**
+- `src/pedidos/pedido.service.ts` — +emisión de ORDER_READY en transición a LISTO
+- `lib/telegram.ts` — +2 funciones: `enviarAlertaPedidoListo` (✅) y `enviarAlertaPedidoEntregado` (🚚)
+- `events/telegram.subscriber.ts` — +2 suscripciones a ORDER_READY y ORDER_DELIVERED
+
+**Cambios:**
+- `ORDER_READY` nunca se emitía → ahora se emite en `transitar()` cuando el estado pasa a LISTO
+- `ORDER_DELIVERED` ya se emitía desde `transitar()` pero no llegaba a Telegram → ahora suscrito
+
+**Eventos Telegram antes/después:**
+
+| EventType | Antes | Después |
+|---|---|---|
+| ORDER_READY | No se emitía | ✅ Emitido en transición a LISTO + suscrito |
+| ORDER_DELIVERED | Emitido, no suscrito | ✅ Suscrito |
+
+**Impacto:** Compatible.
+**Rollback:** Sí.
+
+---
+
 ### M2 — Eventos de Caso a Telegram (Julio 2026)
 
 **Archivos modificados:**

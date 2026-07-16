@@ -68,6 +68,14 @@ export function transitar(pedido: PedidoActual, nuevoEstado: EstadoPedido): bool
     descripcion: `Estado: ${actual} → ${nuevoEstado}`,
   })
 
+  if (nuevoEstado === EstadoPedido.LISTO) {
+    eventBus.emit(EventType.ORDER_READY, {
+      orderId: pedido.id,
+      telefono: pedido.telefono ?? '',
+      descripcion: 'Pedido listo para entrega',
+    })
+  }
+
   if (nuevoEstado === EstadoPedido.ENTREGADO) {
     eventBus.emit(EventType.ORDER_DELIVERED, {
       orderId: pedido.id,

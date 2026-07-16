@@ -22,6 +22,8 @@ import {
   enviarAlertaCasoArchivado,
   enviarAlertaPagoRecibido,
   enviarAlertaPagoPendiente,
+  enviarAlertaPedidoListo,
+  enviarAlertaPedidoEntregado,
   enviarFotoTelegram,
 } from '../lib/telegram'
 
@@ -58,6 +60,18 @@ export function subscribeTelegramEvents(): void {
       fechaHora: (event.payload as any).fechaHora,
       tieneFotoReferencia: (event.payload as any).tieneFotoReferencia,
     }).catch(() => {})
+  })
+
+  eventBus.subscribe(EventType.ORDER_READY, (event) => {
+    enviarAlertaPedidoListo(
+      event.payload.telefono,
+    ).catch(() => {})
+  })
+
+  eventBus.subscribe(EventType.ORDER_DELIVERED, (event) => {
+    enviarAlertaPedidoEntregado(
+      event.payload.telefono,
+    ).catch(() => {})
   })
 
   eventBus.subscribe(EventType.HUMAN_REQUIRED, (event) => {

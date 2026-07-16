@@ -480,6 +480,38 @@ export async function enviarAlertaEmpleadoEnvio(
 }
 
 // ════════════════════════════════════════════════════════════════
+// 14A. ALERTAS DE PEDIDO (LISTO / ENTREGADO)
+// ════════════════════════════════════════════════════════════════
+
+export async function enviarAlertaPedidoListo(
+  numeroCliente: string
+): Promise<void> {
+  const msg = [
+    '✅ *PEDIDO LISTO*',
+    '',
+    `📱 *Cliente:* ${formatearNumero(numeroCliente)}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '_El pedido está listo para entrega o recogida_',
+  ].join('\n')
+  await enviar(msg)
+}
+
+export async function enviarAlertaPedidoEntregado(
+  numeroCliente: string
+): Promise<void> {
+  const msg = [
+    '🚚 *PEDIDO ENTREGADO*',
+    '',
+    `📱 *Cliente:* ${formatearNumero(numeroCliente)}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '_El pedido fue entregado al cliente_',
+  ].join('\n')
+  await enviar(msg)
+}
+
+// ════════════════════════════════════════════════════════════════
 // 14B. ALERTAS DE CASOS
 // ════════════════════════════════════════════════════════════════
 
