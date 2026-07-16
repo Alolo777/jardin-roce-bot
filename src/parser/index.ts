@@ -1,0 +1,7 @@
+export { parseNombre, pareceNombreCliente } from './nombre.parser'
+export { parseFecha, extraerFecha } from './fecha.parser'
+export { parseHora, extraerHora } from './hora.parser'
+export { parseSucursal, extraerSucursal } from './sucursal.parser'
+export { parsePrecio } from './precio.parser'
+export { parseDireccion, extraerDireccion } from './direccion.parser'
+export { limpiarTelefono, formatearTelefono, ultimosDigitos, esLid } from './telefono.parser'

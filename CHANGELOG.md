@@ -37,6 +37,21 @@ Versión: 2.0.4
 
 **Pendiente:** M10d (conectar los 6 validadores a bot.ts para reemplazar los bloques inline de contextoExtra).
 
+### Fix — parser/ → src/parser/ (build Vercel #3) (Julio 2026)
+
+**Error:** `./bot.ts:46 Type error: Cannot find module './parser'`
+
+**Causa:** Next.js/Vercel no resuelve imports relativos a directorios raíz fuera de `src/`.
+
+**Cambios:**
+- Movido `parser/` → `src/parser/`
+- `bot.ts` import: `'./parser'` → `'./src/parser'`
+- Ajustadas rutas relativas en `src/validators/*.ts`, `src/whatsapp/bot-state.ts`, `src/whatsapp/notification.service.ts` (`../../parser` → `../parser`).
+
+**Impacto:** Compatible. Rollback: revertir movimiento.
+
+---
+
 ### M11a — Dashboard: Panel de Operaciones (Julio 2026)
 
 **Cambios:**

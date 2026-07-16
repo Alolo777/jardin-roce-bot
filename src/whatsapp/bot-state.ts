@@ -1,5 +1,5 @@
 import { normalizarTexto } from '../conversation/index'
-import { parsePrecio } from '../../parser/precio.parser'
+import { parsePrecio } from '../parser/precio.parser'
 
 export const FRUSTRACION_NOTIFICADA = new Map<string, number>()
 export const ATENCION_HUMANA_NOTIFICADA = new Map<string, number>()

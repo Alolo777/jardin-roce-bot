@@ -1,6 +1,6 @@
 import { supabaseAdmin } from '../../lib/supabase'
 import { jidANumero } from './message-utils'
-import { limpiarTelefono } from '../../parser'
+import { limpiarTelefono } from '../parser'
 
 let CACHE_EMPLEADOS: { numeros: string[]; ts: number } | null = null
 

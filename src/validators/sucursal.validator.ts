@@ -1,4 +1,4 @@
-import { parseSucursal } from '../../parser/sucursal.parser'
+import { parseSucursal } from '../parser/sucursal.parser'
 
 export interface SucursalInfo {
   sucursal: string | null

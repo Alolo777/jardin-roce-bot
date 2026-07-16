@@ -1,4 +1,4 @@
-import { parseDireccion } from '../../parser/direccion.parser'
+import { parseDireccion } from '../parser/direccion.parser'
 import { normalizarTexto } from '../conversation/conversation.service'
 import { supabaseAdmin } from '../../lib/supabase'
 
