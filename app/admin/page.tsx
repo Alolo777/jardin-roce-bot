@@ -29,6 +29,14 @@ const FEATURES = [
     gradient: 'from-amber-400 to-orange-400',
     shadow: 'shadow-amber-200/40',
   },
+  {
+    href: '/admin/operaciones',
+    icon: '📋',
+    title: 'Operaciones',
+    desc: 'Panel en tiempo real de pedidos activos por estado de la máquina de estados.',
+    gradient: 'from-sky-400 to-indigo-400',
+    shadow: 'shadow-sky-200/40',
+  },
 ]
 
 function BotStatusPanel() {

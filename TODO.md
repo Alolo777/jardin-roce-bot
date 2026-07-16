@@ -101,6 +101,7 @@
 - [x] M10b: sucursal.validator.ts + envio.validator.ts
 - [x] M10c: cancelacion.validator.ts + queja.validator.ts
 - [x] M10d: Simplificar contextoExtra en bot.ts usando validadores
+- [x] M11a: Dashboard Panel de Operaciones (app/admin/operaciones)
 - [ ] Migrar llamadas restantes a Telegram desde bot.ts a eventos
 - [ ] Extraer lógica legacy de pedidos de bot.ts hacia el Order Engine
 - [ ] Reducir bot.ts progresivamente (< 500 líneas objetivo)

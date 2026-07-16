@@ -37,6 +37,16 @@ Versión: 2.0.4
 
 **Pendiente:** M10d (conectar los 6 validadores a bot.ts para reemplazar los bloques inline de contextoExtra).
 
+### M11a — Dashboard: Panel de Operaciones (Julio 2026)
+
+**Cambios:**
+- Nuevo `app/admin/operaciones/page.tsx`: Client Component que consume `/api/bot/status` cada 15s y muestra pedidos activos agrupados por estado de la máquina de estados (NUEVO→LISTO) + tarjetas de resumen + alerta de zonas ambiguas.
+- Agregado enlace "Operaciones 📋" a `app/admin/page.tsx` (FEATURES).
+
+**Impacto:** Compatible. Reusa endpoint existente. Rollback: eliminar página y link.
+
+---
+
 ### Fix — api/ → src/api/ (build Vercel #2) (Julio 2026)
 
 **Error:** `./bot.ts:29:29 Cannot find module './api/server'`
