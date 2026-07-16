@@ -337,3 +337,25 @@ Rollback: Sí — restaurar el bloque eliminado.
 
 **Impacto:** Compatible — solo se agregan notificaciones, no se modifica lógica existente.
 **Rollback:** Sí — revertir cambios en ambos archivos.
+
+---
+
+### M2 — Eventos de Caso a Telegram (Julio 2026)
+
+**Archivos modificados:**
+- `lib/telegram.ts` — +2 funciones: `enviarAlertaCasoNuevo` y `enviarAlertaCasoArchivado`
+- `events/telegram.subscriber.ts` — +2 suscripciones a `CASE_CREATED` y `CASE_ARCHIVED`
+
+**Cambios:**
+- `CASE_CREATED` ya se emitía desde `caso.service.ts` pero no llegaba a Telegram → ahora envía 📋 con tipo y prioridad
+- `CASE_ARCHIVED` ya se emitía desde `caso.service.ts` pero no llegaba a Telegram → ahora envía 🗂️ con motivo
+
+**Eventos Telegram antes/después:**
+
+| EventType | Antes | Después |
+|---|---|---|
+| CASE_CREATED | Emitido, no suscrito | ✅ Suscrito |
+| CASE_ARCHIVED | Emitido, no suscrito | ✅ Suscrito |
+
+**Impacto:** Compatible.
+**Rollback:** Sí.

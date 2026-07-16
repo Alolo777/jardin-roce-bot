@@ -480,7 +480,42 @@ export async function enviarAlertaEmpleadoEnvio(
 }
 
 // ════════════════════════════════════════════════════════════════
-// 14B. ALERTAS DE PAGO
+// 14B. ALERTAS DE CASOS
+// ════════════════════════════════════════════════════════════════
+
+export async function enviarAlertaCasoNuevo(
+  numeroCliente: string,
+  tipoCaso: string,
+  prioridad: string
+): Promise<void> {
+  const emojiPrioridad = prioridad === 'critica' ? '🔴' : prioridad === 'alta' ? '🟠' : '🟢'
+  const msg = [
+    '📋 *NUEVO CASO*',
+    '',
+    `📱 *Cliente:* ${formatearNumero(numeroCliente)}`,
+    `🏷️ *Tipo:* ${esc(tipoCaso)}`,
+    `${emojiPrioridad} *Prioridad:* ${esc(prioridad)}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+  ].join('\n')
+  await enviar(msg)
+}
+
+export async function enviarAlertaCasoArchivado(
+  numeroCliente: string,
+  motivo: string
+): Promise<void> {
+  const msg = [
+    '🗂️ *CASO ARCHIVADO*',
+    '',
+    `📱 *Cliente:* ${formatearNumero(numeroCliente)}`,
+    `📝 *Motivo:* ${esc(motivo)}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+  ].join('\n')
+  await enviar(msg)
+}
+
+// ════════════════════════════════════════════════════════════════
+// 14C. ALERTAS DE PAGO
 // ════════════════════════════════════════════════════════════════
 
 export async function enviarAlertaPagoRecibido(

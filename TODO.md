@@ -11,12 +11,12 @@
 | Order Engine | 100% | ✅ |
 | WhatsApp Services | 60% | 🟡 |
 | Prompt Builder | 100% | ✅ |
-| Event Engine | 75% | 🟡 |
+| Event Engine | 85% | 🟢 |
 | Telegram Engine | 60% | 🟡 |
 | Parsers | 100% | ✅ |
 | Modelos/Tipos | 100% | ✅ |
 
-**Progreso global estimado: ~79%**
+**Progreso global estimado: ~81%**
 **bot.ts actual: ~2500 líneas (pendiente de extracción progresiva)**
 
 ## Errores de la Versión Anterior
@@ -76,8 +76,8 @@
 ### Fase 8 — Event Engine completo
 - [x] PAYMENT_RECEIVED → Telegram ✅
 - [x] PAYMENT_PENDING → Telegram ✅
-- [ ] CASE_CREATED emitido desde caso.service.ts
-- [ ] CASE_ARCHIVED emitido desde caso.service.ts
+- [x] CASE_CREATED → Telegram ✅
+- [x] CASE_ARCHIVED → Telegram ✅
 - [ ] ORDER_UPDATED emitido desde pedido.service.ts
 - [ ] ORDER_READY emitido desde pedido.service.ts
 - [ ] ORDER_DELIVERED emitido desde pedido.service.ts

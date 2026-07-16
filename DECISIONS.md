@@ -298,3 +298,22 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 **Ventajas:** Mensajes claros y diferenciados para pago recibido vs pendiente. Siguen el patrón existente de alerts.
 
 **Desventajas:** Ninguna.
+
+---
+
+## DEC-016: CASE_CREATED y CASE_ARCHIVED suscritos a Telegram
+
+**Fecha:** 2026-07-16
+**Estado:** Aceptada
+
+**Motivo:** `caso.service.ts` ya emitía CASE_CREATED y CASE_ARCHIVED desde su creación, pero ningún suscriptor los reenviaba a Telegram. El equipo no recibía notificaciones de nuevos casos o casos archivados.
+
+**Alternativas consideradas:**
+1. Reutilizar `enviarAlertaTelegram` genérico
+2. Crear funciones dedicadas con formato específico
+
+**Resultado:** Se crearon `enviarAlertaCasoNuevo` (📋) y `enviarAlertaCasoArchivado` (🗂️) en `lib/telegram.ts`. Suscritas en `events/telegram.subscriber.ts`.
+
+**Ventajas:** El equipo ve en Telegram cada nuevo caso con tipo y prioridad, y cada archivo con motivo.
+
+**Desventajas:** Ninguna.

@@ -18,6 +18,8 @@ import {
   enviarAlertaClienteInteresado,
   enviarAlertaEmpleadoFotos,
   enviarAlertaEmpleadoEnvio,
+  enviarAlertaCasoNuevo,
+  enviarAlertaCasoArchivado,
   enviarAlertaPagoRecibido,
   enviarAlertaPagoPendiente,
   enviarFotoTelegram,
@@ -97,6 +99,21 @@ export function subscribeTelegramEvents(): void {
 
   eventBus.subscribe(EventType.ENVIO_REQUESTED, (event) => {
     enviarAlertaEmpleadoEnvio(
+      event.payload.telefono,
+      event.payload.descripcion ?? '',
+    ).catch(() => {})
+  })
+
+  eventBus.subscribe(EventType.CASE_CREATED, (event) => {
+    enviarAlertaCasoNuevo(
+      event.payload.telefono,
+      event.payload.descripcion ?? '',
+      event.payload.prioridad ?? 'media',
+    ).catch(() => {})
+  })
+
+  eventBus.subscribe(EventType.CASE_ARCHIVED, (event) => {
+    enviarAlertaCasoArchivado(
       event.payload.telefono,
       event.payload.descripcion ?? '',
     ).catch(() => {})
