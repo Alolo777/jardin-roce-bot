@@ -512,6 +512,100 @@ export async function enviarAlertaPedidoEntregado(
 }
 
 // ════════════════════════════════════════════════════════════════
+// 14AA. EVENTOS RESTANTES
+// ════════════════════════════════════════════════════════════════
+
+export async function enviarAlertaPagoConfirmado(
+  numeroCliente: string,
+  cliente: string,
+  total: number,
+  metodoPago: string
+): Promise<void> {
+  const msg = [
+    '💳 *PAGO CONFIRMADO*',
+    '',
+    `👤 *Cliente:* ${esc(cliente)}`,
+    `📱 *Teléfono:* ${formatearNumero(numeroCliente)}`,
+    `💵 *Total:* $${(total || 0).toFixed(2)}`,
+    `💳 *Método:* ${esc(metodoPago)}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+  ].join('\n')
+  await enviar(msg)
+}
+
+export async function enviarAlertaPrecioConfirmado(
+  numeroCliente: string
+): Promise<void> {
+  const msg = [
+    '💲 *PRECIO CONFIRMADO*',
+    '',
+    `📱 *Cliente:* ${formatearNumero(numeroCliente)}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '_El cliente aceptó el precio, esperando datos para continuar_',
+  ].join('\n')
+  await enviar(msg)
+}
+
+export async function enviarAlertaEntregaCompletada(
+  numeroCliente: string
+): Promise<void> {
+  const msg = [
+    '📬 *ENTREGA COMPLETADA*',
+    '',
+    `📱 *Cliente:* ${formatearNumero(numeroCliente)}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '_El proceso de entrega finalizó_',
+  ].join('\n')
+  await enviar(msg)
+}
+
+export async function enviarAlertaBotDesconectado(
+  motivo: string
+): Promise<void> {
+  const msg = [
+    '🔴 *BOT DESCONECTADO*',
+    '',
+    `📝 *Motivo:* ${esc(motivo)}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '_El bot se desconectó. Intentando reconectar automáticamente..._',
+  ].join('\n')
+  await enviar(msg)
+}
+
+export async function enviarAlertaClienteEsperando(
+  numeroCliente: string
+): Promise<void> {
+  const msg = [
+    '⏱️ *CLIENTE ESPERANDO*',
+    '',
+    `📱 *Cliente:* ${formatearNumero(numeroCliente)}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '_El cliente está esperando respuesta del equipo_',
+  ].join('\n')
+  await enviar(msg)
+}
+
+export async function enviarAlertaFotoEnviada(
+  numeroCliente: string,
+  caption: string
+): Promise<void> {
+  const msg = [
+    '🖼️ *FOTO ENVIADA*',
+    '',
+    `📱 *Cliente:* ${formatearNumero(numeroCliente)}`,
+    `💬 *Descripción:* ${esc(caption.slice(0, 200))}`,
+    `⏰ *Hora:* ${esc(horaActual())}`,
+    '',
+    '_Se envió una foto al equipo para su revisión_',
+  ].join('\n')
+  await enviar(msg)
+}
+
+// ════════════════════════════════════════════════════════════════
 // 14B. ALERTAS DE CASOS
 // ════════════════════════════════════════════════════════════════
 

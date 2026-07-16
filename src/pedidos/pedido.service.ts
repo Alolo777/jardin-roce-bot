@@ -68,6 +68,13 @@ export function transitar(pedido: PedidoActual, nuevoEstado: EstadoPedido): bool
     descripcion: `Estado: ${actual} → ${nuevoEstado}`,
   })
 
+  if (nuevoEstado === EstadoPedido.PRECIO_CONFIRMADO) {
+    eventBus.emit(EventType.PRICE_CONFIRMED, {
+      orderId: pedido.id,
+      telefono: pedido.telefono ?? '',
+    })
+  }
+
   if (nuevoEstado === EstadoPedido.LISTO) {
     eventBus.emit(EventType.ORDER_READY, {
       orderId: pedido.id,
@@ -78,6 +85,10 @@ export function transitar(pedido: PedidoActual, nuevoEstado: EstadoPedido): bool
 
   if (nuevoEstado === EstadoPedido.ENTREGADO) {
     eventBus.emit(EventType.ORDER_DELIVERED, {
+      orderId: pedido.id,
+      telefono: pedido.telefono ?? '',
+    })
+    eventBus.emit(EventType.DELIVERY_COMPLETED, {
       orderId: pedido.id,
       telefono: pedido.telefono ?? '',
     })

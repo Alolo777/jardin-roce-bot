@@ -974,6 +974,7 @@ async function procesarMediaAcumulado(clienteId: string, telefono: string, texto
         caption: media.caption,
       })
       enviarFotoEmpleadosWhatsApp(sock, media.base64, `📷 Foto de referencia de ${telefono}${media.caption ? `\n\nCliente dice: ${media.caption}` : ''}`, media.mimetype).catch(err => console.error('[bot] WhatsApp foto referencia:', err))
+      eventBus.emit(EventType.PHOTO_SENT, { telefono, descripcion: media.caption || 'Foto de referencia' })
     } else {
       eventBus.emit(EventType.PHOTO_RECEIVED, {
         telefono,
@@ -1592,6 +1593,7 @@ async function procesarMensaje(msg: any): Promise<void> {
         FRUSTRACION_NOTIFICADA.set(clienteId, Date.now())
         const telefonoReal = await numeroRealPromise
         eventBus.emit(EventType.HUMAN_REQUIRED, { telefono: telefonoReal, prioridad: 'critica', descripcion: textoCliente.substring(0, 200) })
+        eventBus.emit(EventType.CUSTOMER_WAITING, { telefono: telefonoReal, descripcion: 'Cliente frustrado esperando atención humana' })
       }
     }
 
@@ -1893,6 +1895,7 @@ async function procesarMensaje(msg: any): Promise<void> {
           caption: media.caption,
         })
         enviarFotoEmpleadosWhatsApp(sock, media.base64, `📷 Imagen pendiente de ${telefonoReal}${media.caption ? `\n\nCliente dice: ${media.caption}` : ''}`, media.mimetype).catch(err => console.error('[bot] WhatsApp imagen pendiente:', err))
+        eventBus.emit(EventType.PHOTO_SENT, { telefono: telefonoReal, descripcion: media.caption || 'Imagen pendiente' })
       }
     }
   }
@@ -1917,6 +1920,13 @@ async function ventaCerradaHandler(clienteId: string, venta: VentaCerrada, telef
   await persistirPedido(clienteId, numeroReal, 'pagado')
 
   eventBus.emit(EventType.PAYMENT_RECEIVED, {
+    telefono: numeroReal,
+    cliente: venta.cliente,
+    producto: venta.producto,
+    total: parseFloat(venta.total.replace(/[^0-9.]/g, '')) || 0,
+    metodoPago: 'Transferencia',
+  })
+  eventBus.emit(EventType.PAYMENT_CONFIRMED, {
     telefono: numeroReal,
     cliente: venta.cliente,
     producto: venta.producto,
@@ -2347,6 +2357,7 @@ async function iniciarBaileys(): Promise<void> {
 
       actualizarEstadoBot('desconectado', `Conexión cerrada (${reason})`)
       publicarEstadoBot().catch(() => {})
+      eventBus.emit(EventType.BOT_DISCONNECTED, { telefono: 'system', descripcion: `Conexión cerrada (${reason || 'desconocido'})` })
 
       if (isLoggedOut || isBadSession || isForbidden) {
         reiniciarProceso(`Sesión inválida (${reason})`)

@@ -24,6 +24,12 @@ import {
   enviarAlertaPagoPendiente,
   enviarAlertaPedidoListo,
   enviarAlertaPedidoEntregado,
+  enviarAlertaPagoConfirmado,
+  enviarAlertaPrecioConfirmado,
+  enviarAlertaEntregaCompletada,
+  enviarAlertaBotDesconectado,
+  enviarAlertaClienteEsperando,
+  enviarAlertaFotoEnviada,
   enviarFotoTelegram,
 } from '../lib/telegram'
 
@@ -164,6 +170,46 @@ export function subscribeTelegramEvents(): void {
 
   eventBus.subscribe(EventType.CANCELACION_REQUESTED, (event) => {
     enviarAlertaCancelacion(
+      event.payload.telefono,
+      event.payload.descripcion ?? '',
+    ).catch(() => {})
+  })
+
+  eventBus.subscribe(EventType.PAYMENT_CONFIRMED, (event) => {
+    enviarAlertaPagoConfirmado(
+      event.payload.telefono,
+      event.payload.cliente ?? '',
+      event.payload.total ?? 0,
+      event.payload.metodoPago ?? '',
+    ).catch(() => {})
+  })
+
+  eventBus.subscribe(EventType.PRICE_CONFIRMED, (event) => {
+    enviarAlertaPrecioConfirmado(
+      event.payload.telefono,
+    ).catch(() => {})
+  })
+
+  eventBus.subscribe(EventType.DELIVERY_COMPLETED, (event) => {
+    enviarAlertaEntregaCompletada(
+      event.payload.telefono,
+    ).catch(() => {})
+  })
+
+  eventBus.subscribe(EventType.BOT_DISCONNECTED, (event) => {
+    enviarAlertaBotDesconectado(
+      event.payload.descripcion ?? 'Sin motivo',
+    ).catch(() => {})
+  })
+
+  eventBus.subscribe(EventType.CUSTOMER_WAITING, (event) => {
+    enviarAlertaClienteEsperando(
+      event.payload.telefono,
+    ).catch(() => {})
+  })
+
+  eventBus.subscribe(EventType.PHOTO_SENT, (event) => {
+    enviarAlertaFotoEnviada(
       event.payload.telefono,
       event.payload.descripcion ?? '',
     ).catch(() => {})

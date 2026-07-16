@@ -340,6 +340,29 @@ Rollback: Sí — restaurar el bloque eliminado.
 
 ---
 
+### M5 — 6 eventos restantes emitidos y suscritos a Telegram (Julio 2026)
+
+**Archivos modificados:**
+- `lib/telegram.ts` — +6 funciones: PagoConfirmado, PrecioConfirmado, EntregaCompletada, BotDesconectado, ClienteEsperando, FotoEnviada
+- `events/telegram.subscriber.ts` — +6 suscripciones
+- `src/pedidos/pedido.service.ts` — +2 emisiones (PRICE_CONFIRMED, DELIVERY_COMPLETED)
+- `bot.ts` — +4 emisiones (PAYMENT_CONFIRMED, CUSTOMER_WAITING, PHOTO_SENT x2, BOT_DISCONNECTED)
+
+**Cambios:**
+- `PAYMENT_CONFIRMED` se emite desde `bot.ts` junto a PAYMENT_RECEIVED
+- `PRICE_CONFIRMED` se emite desde `pedido.service.ts` en transición a PRECIO_CONFIRMADO
+- `DELIVERY_COMPLETED` se emite desde `pedido.service.ts` junto a ORDER_DELIVERED
+- `BOT_DISCONNECTED` se emite desde `bot.ts` en el handler de conexión cerrada
+- `CUSTOMER_WAITING` se emite desde `bot.ts` cuando hay cliente frustrado
+- `PHOTO_SENT` se emite desde `bot.ts` tras enviar foto a empleados
+
+**Event Engine: 18/25 → 24/25 eventos emitidos y suscritos.**
+
+**Impacto:** Compatible.
+**Rollback:** Sí.
+
+---
+
 ### M4 — ZONA_AMBIGUA emitido a Telegram (Julio 2026)
 
 **Archivos modificados:**
