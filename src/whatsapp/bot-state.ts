@@ -15,6 +15,22 @@ export const RATE_TIMESTAMPS = new Map<string, number[]>()
 export const FOTOS_DISPONIBLES_TTL_MS = 2 * 60 * 60_000
 export const INTERVENCION_HUMANA_TTL_MS = 10 * 60_000
 
+export const RATE_LIMIT_MAX = 8
+export const RATE_LIMIT_WINDOW_MS = 30_000
+export const RATE_AVISADOS = new Set<string>()
+
+export function estaRateLimited(id: string): boolean {
+  const ahora = Date.now()
+  const recientes = (RATE_TIMESTAMPS.get(id) ?? []).filter(t => ahora - t < RATE_LIMIT_WINDOW_MS)
+  recientes.push(ahora)
+  if (recientes.length === 0) {
+    RATE_TIMESTAMPS.delete(id)
+  } else {
+    RATE_TIMESTAMPS.set(id, recientes)
+  }
+  return recientes.length > RATE_LIMIT_MAX
+}
+
 export function limpiarCachesEstado(): void {
   FRUSTRACION_NOTIFICADA.clear()
   RATE_TIMESTAMPS.clear()

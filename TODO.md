@@ -9,15 +9,15 @@
 | Decision Engine | 100% | ✅ |
 | Case Engine | 100% | ✅ |
 | Order Engine | 100% | ✅ |
-| WhatsApp Services | 75% | 🟡 |
+| WhatsApp Services | 80% | 🟢 |
 | Prompt Builder | 100% | ✅ |
 | Event Engine | 98% | 🟢 |
 | Telegram Engine | 60% | 🟡 |
 | Parsers | 100% | ✅ |
 | Modelos/Tipos | 100% | ✅ |
 
-**Progreso global estimado: ~88%**
-**bot.ts actual: ~2500 líneas (pendiente de extracción progresiva)**
+**Progreso global estimado: ~89%**
+**bot.ts actual: ~2438 líneas (pendiente de extracción progresiva)**
 
 ## Errores de la Versión Anterior
 
@@ -118,7 +118,9 @@
 ## Pendiente para P3.12 (bot.ts < 500 líneas)
 
 - [ ] Extraer `manejarMensajeEntrante` (~400 líneas) a `src/whatsapp/message-handler.ts`
-- [ ] Extraer Maps de estado global a `src/whatsapp/bot-state.ts`
+- [x] Extraer Maps de estado global a `src/whatsapp/bot-state.ts` (M6)
+- [x] Extraer helper functions de dedup a bot-state.ts (M7)
+- [x] Extraer rate limiter a bot-state.ts (M8)
 - [ ] Mover parsers/ a `src/parser/`
 - [ ] Mover lib/ a `src/lib/`
 - [ ] Mover events/ a `src/events/`

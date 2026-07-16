@@ -2,6 +2,22 @@
 
 ## 2026-07-16
 
+Versión: 2.0.4
+
+### M8 — Rate limiter a bot-state.ts
+
+**Archivos modificados:**
+- `src/whatsapp/bot-state.ts` — +RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, RATE_AVISADOS, estaRateLimited
+- `bot.ts` — eliminadas 17 líneas de declaraciones antiguas, actualizado import
+
+**Métrica:** bot.ts: 2455 → 2438 líneas (-17)
+**Impacto:** Compatible.
+**Rollback:** Sí.
+
+---
+
+## 2026-07-16
+
 Versión: 2.0.3
 
 ### PHOTO_RECEIVED — Telegram por eventos
