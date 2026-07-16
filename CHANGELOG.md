@@ -17,6 +17,14 @@ Versión: 2.0.4
 
 **Pendiente:** Conectar validadores a bot.ts para reemplazar contextoExtra inline.
 
+### M10b — Validadores sucursal + envío (Julio 2026)
+
+**Archivos creados:**
+- `src/validators/sucursal.validator.ts` — `validarSucursal()`, `obtenerTextoConfirmacionSucursal()`, `clienteQuiereRecoger()`, registro de sucursales
+- `src/validators/envio.validator.ts` — `buscarEnvio()`, `detectarLinkMaps()`, `pareceConsultaEnvio()`, caché de municipios/zonas con TTL, `limpiarDireccionCliente()`
+
+**Pendiente:** M10c (cancelación + queja) y M10d (conectar a bot.ts).
+
 ---
 
 ### M9 — Persistencia Supabase para bot-state (Julio 2026)
