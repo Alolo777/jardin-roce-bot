@@ -1,0 +1,48 @@
+export enum EventType {
+  CASE_CREATED = 'CASE_CREATED',
+  CASE_ARCHIVED = 'CASE_ARCHIVED',
+  ORDER_CREATED = 'ORDER_CREATED',
+  ORDER_UPDATED = 'ORDER_UPDATED',
+  ORDER_READY = 'ORDER_READY',
+  ORDER_DELIVERED = 'ORDER_DELIVERED',
+  PAYMENT_PENDING = 'PAYMENT_PENDING',
+  PAYMENT_RECEIVED = 'PAYMENT_RECEIVED',
+  PAYMENT_CONFIRMED = 'PAYMENT_CONFIRMED',
+  HUMAN_REQUIRED = 'HUMAN_REQUIRED',
+  CUSTOMER_ANGRY = 'CUSTOMER_ANGRY',
+  CUSTOMER_WAITING = 'CUSTOMER_WAITING',
+  PHOTO_REQUESTED = 'PHOTO_REQUESTED',
+  PHOTO_RECEIVED = 'PHOTO_RECEIVED',
+  PHOTO_SENT = 'PHOTO_SENT',
+  PRICE_CONFIRMED = 'PRICE_CONFIRMED',
+  DELIVERY_COMPLETED = 'DELIVERY_COMPLETED',
+  COTIZACION_REQUESTED = 'COTIZACION_REQUESTED',
+  ENVIO_REQUESTED = 'ENVIO_REQUESTED',
+  ZONA_AMBIGUA = 'ZONA_AMBIGUA',
+  CANCELACION_REQUESTED = 'CANCELACION_REQUESTED',
+  QR_GENERATED = 'QR_GENERATED',
+  BOT_CONNECTED = 'BOT_CONNECTED',
+  BOT_DISCONNECTED = 'BOT_DISCONNECTED',
+  BOT_DAILY_ALERT = 'BOT_DAILY_ALERT',
+}
+
+export interface EventPayload {
+  caseId?: string
+  orderId?: string
+  telefono: string
+  cliente?: string
+  producto?: string
+  total?: number
+  sucursal?: string
+  metodoPago?: string
+  prioridad?: 'baja' | 'media' | 'alta' | 'critica'
+  descripcion?: string
+  [key: string]: unknown
+}
+
+export interface SystemEvent {
+  id: string
+  type: EventType
+  payload: EventPayload
+  timestamp: string
+}

@@ -1,6 +1,6 @@
 import { EstadoPedido, PedidoActual } from '../../models/types'
-import { eventBus } from '../../events/event-bus'
-import { EventType } from '../../events/types'
+import { eventBus } from '../events/event-bus'
+import { EventType } from '../events/types'
 
 const TRANSICIONES_VALIDAS: Record<string, EstadoPedido[]> = {
   [EstadoPedido.NUEVO]: [EstadoPedido.COTIZANDO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],

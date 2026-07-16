@@ -21,9 +21,9 @@ import { Buffer } from 'node:buffer'
 dotenv.config({ path: '.env.local' })
 
 import { clasificarConversacion, clasificarImagenVenta, getAIResponse, revisarRespuestaFlora } from './lib/ai'
-import { eventBus } from './events/event-bus'
-import { EventType } from './events/types'
-import { subscribeTelegramEvents } from './events/telegram.subscriber'
+import { eventBus } from './src/events/event-bus'
+import { EventType } from './src/events/types'
+import { subscribeTelegramEvents } from './src/events/telegram.subscriber'
 import { supabaseAdmin } from './lib/supabase'
 import type { VentaCerrada } from './lib/types'
 import { startServer } from './api/server'

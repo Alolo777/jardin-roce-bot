@@ -17,8 +17,8 @@
 | Parsers | 100% | ✅ |
 | Modelos/Tipos | 100% | ✅ |
 
-**Progreso global estimado: ~91%**
-**bot.ts actual: ~2439 líneas (pendiente de extracción progresiva)**
+**Progreso global estimado: ~92%**
+**bot.ts actual: ~2446 líneas (pendiente de extracción progresiva)**
 
 ## Errores de la Versión Anterior
 
@@ -26,11 +26,11 @@
 |---|---|
 | #1 — Parser de nombre consume texto adicional | ✅ Resuelto |
 | #2 — Sucursal por defecto incorrecta | ✅ Resuelto |
-| #3 — LLM confirmaba horarios | 🔴 Pendiente |
+| #3 — LLM confirmaba horarios | 🟡 En progreso (M10a: validador creado, falta conectar) |
 | #4 — Pedidos dependían de token VENTA_CERRADA | ✅ Resuelto |
 | #5 — Conversación y pedido misma entidad | ⏳ Pendiente (P2.1 iniciado) |
 | #6 — Telegram dependía del LLM | ⏳ Pendiente (eventos creados, migración parcial) |
-| #7 — Reglas de negocio en el prompt | 🔴 Pendiente |
+| #7 — Reglas de negocio en el prompt | 🟡 En progreso (M10a: horario+pago validators creados) |
 
 ## Fases de Migración (Parte 4.1)
 
@@ -98,6 +98,9 @@
 
 ## Pendientes Inmediatos
 
+- [ ] M10b: sucursal.validator.ts + envio.validator.ts
+- [ ] M10c: cancelacion.validator.ts + queja.validator.ts
+- [ ] M10d: Simplificar contextoExtra en bot.ts usando validadores
 - [ ] Migrar llamadas restantes a Telegram desde bot.ts a eventos
 - [ ] Extraer lógica legacy de pedidos de bot.ts hacia el Order Engine
 - [ ] Reducir bot.ts progresivamente (< 500 líneas objetivo)

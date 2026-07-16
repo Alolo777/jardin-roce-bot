@@ -4,6 +4,21 @@
 
 Versión: 2.0.4
 
+### Fix — events/ → src/events/ (build Vercel) + M10a — Validadores (Julio 2026)
+
+**Fix build (Vercel):**
+- Movido `events/` → `src/events/` para resolver error de módulo en Next.js
+- Actualizados imports en `bot.ts`, `src/casos/caso.service.ts`, `src/pedidos/pedido.service.ts`, `src/events/telegram.subscriber.ts`
+
+**M10a — Validadores horario y pago:**
+- `src/validators/horario.validator.ts` — `validarHorario()`, constantes de horario
+- `src/validators/pago.validator.ts` — CUENTA_BBVA, `determinarInstruccionPago()`, detectores de texto de pago
+- Ambos exportan datos estructurados (no texto prompt)
+
+**Pendiente:** Conectar validadores a bot.ts para reemplazar contextoExtra inline.
+
+---
+
 ### M9 — Persistencia Supabase para bot-state (Julio 2026)
 
 **Archivos creados:**

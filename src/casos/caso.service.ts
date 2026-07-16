@@ -1,6 +1,6 @@
 import { Caso, EstadoCaso, TipoCaso, Prioridad } from '../../models/types'
-import { eventBus } from '../../events/event-bus'
-import { EventType } from '../../events/types'
+import { eventBus } from '../events/event-bus'
+import { EventType } from '../events/types'
 
 const CASOS_ACTIVOS = new Map<string, Caso>()
 let casoCounter = 0

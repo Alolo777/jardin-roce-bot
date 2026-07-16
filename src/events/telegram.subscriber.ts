@@ -31,7 +31,7 @@ import {
   enviarAlertaClienteEsperando,
   enviarAlertaFotoEnviada,
   enviarFotoTelegram,
-} from '../lib/telegram'
+} from '../../lib/telegram'
 
 export function subscribeTelegramEvents(): void {
   eventBus.subscribe(EventType.ORDER_CREATED, (event) => {
