@@ -37,6 +37,18 @@ Versión: 2.0.4
 
 **Pendiente:** M10d (conectar los 6 validadores a bot.ts para reemplazar los bloques inline de contextoExtra).
 
+### P2.1 — Error #5: conversación ≠ pedido (Julio 2026)
+
+**Problema (AGENTS.md Error #5):** El pedido en memoria (`obtenerPedido`) se reutilizaba aunque el caso cambiara de tema, mezclando datos antiguos (nombre, precio, arreglo, sucursal, fecha).
+
+**Cambios (solo `bot.ts`):**
+- Nueva `sincronizarPedidoConCaso(clienteId, telefono, cambioTema)`: resetea `PEDIDO_EN_CURSO`, `ARREGLO_ELEGIDO`, `VENTA_ACTUAL` y crea pedido limpio cuando hay cambio de tema o no existe pedido.
+- En el flujo principal se captura `cambioTema = detectarCambioTema(...)` y se pasa a la función, reemplazando el `if (!obtenerPedido) crearPedido` ciego.
+
+**Impacto:** Compatible. Reversible. No afecta Telegram ni Supabase. Rollback: revertir edición.
+
+---
+
 ### M11b — Verificación Event Engine 100% (Julio 2026)
 
 **Resultado de investigación:**

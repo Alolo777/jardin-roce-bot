@@ -237,6 +237,29 @@
 
 **Pendiente:** Reducción progresiva de `bot.ts` en Fase 10 (Optimización), módulo por módulo y reversible.
 
+---
+
+## DEC-020: Reset de pedido al cambiar de tema (Error #5)
+
+**Fecha:** 2026-07-16
+**Estado:** Aceptada
+
+**Motivo:** El Error #5 de AGENTS.md ocurría porque el pedido en memoria (`obtenerPedido`) se reutilizaba aunque el caso cambiara de tema, mezclando datos antiguos (nombre, precio, arreglo, sucursal, fecha, hora, forma de pago) de conversaciones previas.
+
+**Alternativas consideradas:**
+1. Resetear siempre el pedido al inicio de cada mensaje
+2. Vincular el pedido al caso (mismo ciclo de vida)
+3. Resetear el pedido solo cuando `detectarCambioTema` indique cambio de tema (elegida)
+
+**Resultado:** Se creó `sincronizarPedidoConCaso(clienteId, telefono, cambioTema)` en `bot.ts`. Al cambiar de tema se resetean `PEDIDO_EN_CURSO`, `ARREGLO_ELEGIDO` y `VENTA_ACTUAL` y se crea un pedido limpio.
+
+**Ventajas:** Cumple AGENTS.md Parte 2 (DETECCIÓN DE CAMBIO DE TEMA: nunca reutilizar datos antiguos). Bajo riesgo, reversible, sin tocar caso.service ni pedido.service.
+
+**Desventajas:** El pedido en memoria sigue siendo un Map separado del caso (no unificado); la persistencia Supabase del pedido es responsabilidad del Order Engine ya existente.
+
+**Pendiente:** Unificar ciclo de vida de pedido y caso en Fase 10 si se requiere.
+
+
 
 ## DEC-008: Servidor Express único en api/server.ts
 

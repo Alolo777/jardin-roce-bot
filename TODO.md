@@ -29,7 +29,7 @@
 | #2 — Sucursal por defecto incorrecta | ✅ Resuelto |
 | #3 — LLM confirmaba horarios | ✅ Resuelto (M10a: validador + conexión en M10d) |
 | #4 — Pedidos dependían de token VENTA_CERRADA | ✅ Resuelto |
-| #5 — Conversación y pedido misma entidad | ⏳ Pendiente (P2.1 iniciado) |
+| #5 — Conversación y pedido misma entidad | ✅ Resuelto (P2.1: reset de pedido al cambiar de tema) |
 | #6 — Telegram dependía del LLM | ✅ Resuelto (verificado M11b: 100% eventos) |
 | #7 — Reglas de negocio en el prompt | 🟢 Resuelto (validadores TS creados y conectados en M10a-d) |
 

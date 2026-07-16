@@ -714,6 +714,16 @@ function resetearPedidoActivo(clienteId: string): void {
   VENTA_ACTUAL.delete(clienteId)
 }
 
+// Error #5 (AGENTS.md): conversación ≠ pedido. Al cambiar de tema/caso,
+// el pedido en memoria debe resetearse para NO reutilizar datos antiguos
+// (nombre, precio, arreglo, sucursal, fecha, hora, forma de pago).
+function sincronizarPedidoConCaso(clienteId: string, telefono: string, cambioTema: boolean): void {
+  if (cambioTema || !obtenerPedido(clienteId)) {
+    resetearPedidoActivo(clienteId)
+    crearPedido(clienteId, telefono)
+  }
+}
+
 function ventaDesdeEstado(clienteId: string, fallback?: VentaCerrada): VentaCerrada | null {
   const pedido = PEDIDO_EN_CURSO.get(clienteId)
   const elegido = pedido?.arreglo ?? ARREGLO_ELEGIDO.get(clienteId)
@@ -1216,7 +1226,8 @@ async function procesarMensaje(msg: any): Promise<void> {
     const horasInactivo = casoActivo
       ? (Date.now() - new Date(casoActivo.ultimaActividad).getTime()) / (1000 * 60 * 60)
       : 99
-    if (casoActivo && detectarCambioTema(textoCliente, horasInactivo)) {
+    const cambioTema = casoActivo ? detectarCambioTema(textoCliente, horasInactivo) : false
+    if (cambioTema) {
       casoActivo = crearCaso(clienteId, telefono, clasificarTipoCaso(textoCliente))
     } else if (!casoActivo) {
       casoActivo = crearCaso(clienteId, telefono, clasificarTipoCaso(textoCliente))
@@ -1224,9 +1235,8 @@ async function procesarMensaje(msg: any): Promise<void> {
     actualizarActividad(casoActivo)
 
     // ── ORDER ENGINE: asegurar pedido en máquina de estados ──
-    if (!obtenerPedido(clienteId)) {
-      crearPedido(clienteId, telefono)
-    }
+    // Si hubo cambio de tema, se resetea el pedido para no mezclar datos antiguos (Error #5).
+    sincronizarPedidoConCaso(clienteId, telefono, cambioTema)
 
     // ── DECISION ENGINE: analizar intención ───────────────────
     const decision: Decision = analizarIntencion({
