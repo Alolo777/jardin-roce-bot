@@ -29,3 +29,13 @@ export function validarHorario(): InfoHorario {
 
   return { abierto, horaActual: ahora.etiqueta, horaApertura: HORARIO_APERTURA, horaCierre, mensajeBackend }
 }
+
+export function esHorarioAnticipado(hora: string): boolean {
+  const match = hora.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?/i)
+  if (!match) return false
+  let h = parseInt(match[1], 10)
+  const ampm = (match[3] || '').toLowerCase().replace(/\./g, '')
+  if (ampm === 'pm' && h < 12) h += 12
+  if (ampm === 'am' && h === 12) h = 0
+  return h < HORARIO_APERTURA
+}

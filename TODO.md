@@ -26,8 +26,14 @@
 | Error | Estado |
 |---|---|
 | #1 — Parser de nombre consume texto adicional | ✅ Resuelto |
+| #1b — Parser acepta frases conversacionales como nombre (Issue producción 17-Jul) | ✅ Resuelto (DEC-022) |
+| #1c — `ventaDesdeEstado` usaba `productoPersonalizado` que se contamina con caption de foto | ✅ Resuelto (DEC-023) |
+| #1d — `ventaCerradaHandler` no emitía `ORDER_CREATED` con detalles de compra | ✅ Resuelto (DEC-023) |
+| #1e — Nombre extraído no se sincronizaba con Order Engine (dashboard veía datos incompletos) | ✅ Resuelto (DEC-023) |
+| #3 — LLM confirmaba horarios (9:30 cuando abren 10:00) — ahora deriva a equipo humano | ✅ Resuelto (DEC-024) |
+| #4 — Order Engine persiste en bot_cache (sobrevive reinicios) | ✅ Resuelto (DEC-025) |
+| #5 — `\bno\b` en NO_ES_NOMBRE bloqueaba "Noé Hernández" | ✅ Resuelto (DEC-026) |
 | #2 — Sucursal por defecto incorrecta | ✅ Resuelto |
-| #3 — LLM confirmaba horarios | ✅ Resuelto (M10a: validador + conexión en M10d) |
 | #4 — Pedidos dependían de token VENTA_CERRADA | ✅ Resuelto |
 | #5 — Conversación y pedido misma entidad | ✅ Resuelto (P2.1: reset de pedido al cambiar de tema) |
 | #6 — Telegram dependía del LLM | ✅ Resuelto (verificado M11b: 100% eventos) |
@@ -108,7 +114,16 @@
 - [ ] Extraer lógica legacy de pedidos de bot.ts hacia el Order Engine (diferido a Fase 10)
 - [ ] Reducir bot.ts progresivamente (< 500 líneas objetivo) (diferido a Fase 10 — Optimización)
 
-## Completado
+## Terminados
+
+| Tarea | Módulo | % |
+|-------|--------|---|
+| #1b — Parser acepta frases conversacionales como nombre | nombre.parser.ts | 100% |
+| #1c — `ventaDesdeEstado` + `ventaCerradaHandler` corregidos | bot.ts | 100% |
+| #1d — Sincronizar nombre entre PEDIDO_EN_CURSO y Order Engine | bot.ts | 100% |
+| #3 — Horarios anticipados derivados a equipo humano | horario.validator.ts + bot.ts | 100% |
+| #4 — Order Engine persiste en bot_cache (sobrevive reinicios) | pedido.repository.ts + pedido.service.ts + bot.ts | 100% |
+| #5 — `\bno\b` en NO_ES_NOMBRE bloqueaba "Noé" | nombre.parser.ts | 100% |
 
 - [x] P0.1 — Express duplicado de bot.ts ✅
 - [x] P1.5 — Parsers conectados a bot.ts ✅

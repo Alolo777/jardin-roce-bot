@@ -404,6 +404,25 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 
 **Desventajas:** Ninguna.
 
+## DEC-022: NO_ES_NOMBRE ampliado para rechazar frases conversacionales
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** En producción, `pareceNombreCliente("Okey está bien")` devolvía TRUE porque "está", "bien" y "okey" no estaban bloqueados. Esto contaminó el nombre del cliente en toda la cadena de venta.
+
+**Alternativas consideradas:**
+1. Validar nombre solo después de que el LLM confirme (más complejo, más puntos de falla)
+2. Bloquear frases conversacionales en el regex (elegida)
+
+**Resultado:** Se agregaron 15 palabras conversacionales a `NO_ES_NOMBRE` en `nombre.parser.ts`.
+
+**Ventajas:** Solución de una línea. Impacto cero en nombres reales. Previene falsos positivos.
+
+**Desventajas:** Lista manual — puede requerirse mantener si aparecen nuevas frases.
+
+---
+
 ## DEC-018: Validadores de reglas de negocio en TypeScript (M10a/b/c)
 
 **Fecha:** 2026-07-16
@@ -428,3 +447,95 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 **Desventajas:** El prompt de Supabase (`configuracion_bot.system_prompt`) aún puede contener reglas legacy redundantes; se recomienda limpiarlo manualmente vía `/admin/prompt` para evitar duplicidad con los validadores.
 
 **Estado:** Completado (M10a-d). Los 6 validadores están conectados a `bot.ts`.
+
+---
+
+## DEC-023: ventaDesdeEstado + ventaCerradaHandler corregidos para datos correctos a Telegram
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** Tras corregir DEC-022 (parser de nombre), el nombre "Okey está bien" seguía propagándose porque `ventaDesdeEstado` usaba `pedido?.nombre` sin fallback al Order Engine y `pedido?.productoPersonalizado` se contaminaba con captions de fotos. Además, `ventaCerradaHandler()` solo emitía `PAYMENT_RECEIVED`/`PAYMENT_CONFIRMED` sin detalles completos.
+
+**Alternativas consideradas:**
+1. Agregar limpieza de captions antes de asignar a productoPersonalizado (más cambios, más riesgo)
+2. Eliminar productoPersonalizado de la cadena de fallback y confiar solo en `elegido?.nombre` (elegida)
+3. Sincronizar nombre en cada asignación individual de PEDIDO_EN_CURSO (3 líneas de sync)
+4. Sync único al final del bloque de extracción (elegida — 1 punto de sync cubre 3 asignaciones)
+
+**Resultado:**
+- `ventaDesdeEstado()`: `producto` ya no usa `pedido?.productoPersonalizado`; `cliente` agrega fallback a `obtenerPedido(clienteId)?.nombre`
+- `ventaCerradaHandler()`: emite `ORDER_CREATED` con `precioArreglo`, `precioExtras`, `precioEnvio`, `fechaHora`, `tieneFotoReferencia`
+- Sincronización automática de `pedido.nombre` → Order Engine en 2 puntos estratégicos
+
+**Ventajas:** Telegram recibe datos completos sin propagar texto contaminado. 3 bugs corregidos con 5 ediciones.
+
+**Desventajas:** Ninguna.
+
+---
+
+## DEC-024: Horarios anticipados derivados a equipo humano (Error #3)
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** El LLM confirmaba horarios incorrectamente (ej. "Sí podemos" a las 9:30 cuando la apertura es 10:00). La decisión de horarios no debe estar en manos del LLM.
+
+**Alternativas consideradas:**
+1. Bloquear la respuesta del LLM y responder con mensaje fijo (no permite flexibilidad)
+2. Dejar que el LLM maneje con instrucciones más fuertes en el prompt (ya se intentó, falló)
+3. Detectar backend + notificar equipo + instruir LLM para respuesta provisional (elegida)
+
+**Resultado:**
+- `horario.validator.ts`: `esHorarioAnticipado()` parsea hora con am/pm y compara con `HORARIO_APERTURA` (10:00)
+- `bot.ts`: Cuando se detecta hora < 10:00, emite `HUMAN_REQUIRED` a Telegram (dedup 30min) y agrega instrucción en `contextoExtra` para que el LLM responda "Consulto con el equipo..."
+
+**Ventajas:** El equipo decide si puede atender el horario anticipado. El LLM ya no confirma ni rechaza horarios.
+
+**Desventajas:** Depende de que el equipo vea la notificación de Telegram y responda.
+
+---
+
+## DEC-025: Order Engine persiste en bot_cache para sobrevivir reinicios
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** El Order Engine (`pedido.service.ts`) almacenaba todos los pedidos activos solo en un `Map<string, PedidoActual>` en memoria RAM. Al reiniciar el bot (deploy, crash, mantenimiento), todos los pedidos activos se perdían. El dashboard mostraba 0 pedidos activos hasta que los clientes volvían a escribir.
+
+**Alternativas consideradas:**
+1. Persistir en `pedidos_bot` (requiere mapeo de columnas, ya hay escritura legacy desde `bot.ts`, riesgo de duplicación/datos inconsistentes)
+2. Persistir en `bot_cache` como JSONB (elegida — reutiliza infraestructura existente, mismo schema que `bot-state-persistence.ts`)
+3. Persistir en archivo JSON local (no escala, riesgo de corrupción en VM)
+
+**Resultado:**
+- `src/pedidos/pedido.repository.ts`: `guardarPedidos()` serializa el Map (sin `fotoReferenciaBase64`) a JSONB en `bot_cache` clave `pedidos_engine`; `cargarPedidos()` lo restaura
+- `pedido.service.ts`: `persistir()` fire-and-forget llamada tras cada mutación (`crearPedido`, `transitar`, `archivarPedido`, `cancelarPedido`)
+- `bot.ts`: `cargarPedidosDesdeBD()` llamado en startup
+
+**Ventajas:** Pedidos activos sobreviven reinicios. Sin cambios de schema en Supabase. Aprovecha infraestructura de `bot_cache` ya existente.
+
+**Desventajas:** Persistencia asíncrona (fire-and-forget) — en caso de crash justo después de una mutación, el cambio puede perderse (ventana de ~100ms). Aceptable para el caso de uso actual.
+
+---
+
+## DEC-026: `no` separado de `\b` word boundaries para evitar falso positivo con "Noé"
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** `\bno\b` en `NO_ES_NOMBRE` coincidía con "No" dentro de "Noé" porque JS `\b` trata `é` como `\W` (no está en `[a-zA-Z0-9_]`). Cualquier palabra ASCII seguida de una letra acentuada produce un falso `\b`.
+
+**Alternativas consideradas:**
+1. Agregar bandera `u` al regex (no cambia el comportamiento de `\b` para caracteres no-ASCII)
+2. Usar Unicode property escapes con `\p{L}` (requiere `u` flag, no resuelve `\b`)
+3. Separar `no` en un regex propio que use separadores explícitos en vez de `\b` (elegida)
+
+**Resultado:**
+- `no` eliminado de `STOP_PATTERN` y `NO_ES_NOMBRE_REGEX`
+- Nuevo `NO_INDEPENDIENTE = /(?:^|[\s,.;:!?¡¿])no(?:$|[\s,.;:!?¡¿])/i` que solo coincide cuando `no` está rodeado de inicio/fin de string o separadores ortográficos (espacio, coma, punto, etc.), no cuando le sigue una letra acentuada como `é`
+- `esNoNombre()` reemplaza `NO_ES_NOMBRE.test()`
+
+**Ventajas:** Soluciona el bug. Cero impacto en otros casos porque los separadores explícitos cubren exactamente los mismos contextos que `\b` para `no`.
+
+**Desventajas:** La lógica queda en 3 reglas (STOP_PATTERN, NO_ES_NOMBRE_REGEX, NO_INDEPENDIENTE) en vez de una sola. Es más mantenible que un regex monolítico.

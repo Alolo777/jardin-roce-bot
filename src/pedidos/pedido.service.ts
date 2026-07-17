@@ -1,6 +1,7 @@
 import { EstadoPedido, PedidoActual } from '../models/types'
 import { eventBus } from '../events/event-bus'
 import { EventType } from '../events/types'
+import { guardarPedidos, cargarPedidos } from './pedido.repository'
 
 const TRANSICIONES_VALIDAS: Record<string, EstadoPedido[]> = {
   [EstadoPedido.NUEVO]: [EstadoPedido.COTIZANDO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
@@ -25,6 +26,20 @@ function generarId(): string {
   return `ped_${Date.now()}_${++pedidoCounter}`
 }
 
+function persistir(): void {
+  guardarPedidos(PEDIDOS).catch(() => {})
+}
+
+export async function cargarPedidosDesdeBD(): Promise<void> {
+  const restaurados = await cargarPedidos()
+  for (const [id, pedido] of restaurados) {
+    PEDIDOS.set(id, pedido)
+  }
+  if (restaurados.size > 0) {
+    console.log(`[pedidos] Restaurados ${restaurados.size} pedidos activos`)
+  }
+}
+
 export function crearPedido(clienteId: string, telefono: string): PedidoActual {
   const pedido: PedidoActual = {
     id: generarId(),
@@ -42,6 +57,7 @@ export function crearPedido(clienteId: string, telefono: string): PedidoActual {
     descripcion: 'Pedido creado',
   })
 
+  persistir()
   return pedido
 }
 
@@ -94,6 +110,7 @@ export function transitar(pedido: PedidoActual, nuevoEstado: EstadoPedido): bool
     })
   }
 
+  persistir()
   return true
 }
 
@@ -114,6 +131,7 @@ export function archivarPedido(clienteId: string, motivo?: string): boolean {
     descripcion: motivo ?? 'Pedido archivado',
   })
 
+  persistir()
   return true
 }
 
@@ -134,6 +152,7 @@ export function cancelarPedido(clienteId: string, motivo?: string): boolean {
     descripcion: motivo ?? 'Pedido cancelado',
   })
 
+  persistir()
   return true
 }
 

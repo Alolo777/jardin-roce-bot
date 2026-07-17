@@ -1,5 +1,101 @@
 # CHANGELOG
 
+## 2026-07-17
+
+Versión: 2.0.5
+
+### Fix — nombre.parser.ts: rechazar frases conversacionales como nombre de cliente
+
+**Problema (Issue #1 de sesión):** El nombre del cliente se contaminaba con "Okey está bien" porque `pareceNombreCliente()` aceptaba frases conversacionales como nombres válidos. Esto causaba que `ventaCerradaHandler` emitiera eventos a Telegram con `cliente: "Okey está bien"` en lugar del nombre real "José Luis López González".
+
+**Causa raíz (logs producción 17-Jul):**
+1. Batch `"Okey está bien\n---\nSe podría para mañana?"` → primera línea = "Okey está bien"
+2. `pareceNombreCliente("Okey está bien")` → TRUE porque "está", "bien", "okey" no estaban en `NO_ES_NOMBRE`
+3. `pedido.nombre = "Okey está bien"` se fija incorrectamente
+4. Llega "José Luis López González" pero `pedido.nombre` ya existe → no se sobrescribe
+
+**Cambio:**
+- `src/parser/nombre.parser.ts`: `NO_ES_NOMBRE` ampliado con `está`, `esta`, `bien`, `okey`, `vale`, `dale`, `va`, `entregan`, `podría`, `podria`, `necesito`, `quisiera`, `quiere`, `quiero`, `tiene`, `tienen`, `listo`
+
+**Impacto:** Bug de producción corregido. Nombres como "José Luis López González" se extraerán correctamente porque frases conversacionales ("Okey está bien", "está bien", "okey", "listo") ya no pasan como nombres.
+
+**Rollback:** Revertir `NO_ES_NOMBRE` a versión anterior.
+
+---
+
+### Fix — bot.ts: ventaDesdeEstado + ventaCerradaHandler emiten datos correctos a Telegram
+
+**Problema (Issue #1):** Los eventos `PAYMENT_RECEIVED` y `PAYMENT_CONFIRMED` se emitían a Telegram con `cliente: "Okey está bien"` y `producto: "Me gustó este que precio tiene"` (texto de caption de foto).
+
+**Causa raíz:**
+1. `ventaDesdeEstado()` usaba `pedido?.nombre` sin fallback al Order Engine y usaba `pedido?.productoPersonalizado` como producto (se contaminaba con caption de foto)
+2. `ventaCerradaHandler()` solo emitía PAYMENT_RECEIVED/PAYMENT_CONFIRMED sin ORDER_CREATED (que tiene más detalles)
+3. El nombre extraído no se sincronizaba con el Order Engine
+
+**Cambios en `bot.ts`:**
+- `ventaDesdeEstado()`: `producto` ya no usa `pedido?.productoPersonalizado` (solo `elegido?.nombre ?? fallback?.producto`); `cliente` agrega `obtenerPedido(clienteId)?.nombre` como fallback
+- `ventaCerradaHandler()`: emite `ORDER_CREATED` con precioArreglo, precioExtras, precioEnvio, fechaHora, tieneFotoReferencia
+- Sincronización: el nombre extraído se replica de `PEDIDO_EN_CURSO` al Order Engine (`obtenerPedido(clienteId).nombre`) en `aplicarDatosPedidoDesdeTexto` y en el bloque de extracción inline
+
+**Impacto:** Los eventos de Telegram ahora muestran nombre real del cliente, producto correcto y detalles completos de la compra.
+
+**Rollback:** Revertir ediciones en bot.ts.
+
+---
+
+### Fix — horario.validator.ts + bot.ts: horarios anticipados derivados a equipo humano
+
+**Problema (Error #3 de AGENTS.md):** El LLM confirmaba horarios incorrectamente (ej. "Sí podemos" a las 9:30 cuando la apertura es 10:00). El horario validator solo informaba al LLM sin intervención del backend.
+
+**Causa raíz:** No existía detección ni manejo backend de solicitudes de entrega antes de la hora de apertura. La decisión quedaba en manos del LLM.
+
+**Cambios:**
+- `src/validators/horario.validator.ts`: Nueva función `esHorarioAnticipado(hora)` que parsea "9:30", "9:30 am", "3:30 pm" y retorna `true` si la hora es antes de las 10:00 (convierte am/pm a 24h)
+- `bot.ts`: Detección post-extracción de hora. Si `esHorarioAnticipado` es `true`:
+  1. `pedido.estadoFlujo = 'esperando_fecha_hora'`
+  2. Emite `HUMAN_REQUIRED` a Telegram con dedup de 30 min
+  3. Agrega instrucción en `contextoExtra` para que el LLM no confirme/rechace el horario y responda "Consulto con el equipo..."
+
+**Impacto:** El equipo recibe notificación cuando un cliente pide entrega antes de las 10:00. El LLM ya no confirma horarios incorrectamente.
+
+**Rollback:** Revertir ediciones en bot.ts y horario.validator.ts.
+
+---
+
+### Fix — Order Engine persiste en bot_cache (sobrevive reinicios)
+
+**Problema:** El Order Engine (`pedido.service.ts`) almacenaba pedidos activos solo en memoria RAM (`Map<string, PedidoActual>`). Al reiniciar el bot, todos los pedidos activos se perdían: el dashboard mostraba 0 pedidos activos hasta que los clientes volvían a escribir.
+
+**Causa raíz:** No existía persistencia para el `PEDIDOS` Map del Order Engine. Solo los Maps de notificaciones/dedup (`bot-state.ts`) se persistían via `bot-state-persistence.ts`.
+
+**Cambios:**
+- `src/pedidos/pedido.repository.ts` (NUEVO): `guardarPedidos(mapa)` escribe el Map completo en `bot_cache` clave `pedidos_engine` (como JSONB, omitiendo `fotoReferenciaBase64` para evitar datos grandes); `cargarPedidos()` restaura desde `bot_cache`
+- `src/pedidos/pedido.service.ts`: Se agrega `persistir()` fire-and-forget que se llama después de `crearPedido`, `transitar`, `archivarPedido`, `cancelarPedido`. Se exporta `cargarPedidosDesdeBD()` para carga al arranque.
+- `bot.ts`: Se importa y llama `cargarPedidosDesdeBD()` en el startup (tras `cargarEstado()`)
+
+**Impacto:** Los pedidos activos sobreviven a reinicios del bot. El dashboard recupera el estado correcto inmediatamente.
+
+**Rollback:** Revertir ediciones en pedido.service.ts, bot.ts; eliminar pedido.repository.ts.
+
+---
+
+### Fix — nombre.parser.ts: `no` en NO_ES_NOMBRE ya no bloquea nombres como "Noé"
+
+**Problema:** `\bno\b` con la bandera `i` coincidía con "No" dentro de "Noé" porque JS `\b` trata `é` como `\W` (no está en `[a-zA-Z0-9_]`). Esto causaba que `pareceNombreCliente("Noé Hernández")` retornara `false` y `parseNombre` truncara el nombre.
+
+**Causa raíz:** JavaScript `\b` no reconoce caracteres acentuados como `\w`. Cualquier palabra de 2+ letras sin acento seguida de una letra acentuada (como "No" + "é") tiene un falso `\b` entre ambas.
+
+**Cambios en `src/parser/nombre.parser.ts`:**
+- `no` se eliminó de `STOP_PATTERN` (usado para split) y de `NO_ES_NOMBRE_REGEX` (usado para detección)
+- Se creó `NO_INDEPENDIENTE = /(?:^|[\s,.;:!?¡¿])no(?:$|[\s,.;:!?¡¿])/i` que usa separadores explícitos en lugar de `\b`, y por tanto no se activa con "Noé" (donde `é` no es separador)
+- `esNoNombre()` reemplaza a `NO_ES_NOMBRE.test()`
+
+**Impacto:** Nombres como "Noé Hernández", "Noé González", "Noemí López" ya no son bloqueados. "no" como palabra independiente sigue siendo correctamente rechazado.
+
+**Rollback:** Revertir a versión anterior de nombre.parser.ts.
+
+---
+
 ## 2026-07-16
 
 Versión: 2.0.4

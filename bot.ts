@@ -46,7 +46,7 @@ import {
 import { parseNombre, pareceNombreCliente, parseFecha, extraerFecha, parseHora, extraerHora, parseSucursal, parsePrecio, parseDireccion, limpiarTelefono } from './src/parser'
 import { getContenidoMensaje, getMessageBody, getMensajeTexto, getMessageType, hasQuotedMsg, getQuotedText, descargarMedia, jidANumero, ahoraCdmx, estaEnHorario, getFechaActual } from './src/whatsapp/message-utils'
 import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema, clasificarTipoCaso, limpiarCachesCasos } from './src/casos/caso.service'
-import { crearPedido, obtenerPedido, transitar, transitarDesdeFlujo, archivarPedido, cancelarPedido, limpiarCachesPedidos } from './src/pedidos/pedido.service'
+import { crearPedido, obtenerPedido, transitar, transitarDesdeFlujo, archivarPedido, cancelarPedido, limpiarCachesPedidos, cargarPedidosDesdeBD } from './src/pedidos/pedido.service'
 import { analizarIntencion, Decision } from './src/decision/decision.engine'
 import { Intencion } from './src/models/types'
 import { construirContextoPrompt } from './src/openai/prompt.builder'
@@ -56,7 +56,7 @@ import { notificarEmpleadosWhatsApp, enviarFotoEmpleadosWhatsApp } from './src/w
 import { detectarCancelacion, detectarQueja, detectarEvento, detectarInteresCompra } from './src/decision/intent-detector'
 import { FRUSTRACION_NOTIFICADA, ATENCION_HUMANA_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, RECLAMACION_NOTIFICADA, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, ALERTAS_DEDUP, ULTIMA_INTERVENCION_HUMANA, RATE_TIMESTAMPS, FOTOS_DISPONIBLES_TTL_MS, INTERVENCION_HUMANA_TTL_MS, limpiarCachesEstado, debeNotificarAtencionHumana, debeNotificarReclamacion, debeEnviarAlertaDedup, registrarIntervencionHumana, obtenerIntervencionHumanaReciente, extraerPrecioRespuesta, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, RATE_AVISADOS, estaRateLimited } from './src/whatsapp/bot-state'
 import { cargarEstado, guardarEstado, iniciarPersistenciaPeriodica } from './src/whatsapp/bot-state-persistence'
-import { validarHorario } from './src/validators/horario.validator'
+import { validarHorario, esHorarioAnticipado, HORARIO_APERTURA } from './src/validators/horario.validator'
 import { obtenerTextoCuenta, determinarInstruccionPago } from './src/validators/pago.validator'
 import { validarSucursal, obtenerTextoConfirmacionSucursal } from './src/validators/sucursal.validator'
 import { buscarEnvio, pareceConsultaEnvio } from './src/validators/envio.validator'
@@ -729,7 +729,7 @@ function ventaDesdeEstado(clienteId: string, fallback?: VentaCerrada): VentaCerr
   const elegido = pedido?.arreglo ?? ARREGLO_ELEGIDO.get(clienteId)
   if (!elegido && !pedido?.productoPersonalizado && !fallback) return null
 
-  const producto = elegido?.nombre ?? pedido?.productoPersonalizado ?? fallback?.producto ?? 'Pedido'
+  const producto = elegido?.nombre ?? fallback?.producto ?? 'Pedido'
   const subtotal = elegido?.precio ?? pedido?.precioPersonalizado ?? (parseFloat(String(fallback?.total ?? '').replace(/[^0-9.]/g, '')) || 0)
   const extras = totalExtrasPedido(clienteId)
   const envio = pedido?.envio?.precio ?? 0
@@ -746,7 +746,7 @@ function ventaDesdeEstado(clienteId: string, fallback?: VentaCerrada): VentaCerr
     : `$${total.toFixed(2)} MXN`
 
   return {
-    cliente: pedido?.nombre ?? fallback?.cliente ?? 'Verificar en chat',
+    cliente: pedido?.nombre ?? obtenerPedido(clienteId)?.nombre ?? fallback?.cliente ?? 'Verificar en chat',
     producto,
     total: totalTexto,
     direccion,
@@ -804,6 +804,11 @@ function aplicarDatosPedidoDesdeTexto(clienteId: string, texto: string): void {
   if (/\b(transferencia|transfer|comprobante|recibo|ticket|listo\s+ese\s+es\s+el\s+recibo|pago\s+con\s+transferencia)\b/i.test(texto)) {
     pedido.metodoPago = 'transferencia'
     pedido.estadoFlujo = 'esperando_pago'
+  }
+
+  if (pedido.nombre) {
+    const op = obtenerPedido(clienteId)
+    if (op) op.nombre = pedido.nombre
   }
 }
 
@@ -1245,10 +1250,25 @@ async function procesarMensaje(msg: any): Promise<void> {
     })
 
     const fechaHoraDetectada = extraerFechaHoraPedido(textoCliente)
+    let esHorarioAnticipadoFlag = false
     if ((fechaHoraDetectada.fecha || fechaHoraDetectada.hora) && tieneArregloVerificado(clienteId)) {
       const pedido = pedidoActual(clienteId)
       if (fechaHoraDetectada.fecha) pedido.fechaEntrega = fechaHoraDetectada.fecha
       if (fechaHoraDetectada.hora) pedido.horaEntrega = fechaHoraDetectada.hora
+    }
+    if (fechaHoraDetectada.hora && tieneArregloVerificado(clienteId) && esHorarioAnticipado(fechaHoraDetectada.hora)) {
+      esHorarioAnticipadoFlag = true
+      const pedido = pedidoActual(clienteId)
+      pedido.estadoFlujo = 'esperando_fecha_hora'
+      if (debeEnviarAlertaDedup(clienteId, 'horario-anticipado', fechaHoraDetectada.hora, 30 * 60_000)) {
+        eventBus.emit(EventType.HUMAN_REQUIRED, {
+          telefono: await numeroRealPromise,
+          cliente: msg.pushName || '',
+          prioridad: 'media',
+          descripcion: `Cliente solicita entrega a las ${fechaHoraDetectada.hora} (antes de apertura ${HORARIO_APERTURA}:00). ¿Podemos?`,
+          contexto: 'Horario anticipado',
+        })
+      }
     }
 
     const intencion     = detectarIntencion(textoCliente, clienteId)
@@ -1268,6 +1288,12 @@ async function procesarMensaje(msg: any): Promise<void> {
       contextoExtra +=
         `\n\n[CLIENTE QUIERE EMPEZAR DESDE CERO] ` +
         `El pedido anterior ya no debe mezclarse con este. Usa SOLO la última solicitud del cliente para el pedido nuevo. No reutilices flores, precio, sucursal, pago ni nombre del pedido anterior.`
+    }
+
+    if (esHorarioAnticipadoFlag) {
+      contextoExtra +=
+        `\n\n[HORARIO ANTICIPADO] El cliente pide entrega a las ${fechaHoraDetectada.hora}, antes de las ${HORARIO_APERTURA}:00 (nuestra apertura). ` +
+        `INSTRUCCIÓN: NO confirmes ni rechaces el horario. Responde exactamente: "Entendido, consulto con el equipo si podemos tenerlo listo a las ${fechaHoraDetectada.hora} y te confirmo 🌷"`
     }
 
     // ── Múltiples mensajes agrupados ─────────────────────────────
@@ -1624,6 +1650,11 @@ async function procesarMensaje(msg: any): Promise<void> {
       pedidoActual(clienteId).nombre = primeraLineaNombre.replace(/\s+/g, ' ').slice(0, 80)
     }
 
+    if (pedidoActual(clienteId).nombre) {
+      const op = obtenerPedido(clienteId)
+      if (op) op.nombre = pedidoActual(clienteId).nombre
+    }
+
     let ventaCerrada = false
 
     // ── MÉTODO DE PAGO ──────────────────────────────────────────
@@ -1861,6 +1892,20 @@ async function ventaCerradaHandler(clienteId: string, venta: VentaCerrada, telef
     total: parseFloat(venta.total.replace(/[^0-9.]/g, '')) || 0,
     metodoPago: 'Transferencia',
   })
+  eventBus.emit(EventType.ORDER_CREATED, {
+    telefono: numeroReal,
+    cliente: venta.cliente,
+    producto: venta.producto,
+    total: parseFloat(venta.total.replace(/[^0-9.]/g, '')) || 0,
+    sucursal: venta.direccion,
+    metodoPago: 'Transferencia',
+    descripcion: 'Pago recibido - venta completada',
+    precioArreglo: precioArregloTexto(clienteId),
+    precioExtras: extrasPedidoTexto(clienteId) ?? undefined,
+    precioEnvio: pedido?.envio?.precio,
+    fechaHora: [pedido?.fechaEntrega, pedido?.horaEntrega].filter(Boolean).join(' ') || undefined,
+    tieneFotoReferencia: pedido?.fotoReferenciaBase64 ? true : undefined,
+  } as any)
   resetearPedidoCliente(clienteId)
 }
 
@@ -2404,6 +2449,7 @@ startupWatchdog.unref()
 
 cargarEstado().catch(() => {})
 iniciarPersistenciaPeriodica()
+cargarPedidosDesdeBD().catch(() => {})
 iniciarBaileys().catch((err) => { console.error('❌ Error:', err); registrarCrash(); process.exit(1) })
 
 async function gracefulShutdown(signal: string): Promise<void> {
