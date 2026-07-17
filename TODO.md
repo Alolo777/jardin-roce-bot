@@ -24,20 +24,22 @@
 ## Errores de la Versión Anterior
 
 | Error | Estado |
-|---|---|
+|---|---|---|
 | #1 — Parser de nombre consume texto adicional | ✅ Resuelto |
 | #1b — Parser acepta frases conversacionales como nombre (Issue producción 17-Jul) | ✅ Resuelto (DEC-022) |
 | #1c — `ventaDesdeEstado` usaba `productoPersonalizado` que se contamina con caption de foto | ✅ Resuelto (DEC-023) |
 | #1d — `ventaCerradaHandler` no emitía `ORDER_CREATED` con detalles de compra | ✅ Resuelto (DEC-023) |
 | #1e — Nombre extraído no se sincronizaba con Order Engine (dashboard veía datos incompletos) | ✅ Resuelto (DEC-023) |
+| #2 — Sucursal por defecto incorrecta | ✅ Resuelto |
 | #3 — LLM confirmaba horarios (9:30 cuando abren 10:00) — ahora deriva a equipo humano | ✅ Resuelto (DEC-024) |
 | #4 — Order Engine persiste en bot_cache (sobrevive reinicios) | ✅ Resuelto (DEC-025) |
 | #5 — `\bno\b` en NO_ES_NOMBRE bloqueaba "Noé Hernández" | ✅ Resuelto (DEC-026) |
-| #2 — Sucursal por defecto incorrecta | ✅ Resuelto |
-| #4 — Pedidos dependían de token VENTA_CERRADA | ✅ Resuelto |
-| #5 — Conversación y pedido misma entidad | ✅ Resuelto (P2.1: reset de pedido al cambiar de tema) |
-| #6 — Telegram dependía del LLM | ✅ Resuelto (verificado M11b: 100% eventos) |
-| #7 — Reglas de negocio en el prompt | 🟢 Resuelto (validadores TS creados y conectados en M10a-d) |
+| #6 — Conversación y pedido misma entidad | ✅ Resuelto (P2.1: reset de pedido al cambiar de tema) |
+| #7 — Telegram dependía del LLM | ✅ Resuelto (verificado M11b: 100% eventos) |
+| #8 — Reglas de negocio en el prompt | 🟢 Resuelto (validadores TS creados y conectados en M10a-d) |
+| #9 — Google Maps links no reconocidos como dirección | ✅ Resuelto (DEC-031) |
+| #10 — Telegram no enviaba notificaciones (subscribeTelegramEvents nunca llamado) | ✅ Resuelto (DEC-032) |
+| #11 — Comprobante no notificaba a empleados WhatsApp | ✅ Resuelto (DEC-033) |
 
 ## Fases de Migración (Parte 4.1)
 

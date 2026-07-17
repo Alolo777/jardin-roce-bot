@@ -601,3 +601,64 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 2. Eliminar el requisito de keyword de precio si `seleccionaFotoDisponible` es true (elegida)
 
 **Resultado:** Siempre que `seleccionaFotoDisponible && !tienePrecioConfirmado`, se notifica al equipo. No depende del texto exacto del cliente.
+
+---
+
+## DEC-031: Google Maps links detectados como dirección válida
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** Clientes enviaban links `https://maps.app.goo.gl/...` y el bot respondía "Proporciona la dirección completa" porque `parseDireccion()` no reconocía URLs de Maps como dirección. El formato `maps.app.goo.gl` no estaba cubierto por el regex.
+
+**Alternativas:**
+1. Delegar al LLM la interpretación del link (no, el LLM no puede acceder a URLs)
+2. Extraer coordenadas del link y geocodificar inversamente (demasiado complejo)
+3. Reconocer el link como dirección válida y notificar al equipo (elegida)
+
+**Resultado:**
+- `direccion.parser.ts`: `GOOGLE_MAPS_REGEX` detecta `maps.app.goo.gl`, `goo.gl/maps`, `google.*/maps` con confianza 'alta'
+- `envio.validator.ts`: `buscarEnvio()` limpia el link antes de buscar municipios; retorna null cuando solo hay link sin texto adicional
+- `bot.ts`: inline `GOOGLE_MAPS_REGEX` actualizado para consistencia
+
+**Ventajas:** El link es tratado como dirección válida, el equipo es notificado. El LLM recibe instrucción de que el cliente ya proporcionó ubicación.
+
+**Desventajas:** El equipo debe abrir manualmente el link para ver la ubicación.
+
+---
+
+## DEC-032: subscribeTelegramEvents agregado al arranque del bot
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** `subscribeTelegramEvents()` se importaba en `bot.ts:26` pero nunca se invocaba. El Event Engine emitía 25 tipos de eventos pero ningún suscriptor los reenviaba a Telegram porque el subscriber nunca se registraba en el `eventBus`.
+
+**Alternativas:**
+1. Mover la suscripción a un módulo separado con auto-inicialización (más cambios, más riesgo)
+2. Llamar la función directamente en el arranque de bot.ts (elegida — mínimo cambio)
+
+**Resultado:** Agregada llamada `subscribeTelegramEvents()` en la secuencia de arranque, después de `cargarEstado()`.
+
+**Ventajas:** Se activan todas las notificaciones a Telegram sin modificar la lógica existente. Cambio de una línea, 0 riesgo.
+
+**Desventajas:** Ninguna.
+
+---
+
+## DEC-033: Comprobante notifica a empleados WhatsApp
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** Cuando un cliente enviaba un comprobante de pago, `procesarMediaAcumulado()` solo emitía un evento `PHOTO_RECEIVED` (que no llegaba a Telegram por DEC-032). El equipo no recibía el comprobante para verificarlo, repitiendo el caso "Lizet" donde un pago se pierde porque nadie lo revisa.
+
+**Alternativas:**
+1. Depender solo de Telegram (pero Bug #2 mostraba que el equipo no veía las notificaciones)
+2. Enviar la foto del comprobante y una alerta de texto por WhatsApp a empleados (elegida — mismo patrón que referencia)
+
+**Resultado:** En `procesarMediaAcumulado()`, el bloque `esComprobante` ahora llama a `enviarFotoEmpleadosWhatsApp()` (envía la foto) y `notificarEmpleadosWhatsApp()` (alerta de texto), exactamente como se hace para `esReferencia`.
+
+**Ventajas:** El equipo recibe el comprobante inmediatamente por WhatsApp para verificar el pago. Patrón consistente con el manejo de fotos de referencia.
+
+**Desventajas:** Ninguna.

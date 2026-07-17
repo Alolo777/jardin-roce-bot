@@ -54,7 +54,7 @@ function contieneFrase(texto: string, frase: string): boolean {
   return new RegExp(`\\b${frase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(texto)
 }
 
-const GOOGLE_MAPS_REGEX = /https?:\/\/(?:www\.)?(?:google\.[a-z]+\/maps|goo\.gl\/maps)[^\s]*/i
+const GOOGLE_MAPS_REGEX = /https?:\/\/(?:www\.)?(?:google\.[a-z]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl)[^\s]*/i
 const COORDS_REGEX = /@(-?\d+\.\d+),(-?\d+\.\d+)/
 
 export function detectarLinkMaps(texto: string): boolean {
@@ -77,8 +77,14 @@ export function pareceConsultaEnvio(texto: string): boolean {
 }
 
 export async function buscarEnvio(texto: string): Promise<ResultadoEnvio> {
-  const n = normalizarTexto(texto)
+  const textoSinMaps = texto.replace(GOOGLE_MAPS_REGEX, '').replace(/\s+/g, ' ').trim()
+  const n = normalizarTexto(textoSinMaps || texto)
   const tieneDatoDireccion = parseDireccion(texto).confianza !== 'ninguna'
+  const esLinkMaps = detectarLinkMaps(texto)
+
+  if (esLinkMaps && !textoSinMaps) {
+    return null
+  }
 
   const municipios = await obtenerMunicipiosEnvio()
   if (municipios.length > 0) {

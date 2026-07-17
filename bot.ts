@@ -908,6 +908,8 @@ async function procesarMediaAcumulado(clienteId: string, telefono: string, texto
         mimetype: media.mimetype,
         caption: media.caption,
       })
+      enviarFotoEmpleadosWhatsApp(sock, media.base64, `📸 *Comprobante de pago* — ${telefono}${media.caption ? `\n\n${media.caption}` : ''}\n\nVerifica el comprobante y confirma el pago.`, media.mimetype).catch(err => console.error('[bot] WhatsApp foto comprobante:', err))
+      notificarEmpleadosWhatsApp(sock, `💰 *Comprobante de pago recibido:* ${telefono}\n\nRevisa la foto del comprobante y confirma el pago con el equipo.`).catch(err => console.error('[bot] WhatsApp notif comprobante:', err))
     } else if (esReferencia) {
       eventBus.emit(EventType.PHOTO_RECEIVED, {
         telefono,
@@ -1131,7 +1133,7 @@ async function buscarPrecioEnvio(texto: string): Promise<ResultadoEnvio | null> 
   return null
 }
 
-const GOOGLE_MAPS_REGEX = /https?:\/\/(?:www\.)?(?:google\.[a-z]+\/maps|goo\.gl\/maps)[^\s]*/i
+const GOOGLE_MAPS_REGEX = /https?:\/\/(?:www\.)?(?:google\.[a-z]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl)[^\s]*/i
 const COORDS_REGEX = /@(-?\d+\.\d+),(-?\d+\.\d+)/
 
 function detectarLinkMaps(texto: string): boolean {
@@ -2456,6 +2458,7 @@ const startupWatchdog = setInterval(() => {
 startupWatchdog.unref()
 
 cargarEstado().catch(() => {})
+subscribeTelegramEvents()
 iniciarPersistenciaPeriodica()
 cargarPedidosDesdeBD().catch(() => {})
 iniciarBaileys().catch((err) => { console.error('❌ Error:', err); registrarCrash(); process.exit(1) })

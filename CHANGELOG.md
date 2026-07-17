@@ -2,6 +2,57 @@
 
 ## 2026-07-17
 
+Versión: 2.0.7
+
+### Fix — Google Maps links no detectados como dirección
+### Fix — Telegram no enviaba notificaciones (subscribeTelegramEvents nunca iniciado)
+### Fix — Comprobante no notificaba a empleados WhatsApp
+
+**Problema:** Los clientes enviaban links de Google Maps (`https://maps.app.goo.gl/...`) y el bot no los reconocía como dirección válida porque:
+1. `parseDireccion()` no detectaba links de Maps (sin palabras clave tipo "calle")
+2. El regex `GOOGLE_MAPS_REGEX` no coincidía con `maps.app.goo.gl` (formato usado actualmente)
+3. `buscarEnvio()` incluía la URL en la búsqueda contra municipios, evitando matching
+
+**Cambios:**
+- `src/parser/direccion.parser.ts`: Agregado `GOOGLE_MAPS_REGEX` y detección de Maps links como `confianza: 'alta'`
+- `src/validators/envio.validator.ts`: Actualizado `GOOGLE_MAPS_REGEX` para incluir `maps.app.goo.gl`; `buscarEnvio()` ahora limpia el link antes de buscar municipios, retorna null si es solo Maps link sin texto
+- `bot.ts`: Actualizado inline `GOOGLE_MAPS_REGEX` para consistencia
+
+**Impacto:** Compatible.
+**Rollback:** Sí.
+
+---
+
+### Fix — Telegram no enviaba notificaciones
+
+**Problema:** `subscribeTelegramEvents()` se importaba en `bot.ts` pero nunca se llamaba durante el arranque. Sin esta llamada, los suscriptores del `eventBus` nunca se registraban, por lo que ningún evento llegaba a Telegram (ni comprobantes, ni ventas cerradas, ni alertas).
+
+**Causa raíz:** En la secuencia de arranque (`bot.ts:2458-2461`) faltaba la invocación a `subscribeTelegramEvents()`.
+
+**Cambio:**
+- `bot.ts`: Agregada llamada `subscribeTelegramEvents()` después de `cargarEstado()` en la secuencia de arranque.
+
+**Impacto:** Ahora los 25 eventos emitidos por el `eventBus` se reenvían a Telegram.
+**Rollback:** Revertir línea agregada.
+
+---
+
+### Fix — Comprobante no notificaba a empleados WhatsApp
+
+**Problema:** Cuando un cliente enviaba un comprobante de pago, el equipo no recibía ninguna notificación por WhatsApp. La foto del comprobante solo se emitía como evento `PHOTO_RECEIVED` (que antes no llegaba a Telegram por Bug #2), pero nunca se llamaba a `enviarFotoEmpleadosWhatsApp` ni `notificarEmpleadosWhatsApp`.
+
+**Causa raíz:** En `procesarMediaAcumulado()` (`bot.ts:902-910`), el bloque `esComprobante` solo emitía un evento, a diferencia del bloque `esReferencia` (línea 919) que SÍ enviaba la foto a empleados.
+
+**Cambio:**
+- `bot.ts`: Agregadas llamadas a `enviarFotoEmpleadosWhatsApp` (envía la foto del comprobante) y `notificarEmpleadosWhatsApp` (envía alerta de texto) en el bloque `esComprobante` de `procesarMediaAcumulado`.
+
+**Impacto:** El equipo recibe el comprobante y una alerta por WhatsApp cuando un cliente paga.
+**Rollback:** Revertir líneas agregadas en `procesarMediaAcumulado`.
+
+---
+
+## 2026-07-17
+
 Versión: 2.0.6
 
 ### Fix — 6 issues de producción

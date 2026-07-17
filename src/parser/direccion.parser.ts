@@ -1,3 +1,4 @@
+const GOOGLE_MAPS_REGEX = /https?:\/\/(?:www\.)?(?:google\.[a-z]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl)[^\s]*/i
 const DIRECCION_PATTERN = /\b(calle|av|avenida|boulevard|blvd|privada|cerrada|andador|carretera|colonia|col\.|fraccionamiento|fracc\.|residencial|unidad|manzana|lote|edificio|departamento|depto|int|edif)\b/i
 const NUMERO_EXTERNO = /\b(?:no\.?\s*|número\s*|num\s*)?(\d{1,5})\s*(?:,\s*)?/i
 
@@ -7,8 +8,11 @@ export interface DireccionParseada {
 }
 
 export function parseDireccion(texto: string): DireccionParseada {
+  if (GOOGLE_MAPS_REGEX.test(texto)) {
+    return { direccion: texto.trim().slice(0, 100).replace(/\s+/g, ' '), confianza: 'alta' }
+  }
+
   if (DIRECCION_PATTERN.test(texto)) {
-    // Tomar primeras 100 caracteres como posible dirección
     const candidata = texto.trim().slice(0, 100).replace(/\s+/g, ' ')
     return { direccion: candidata, confianza: 'alta' }
   }
