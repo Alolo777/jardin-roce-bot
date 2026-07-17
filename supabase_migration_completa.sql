@@ -251,41 +251,46 @@ CREATE INDEX IF NOT EXISTS idx_historial_chat_cliente
   ON historial_chat (cliente_id, creado_en DESC);
 
 -- =============================================================================
--- POLÍTICAS RLS
+-- POLÍTICAS RLS (compatibles con PG < 15 — usa DO block en lugar de IF NOT EXISTS)
 -- NOTA: El bot usa service_role (bypassea RLS). Estas políticas son para
 --       acceso directo desde el panel de Supabase o desde Next.js con
 --       rol autenticado.
 -- =============================================================================
 
-CREATE POLICY IF NOT EXISTS "service_role_all_historial_prompt"
-  ON historial_prompt FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
-CREATE POLICY IF NOT EXISTS "service_role_all_reclamaciones"
-  ON reclamaciones FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
-CREATE POLICY IF NOT EXISTS "service_role_all_reporte_ventas"
-  ON reporte_ventas FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
-CREATE POLICY IF NOT EXISTS "Todos pueden leer numeros_ignorados"
-  ON numeros_ignorados FOR SELECT USING (true);
-
-CREATE POLICY IF NOT EXISTS "Solo service_role puede insertar numeros_ignorados"
-  ON numeros_ignorados FOR INSERT WITH CHECK (true);
-
-CREATE POLICY IF NOT EXISTS "Solo service_role puede eliminar numeros_ignorados"
-  ON numeros_ignorados FOR DELETE USING (true);
-
-CREATE POLICY IF NOT EXISTS "Todos pueden leer municipios"
-  ON municipios_envio FOR SELECT USING (true);
-
-CREATE POLICY IF NOT EXISTS "Solo service_role puede insertar municipios"
-  ON municipios_envio FOR INSERT WITH CHECK (true);
-
-CREATE POLICY IF NOT EXISTS "Solo service_role puede actualizar municipios"
-  ON municipios_envio FOR UPDATE USING (true);
-
-CREATE POLICY IF NOT EXISTS "Solo service_role puede eliminar municipios"
-  ON municipios_envio FOR DELETE USING (true);
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'service_role_all_historial_prompt') THEN
+    CREATE POLICY "service_role_all_historial_prompt" ON historial_prompt FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'service_role_all_reclamaciones') THEN
+    CREATE POLICY "service_role_all_reclamaciones" ON reclamaciones FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'service_role_all_reporte_ventas') THEN
+    CREATE POLICY "service_role_all_reporte_ventas" ON reporte_ventas FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Todos pueden leer numeros_ignorados') THEN
+    CREATE POLICY "Todos pueden leer numeros_ignorados" ON numeros_ignorados FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Solo service_role puede insertar numeros_ignorados') THEN
+    CREATE POLICY "Solo service_role puede insertar numeros_ignorados" ON numeros_ignorados FOR INSERT WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Solo service_role puede eliminar numeros_ignorados') THEN
+    CREATE POLICY "Solo service_role puede eliminar numeros_ignorados" ON numeros_ignorados FOR DELETE USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Todos pueden leer municipios') THEN
+    CREATE POLICY "Todos pueden leer municipios" ON municipios_envio FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Solo service_role puede insertar municipios') THEN
+    CREATE POLICY "Solo service_role puede insertar municipios" ON municipios_envio FOR INSERT WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Solo service_role puede actualizar municipios') THEN
+    CREATE POLICY "Solo service_role puede actualizar municipios" ON municipios_envio FOR UPDATE USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Solo service_role puede eliminar municipios') THEN
+    CREATE POLICY "Solo service_role puede eliminar municipios" ON municipios_envio FOR DELETE USING (true);
+  END IF;
+END
+$$;
 
 -- =============================================================================
 -- FIN DE MIGRACIÓN
