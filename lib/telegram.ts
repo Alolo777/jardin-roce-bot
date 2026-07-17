@@ -609,6 +609,18 @@ export async function enviarAlertaFotoEnviada(
 // 14B. ALERTAS DE CASOS
 // ════════════════════════════════════════════════════════════════
 
+export async function enviarAlertaProveedorCaido(error: string): Promise<void> {
+  const msj = [
+    `🚨 *Proveedor de IA caído*`,
+    ``,
+    `Flora no puede generar respuestas en este momento.`,
+    `Error: ${esc(error.slice(0, 300))}`,
+    ``,
+    `📅 ${horaActual()}`,
+  ].join('\n')
+  await enviar(msj)
+}
+
 export async function enviarAlertaCasoNuevo(
   numeroCliente: string,
   tipoCaso: string,

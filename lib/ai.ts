@@ -3,7 +3,8 @@
 
 import OpenAI from 'openai'
 import { supabaseAdmin } from './supabase'
-import { callGeminiText, callGeminiVision } from './gemini-ai'
+import { eventBus } from '../src/events/event-bus'
+import { EventType } from '../src/events/types'
 import type { AIResponse, VentaCerrada } from './types'
 
 // ─── Cliente OpenAI apuntando a GitHub Models ───────────────────────────────
@@ -16,8 +17,8 @@ const MODEL = process.env.GITHUB_MODEL ?? 'gpt-4o-mini'
 const REVIEW_MODEL = process.env.GITHUB_REVIEW_MODEL ?? MODEL
 
 // ─── Semáforo global: máximo 2 llamadas concurrentes a la API ───────────────
-const MAX_CONCURRENT = 2
-const SLOT_TIMEOUT_MS = 60_000
+const MAX_CONCURRENT = 3
+const SLOT_TIMEOUT_MS = 30_000
 let activeRequests = 0
 const requestQueue: Array<() => void> = []
 
@@ -64,25 +65,7 @@ async function withLimit<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-async function callWithFallback<T>(
-  githubFn: () => Promise<T>,
-  geminiFn: () => Promise<T>,
-  label: string
-): Promise<T> {
-  try {
-    return await githubFn()
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.warn(`[ai.ts] 🟡 Fallback → Gemini para "${label}": ${msg}`)
-    try {
-      return await geminiFn()
-    } catch (geminiErr) {
-      const gmsg = geminiErr instanceof Error ? geminiErr.message : String(geminiErr)
-      console.error(`[ai.ts] 🔴 Gemini también falló para "${label}": ${gmsg}`)
-      throw geminiErr
-    }
-  }
-}
+// callWithFallback eliminado — solo usamos GitHub Models
 
 // ─── Caché del System Prompt (TTL: 60 segundos) ─────────────────────────────
 interface CachePrompt {
@@ -455,8 +438,7 @@ export async function clasificarImagenVenta(
   try {
     console.time('[ai.ts] Vision classify')
 
-    const rawTexto = await callWithFallback(
-      async () => {
+    const rawTexto = await (async () => {
         const body = JSON.stringify({
           model: REVIEW_MODEL,
           messages: [
@@ -494,12 +476,7 @@ export async function clasificarImagenVenta(
           }
         }, 2)
         return raw.choices?.[0]?.message?.content?.trim() || ''
-      },
-      async () => {
-        return await callGeminiVision(prompt, imagenes)
-      },
-      'Vision classify'
-    )
+      })()
     console.timeEnd('[ai.ts] Vision classify')
 
     const parsed = JSON.parse(rawTexto) as { tipo?: string; razon?: string }
@@ -539,8 +516,7 @@ export async function clasificarConversacion(
   ].join('\n')
 
   try {
-    const rawJson = await callWithFallback(
-      async () => {
+    const rawJson = await (async () => {
         const completion = await conRetry(async () => {
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 10_000)
@@ -559,12 +535,7 @@ export async function clasificarConversacion(
           }
         }, 2)
         return completion.choices[0]?.message?.content || ''
-      },
-      async () => {
-        return await callGeminiText(prompt, { maxTokens: 220, temperature: 0 })
-      },
-      'clasificarConversacion'
-    )
+      })()
 
     const parsed = JSON.parse(extraerJsonObjeto(rawJson)) as Partial<ClasificacionConversacion>
     const intenciones: IntencionConversacion[] = ['saludo', 'consulta_producto', 'cotizacion', 'envio', 'pago_comprobante', 'venta', 'cancelacion', 'queja', 'atencion_humana', 'seguimiento', 'off_topic', 'incierto']
@@ -616,8 +587,7 @@ export async function revisarRespuestaFlora(
   ].join('\n')
 
   try {
-    const rawJson = await callWithFallback(
-      async () => {
+    const rawJson = await (async () => {
         const completion = await conRetry(async () => {
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 12_000)
@@ -636,12 +606,7 @@ export async function revisarRespuestaFlora(
           }
         }, 2)
         return completion.choices[0]?.message?.content || ''
-      },
-      async () => {
-        return await callGeminiText(prompt, { maxTokens: 350, temperature: 0 })
-      },
-      'revisarRespuestaFlora'
-    )
+      })()
 
     const parsed = JSON.parse(extraerJsonObjeto(rawJson)) as Partial<RevisionRespuestaFlora>
     const riesgo = parsed.riesgo === 'medio' || parsed.riesgo === 'alto' ? parsed.riesgo : 'bajo'
@@ -674,8 +639,7 @@ export async function getAIResponse(
     }
 
     console.time('[ai.ts] LLM call')
-    const respuestaRaw = await callWithFallback(
-      async () => {
+    const respuestaRaw = await (async () => {
         const completion = await conRetry(async () => {
           const controller = new AbortController()
           const timeoutId  = setTimeout(() => controller.abort(), 15_000)
@@ -700,19 +664,7 @@ export async function getAIResponse(
         return contenido && contenido.length > 0
           ? contenido
           : 'Lo siento, no pude procesar tu mensaje. ¿Puedes repetirlo? 🌸'
-      },
-      async () => {
-        const historialTexto = historial
-          .map(m => `${m.role === 'user' ? 'cliente' : 'flora'}: ${m.content}`)
-          .join('\n')
-        const prompt = `${systemPromptFinal}\n\n--- Conversación ---\n${historialTexto}`
-        const texto = await callGeminiText(prompt, { maxTokens: 800, temperature: 0.7 })
-        return texto && texto.length > 0
-          ? texto
-          : 'Lo siento, no pude procesar tu mensaje. ¿Puedes repetirlo? 🌸'
-      },
-      'getAIResponse'
-    )
+      })()
     console.timeEnd('[ai.ts] LLM call')
 
     // Detectar si hay un token de venta cerrada
@@ -725,8 +677,14 @@ export async function getAIResponse(
 
     return { mensaje: mensajeLimpio, ventaCerrada }
   } catch (error) {
-    console.error('[ai.ts] Error en getAIResponse:', error)
-    throw error
+    console.error('[ai.ts] 🔴 Error en getAIResponse (ambos proveedores fallaron):', error)
+    try {
+      eventBus.emit(EventType.PROVIDER_FAILURE, {
+        telefono: 'system',
+        descripcion: error instanceof Error ? error.message.slice(0, 200) : 'Error desconocido en proveedor IA',
+      })
+    } catch {}
+    return { mensaje: '🌷 Perdón, un pequeño mareo digital. Dame un momento y vuelve a escribirme, por favor.', ventaCerrada: null }
   }
 }
 

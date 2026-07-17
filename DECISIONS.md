@@ -662,3 +662,63 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 **Ventajas:** El equipo recibe el comprobante inmediatamente por WhatsApp para verificar el pago. Patrón consistente con el manejo de fotos de referencia.
 
 **Desventajas:** Ninguna.
+
+---
+
+## DEC-034: Gemini eliminado como fallback, solo GitHub Models
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** Gemini free tier (cuota 150 requests/86400s) se agotaba diariamente, causando HTTP 429 que hacía que `getAIResponse` lanzara throw y el cliente recibiera "mareo digital". Las pruebas mostraron GitHub Models funcional (~2s de latencia).
+
+**Alternativas consideradas:**
+1. Migrar a Gemini plan pago (costo adicional, misma latencia)
+2. Mantener ambos proveedores con mejor manejo de cuota (más complejo)
+3. Eliminar Gemini y dejar solo GitHub Models (elegida)
+
+**Resultado:** Se removió `callWithFallback` y todos los imports a Gemini. Las 4 funciones (`clasificarImagenVenta`, `clasificarConversacion`, `revisarRespuestaFlora`, `getAIResponse`) llaman directamente a GitHub Models con `conRetry`. Se eliminaron `lib/gemini-ai.ts` y `@google/generative-ai`.
+
+**Ventajas:** Un solo proveedor, menos latencia, sin fallback frágil, sin dependencia externa de Google.
+
+**Desventajas:** Sin redundancia — si GitHub Models cae, no hay fallback (mitigado por `PROVIDER_FAILURE` event que notifica al equipo).
+
+---
+
+## DEC-035: getAIResponse devuelve fallback en vez de throw
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** Cuando ambos proveedores fallaban, `getAIResponse` lanzaba error, `procesarMensaje` lo atrapaba y respondía con "mareo digital". El cliente perdía el contexto de su mensaje.
+
+**Alternativas consideradas:**
+1. Seguir lanzando error y dejar que el catch maneje (status quo, cliente recibe mensaje genérico)
+2. No responder cuando falla (peor experiencia)
+3. Devolver texto de respaldo pidiendo al cliente que repita + emitir evento al equipo (elegida)
+
+**Resultado:** `getAIResponse` atrapa el error, emite `PROVIDER_FAILURE` al event bus (→ Telegram notifica al equipo), y retorna `{ mensaje: '🌷 Perdón, un pequeño mareo digital...', ventaCerrada: null }`.
+
+**Ventajas:** El cliente recibe una respuesta coherente. El equipo sabe que la IA está caída. El cliente puede reintentar.
+
+**Desventajas:** El mensaje pide al cliente que repita — puede ser confuso si no lee con atención.
+
+---
+
+## DEC-036: Concurrencia aumentada y timeout reducido
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** Los logs de producción mostraban Timeout 60000ms esperando slot de concurrencia. Con 2 slots y 60s de timeout, cuando ambos estaban ocupados (ej: clasificación de imágenes + respuesta a otro cliente), los mensajes nuevos se quedaban en cola hasta 60s.
+
+**Alternativas consideradas:**
+1. Mantener 2 slots (no resuelve contención)
+2. Aumentar a 3 slots + reducir timeout a 30s (elegida)
+3. Eliminar el semáforo por completo (riesgo de rate-limit de Azure)
+
+**Resultado:** MAX_CONCURRENT 2→3, SLOT_TIMEOUT_MS 60s→30s.
+
+**Ventajas:** 50% más capacidad concurrente. Los clientes esperan la mitad del tiempo antes de que su request "force" el slot.
+
+**Desventajas:** Mayor probabilidad de alcanzar rate-limit de Azure si hay muchos mensajes simultáneos (mitigado por conRetry con backoff).

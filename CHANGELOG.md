@@ -2,6 +2,34 @@
 
 ## 2026-07-17
 
+### Fix — Eliminar Gemini fallback, getAIResponse ya no lanza error, concurrencia mejorada
+
+**Problema:** Cuando ambos proveedores de IA fallaban (Azure OpenAI timeout + Gemini quota 429), `getAIResponse` lanzaba throw y `procesarMensaje` atrapaba el error enviando "mareo digital". Esto ocurría porque Gemini free tier (cuota 150/día) se agotaba y el semáforo de concurrencia (2 slots, 60s timeout) causaba contención de cola.
+
+**Archivos modificados:**
+- `lib/ai.ts`
+- `lib/telegram.ts`
+- `src/events/types.ts`
+- `src/events/telegram.subscriber.ts`
+- `lib/gemini-ai.ts` (eliminado)
+- `package.json` (@google/generative-ai eliminado)
+
+**Cambios:**
+
+1. **Eliminado Gemini como fallback**: Removida importación `callGeminiText/callGeminiVision` de `lib/gemini-ai.ts`. Eliminada función `callWithFallback`. Las 4 llamadas que intentaban Gemini como respaldo ahora van directo a GitHub Models con `conRetry`.
+2. **Aumentada concurrencia**: `MAX_CONCURRENT 2→3`, `SLOT_TIMEOUT_MS 60s→30s` — menos contención en cola.
+3. **getAIResponse ya no lanza**: El catch final emite `PROVIDER_FAILURE` a Telegram y devuelve texto de respaldo en vez de throw.
+4. **Nuevo evento PROVIDER_FAILURE**: Agregado a `EventType` enum, suscrito en Telegram con función `enviarAlertaProveedorCaido`.
+5. **Gemini eliminado**: `lib/gemini-ai.ts` borrado, `@google/generative-ai` desinstalado.
+
+**Impacto:** El bot nunca deja de responder por fallo de proveedor IA. GitHub Models es el único proveedor. Telegram notifica al equipo cuando el proveedor está caído.
+
+**Rollback:** Revertir cambios en lib/ai.ts, lib/telegram.ts, src/events/types.ts, src/events/telegram.subscriber.ts; restaurar lib/gemini-ai.ts + @google/generative-ai.
+
+---
+
+## 2026-07-17
+
 ### Feature — Extracción de manejarMensajeEntrante a message-entry.ts
 
 **Archivos modificados:**

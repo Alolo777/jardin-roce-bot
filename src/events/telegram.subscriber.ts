@@ -30,6 +30,7 @@ import {
   enviarAlertaBotDesconectado,
   enviarAlertaClienteEsperando,
   enviarAlertaFotoEnviada,
+  enviarAlertaProveedorCaido,
   enviarFotoTelegram,
 } from '../../lib/telegram'
 
@@ -236,5 +237,9 @@ export function subscribeTelegramEvents(): void {
         : '📸 *Imagen del cliente*'
     const texto = `${prefix} — ${telefono}${caption ? `\n\n${caption}` : ''}`
     enviarFotoTelegram(base64, texto, mimetype)
+  })
+
+  eventBus.subscribe(EventType.PROVIDER_FAILURE, (event) => {
+    enviarAlertaProveedorCaido(event.payload.descripcion ?? 'Error desconocido')
   })
 }

@@ -9,7 +9,7 @@
 | Decision Engine | 100% | ✅ |
 | Case Engine | 100% | ✅ |
 | Order Engine | 100% | ✅ |
-| WhatsApp Services | 85% | 🟢 |
+| WhatsApp Services | 100% | ✅ |
 | Persistencia Supabase | 100% | ✅ |
 | Prompt Builder | 100% | ✅ |
 | Event Engine | 98% | 🟢 |
@@ -40,6 +40,7 @@
 | #9 — Google Maps links no reconocidos como dirección | ✅ Resuelto (DEC-031) |
 | #10 — Telegram no enviaba notificaciones (subscribeTelegramEvents nunca llamado) | ✅ Resuelto (DEC-032) |
 | #11 — Comprobante no notificaba a empleados WhatsApp | ✅ Resuelto (DEC-033) |
+| #12 — Gemini fallback con cuota 429, bot no responde | ✅ Resuelto: Gemini eliminado, getAIResponse devuelve fallback + PROVIDER_FAILURE |
 
 ## Fases de Migración (Parte 4.1)
 

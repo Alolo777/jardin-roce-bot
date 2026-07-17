@@ -24,6 +24,7 @@ export enum EventType {
   BOT_CONNECTED = 'BOT_CONNECTED',
   BOT_DISCONNECTED = 'BOT_DISCONNECTED',
   BOT_DAILY_ALERT = 'BOT_DAILY_ALERT',
+  PROVIDER_FAILURE = 'PROVIDER_FAILURE',
 }
 
 export interface EventPayload {
