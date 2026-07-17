@@ -1,6 +1,6 @@
 import { EstadoPedido, PedidoActual } from '../models/types'
 import { eventBus } from '../events/event-bus'
-import { EventType } from '../events/types'
+import { EventType, EventPayload } from '../events/types'
 import { guardarPedidos, cargarPedidos, sincronizarPedidosBot } from './pedido.repository'
 
 const TRANSICIONES_VALIDAS: Record<string, EstadoPedido[]> = {
@@ -45,6 +45,32 @@ export async function cargarPedidosDesdeBD(): Promise<void> {
   }
 }
 
+function buildOrderPayload(pedido: PedidoActual): EventPayload {
+  const total =
+    pedido.precioPersonalizado ??
+    pedido.arreglo?.precio ??
+    0
+  const producto =
+    pedido.productoPersonalizado ??
+    pedido.arreglo?.nombre ??
+    'Por definir'
+  const entrega =
+    pedido.sucursal ??
+    pedido.direccion ??
+    pedido.envio?.zona ??
+    'Por confirmar'
+  return {
+    orderId: pedido.id,
+    telefono: pedido.telefono ?? '',
+    cliente: pedido.nombre ?? '',
+    producto,
+    total: typeof total === 'number' ? total : 0,
+    sucursal: entrega,
+    metodoPago: pedido.metodoPago ?? '',
+    descripcion: 'Pedido creado',
+  }
+}
+
 export function crearPedido(clienteId: string, telefono: string, datosIniciales?: Partial<PedidoActual>): PedidoActual {
   const pedido: PedidoActual = {
     id: generarId(),
@@ -57,11 +83,10 @@ export function crearPedido(clienteId: string, telefono: string, datosIniciales?
 
   PEDIDOS.set(clienteId, pedido)
 
-  eventBus.emit(EventType.ORDER_CREATED, {
-    orderId: pedido.id,
-    telefono,
-    descripcion: 'Pedido creado',
-  })
+  // BUG-A: crear un pedido NO es una venta cerrada. Emitir ORDER_UPDATED
+  // (cableado a "PEDIDO APARTADO") con datos reales en vez de ORDER_CREATED
+  // (cableado a "VENTA CERRADA") para evitar alertas falsas y vacías.
+  eventBus.emit(EventType.ORDER_UPDATED, buildOrderPayload(pedido))
 
   persistir()
   return pedido
@@ -116,8 +141,7 @@ export function transitar(pedido: PedidoActual, nuevoEstado: EstadoPedido): bool
   pedido.actualizadoEn = new Date().toISOString()
 
   eventBus.emit(EventType.ORDER_UPDATED, {
-    orderId: pedido.id,
-    telefono: pedido.telefono ?? '',
+    ...buildOrderPayload(pedido),
     descripcion: `Estado: ${actual} → ${nuevoEstado}`,
   })
 
@@ -163,8 +187,7 @@ export function archivarPedido(clienteId: string, motivo?: string): boolean {
   PEDIDOS.delete(clienteId)
 
   eventBus.emit(EventType.ORDER_UPDATED, {
-    orderId: pedido.id,
-    telefono: pedido.telefono ?? '',
+    ...buildOrderPayload(pedido),
     descripcion: motivo ?? 'Pedido archivado',
   })
 

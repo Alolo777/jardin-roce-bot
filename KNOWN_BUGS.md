@@ -5,12 +5,12 @@
 
 ## BUG-001: Alertas de Telegram llegan sin datos (producto/total/cliente vacíos)
 - **Prioridad:** Alta
-- **Estado:** Abierto
+- **Estado:** ✅ Resuelto (2026-07-17, DEC-041)
 - **Reportado:** 2026-07-17
 - **Síntomas:** Las alertas VENTA CERRADA / PEDIDO APARTADO llegan con `Producto:`, `Total:`, `Cliente:` vacíos.
-- **Causa raíz (sospecha):** Los eventos `ORDER_CREATED`/`ORDER_UPDATED` emitidos desde `message-handler.ts` y `bot.ts` no incluyen `producto`, `total` ni `cliente` en el payload.
-- **Versión donde apareció:** 3.0.0
-- **Versión donde se corrigió:** —
+- **Causa raíz:** `pedido.service.ts` emitía `ORDER_CREATED`/`ORDER_UPDATED` sin `producto`/`total`/`cliente` en el payload.
+- **Corrección:** `buildOrderPayload(pedido)` mapea datos reales del `PedidoActual`; `crearPedido` ahora emite `ORDER_UPDATED` (no `ORDER_CREATED`).
+- **Versión donde se corrigió:** 3.0.1
 
 ## BUG-002: "VENTA CERRADA" falsa por interés de compra
 - **Prioridad:** Alta

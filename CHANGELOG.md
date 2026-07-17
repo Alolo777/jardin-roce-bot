@@ -2,6 +2,26 @@
 
 ## 2026-07-17
 
+### Fix — Bug A: Alertas Telegram vacías + crearPedido ya no emite VENTA CERRADA falsa
+
+**Problema:** Las alertas de Telegram (VENTA CERRADA / PEDIDO APARTADO) llegaban con `Producto:`, `Total:`, `Cliente:` vacíos. Además `crearPedido` emitía `ORDER_CREATED` (cableado a "🌸 ¡VENTA CERRADA!") solo con `descripcion: 'Pedido creado'`, generando la alerta engañosa que el usuario reportó.
+
+**Archivos modificados:**
+- `src/pedidos/pedido.service.ts`
+
+**Cambios:**
+1. Nueva función `buildOrderPayload(pedido)` que mapea datos reales del `PedidoActual`: `cliente` (nombre), `producto` (productoPersonalizado o arreglo.nombre), `total` (precioPersonalizado o arreglo.precio), `sucursal` (sucursal/direccion/envio.zona), `metodoPago`.
+2. `crearPedido` ahora emite `ORDER_UPDATED` (cableado a "📦 PEDIDO APARTADO") con payload completo en vez de `ORDER_CREATED` (cableado a "VENTA CERRADA"). Crear un pedido no es una venta.
+3. `transitar` y `archivarPedido` enriquecen su `ORDER_UPDATED` con `buildOrderPayload`, eliminando los campos vacíos.
+
+**Impacto:** El equipo recibe alertas con datos reales y accionables. Se elimina la "VENTA CERRADA" falsa al crear pedido (BUG-002 de KNOWN_BUGS ya resuelto en Bug C; este cierra la vía restante). La venta real sigue notificándose vía `ORDER_CREATED` desde `ventaCerradaHandler` (bot.ts) con datos completos.
+
+**Rollback:** Revertir `src/pedidos/pedido.service.ts` a la versión del commit `c0f48a0`.
+
+---
+
+## 2026-07-17
+
 ### Fix — Bug C: "VENTA CERRADA" falsa por interés de compra + datos reales en alertas
 
 **Problema:** Cuando `esInteresCompra` era true, `message-handler.ts` emitía `EventType.ORDER_CREATED` con solo `telefono` y `descripcion`. Eso disparaba `enviarAlertaVentaCerrada` mostrando "🌸 ¡VENTA CERRADA!" aunque el cliente solo mostró intención de compra (no pagó ni cerró). Además, las alertas llegaban sin datos reales del chat (producto/total vacíos, número enmascarado).

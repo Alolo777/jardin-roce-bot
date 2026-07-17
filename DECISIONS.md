@@ -791,3 +791,37 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 
 **Resultado:** `KNOWN_BUGS.md` creado con BUG-001 (alertas Telegram vacías), BUG-002 (VENTA CERRADA falsa por interés), BUG-003 (alerta de fotos sin contexto/número real). BUG-002 resuelto en este commit.
 
+---
+
+## DEC-041: crearPedido emite ORDER_UPDATED (no ORDER_CREATED) + payload con datos reales
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** Bug A. `pedido.service.ts` emitía `ORDER_CREATED` con solo `orderId`/`telefono`/`descripcion`. Como `ORDER_CREATED` está cableado a "🌸 ¡VENTA CERRADA!" en Telegram (telegram.subscriber.ts:38), crear un pedido mostraba una venta cerrada falsa y vacía. Viola DEC-001.
+
+**Alternativas consideradas:**
+1. Crear evento `PEDIDO_INICIADO` nuevo (más limpio pero más superficie: types + subscriber)
+2. `crearPedido` emite `ORDER_UPDATED` (cableado a "PEDIDO APARTADO") con datos reales (elegida)
+
+**Resultado:** `buildOrderPayload(pedido)` mapea nombre→cliente, productoPersonalizado/arreglo.nombre→producto, precioPersonalizado/arreglo.precio→total, sucursal/direccion/envio.zona→sucursal. `crearPedido`, `transitar` y `archivarPedido` usan ese payload en `ORDER_UPDATED`.
+
+**Ventajas:** Cero alertas vacías. Cero "VENTA CERRADA" falsa al crear pedido. La venta real sigue vía `ventaCerradaHandler` → `ORDER_CREATED` con datos completos.
+
+**Desventajas:** Ninguna relevante.
+
+---
+
+## DEC-042: KNOWN_BUGS.md creado (cumplimiento AGENTS.md)
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** AGENTS.md Parte 4.2A exige `KNOWN_BUGS.md`. El repo no lo tenía.
+
+**Resultado:** Creado con BUG-001 (vacías), BUG-002 (VENTA CERRADA falsa), BUG-003 (fotos sin contexto). BUG-002 resuelto en DEC-039; BUG-001 resuelto en DEC-041.
+
+**Ventajas:** Cumple protocolo; trazabilidad de bugs.
+
+**Desventajas:** Ninguna.
+
