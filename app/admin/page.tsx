@@ -37,6 +37,14 @@ const FEATURES = [
     gradient: 'from-sky-400 to-indigo-400',
     shadow: 'shadow-sky-200/40',
   },
+  {
+    href: '/admin/reportes',
+    icon: '📊',
+    title: 'Reportes',
+    desc: 'Métricas históricas de ventas, cotizaciones y desglose por sucursal con exportación a CSV.',
+    gradient: 'from-violet-400 to-purple-400',
+    shadow: 'shadow-violet-200/40',
+  },
 ]
 
 function BotStatusPanel() {
