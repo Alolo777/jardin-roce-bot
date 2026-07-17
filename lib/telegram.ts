@@ -170,15 +170,14 @@ export async function enviarAlertaCotizacion(
   descripcion: string
 ): Promise<void> {
   const msg = [
-    '🌷 *COTIZACIÓN CON FOTO/REFERENCIA*',
+    '🌷 *INTERÉS / COTIZACIÓN*',
     '',
     `📱 *Teléfono:* ${formatearNumero(numeroCliente)}`,
-    `💬 *Busca:* ${esc(descripcion.slice(0, 300))}`,
-    '🖼️ *Foto:* enviada abajo si el cliente la mandó',
+    `💬 *Detalle:* ${esc(descripcion.slice(0, 400))}`,
     '⚠️ *Acción:* cotizar precio y confirmar disponibilidad',
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
-    '_Se le envió el cotizador web — puede necesitar ayuda con precio de envío_',
+    '_Dar seguimiento al cliente y confirmar si desea apartar_',
   ].join('\n')
   await enviar(msg)
 }

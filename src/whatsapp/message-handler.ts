@@ -822,8 +822,19 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         if (Date.now() - ahoraInteres > 30 * 60_000) {
           INTERES_COMPRA_NOTIFICADO.set(clienteId, Date.now())
           const telefonoReal = await numeroRealPromise
+          const pedidoInteres = deps.pedidoActual(clienteId)
+          const productoInteres = pedidoInteres?.productoPersonalizado
+            || pedidoInteres?.arreglo
+            || (deps.tieneArregloVerificado(clienteId) ? 'arreglo en selección' : 'sin arreglo definido')
+          const descripcionInteres =
+            `Interés de compra de ${msg.pushName || 'cliente'} (${telefonoReal}): ` +
+            `${productoInteres} | "${textoCliente.substring(0, 180)}"`
           console.log(`[bot] 💰 Interés de compra de ${telefonoReal}: ${textoCliente.substring(0, 80)}`)
-          eventBus.emit(EventType.ORDER_CREATED, { telefono: telefonoReal, descripcion: textoCliente.substring(0, 300) })
+          eventBus.emit(EventType.COTIZACION_REQUESTED, {
+            telefono: telefonoReal,
+            cliente: msg.pushName || '',
+            descripcion: descripcionInteres,
+          })
         }
       }
 

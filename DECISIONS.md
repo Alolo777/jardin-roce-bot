@@ -761,3 +761,33 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 
 **Desventajas:** El Proxy recursivo puede envolver objetos anidados innecesariamente en llamadas calientes (costo despreciable). Las métricas viven en memoria del proceso del bot; en Vercel solo se ven tras el flush a Supabase (hasta 30s de retraso). No hay persistencia histórica de métricas (solo último snapshot).
 
+---
+
+## DEC-039: Intereses de compra no deben emitir ORDER_CREATED (evita "VENTA CERRADA" falsa)
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** `message-handler.ts` emitía `EventType.ORDER_CREATED` cuando `esInteresCompra` era true, lo que disparaba `enviarAlertaVentaCerrada` ("🌸 ¡VENTA CERRADA!") aunque el cliente solo mostró intención. Viola DEC-001 (el backend no confirma ventas) y el Error #4 de AGENTS.md.
+
+**Alternativas consideradas:**
+1. Crear un nuevo evento `INTERES_COMPRA` (más superficie, nueva alerta)
+2. Reusar `COTIZACION_REQUESTED` (ya existe, ya tiene alerta) con payload robusto (elegida)
+
+**Resultado:** El bloque `esInteresCompra` emite `COTIZACION_REQUESTED` con `telefono` (número real resuelto), `cliente` (pushName) y `descripcion` que incluye producto/arreglo actual + texto del interés. `enviarAlertaCotizacion` ahora muestra "INTERÉS / COTIZACIÓN" con teléfono real y detalle.
+
+**Ventajas:** Sin falsas ventas cerradas. Alertas con datos reales y accionables. Reuso de evento existente (menos superficie).
+
+**Desventajas:** `COTIZACION_REQUESTED` ahora cubre tanto cotizaciones con foto como intereses de texto; la alerta es genérica. Aceptable.
+
+---
+
+## DEC-040: Creación de KNOWN_BUGS.md
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** AGENTS.md (Parte 4.2A) exige `KNOWN_BUGS.md` como documento oficial de errores conocidos. El repo no lo tenía. Se crea para registrar los bugs del reporte de producción (alertas vacías, VENTA CERRADA falsa, alerta de fotos sin contexto).
+
+**Resultado:** `KNOWN_BUGS.md` creado con BUG-001 (alertas Telegram vacías), BUG-002 (VENTA CERRADA falsa por interés), BUG-003 (alerta de fotos sin contexto/número real). BUG-002 resuelto en este commit.
+

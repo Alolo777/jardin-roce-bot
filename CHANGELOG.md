@@ -2,6 +2,26 @@
 
 ## 2026-07-17
 
+### Fix — Bug C: "VENTA CERRADA" falsa por interés de compra + datos reales en alertas
+
+**Problema:** Cuando `esInteresCompra` era true, `message-handler.ts` emitía `EventType.ORDER_CREATED` con solo `telefono` y `descripcion`. Eso disparaba `enviarAlertaVentaCerrada` mostrando "🌸 ¡VENTA CERRADA!" aunque el cliente solo mostró intención de compra (no pagó ni cerró). Además, las alertas llegaban sin datos reales del chat (producto/total vacíos, número enmascarado).
+
+**Archivos modificados:**
+- `src/whatsapp/message-handler.ts` (líneas ~820-828)
+- `lib/telegram.ts` (`enviarAlertaCotizacion`)
+
+**Cambios:**
+1. El bloque `esInteresCompra` ya NO emite `ORDER_CREATED`. Ahora emite `COTIZACION_REQUESTED` con payload robusto: `telefono` (número real resuelto vía `numeroRealPromise`), `cliente` (`msg.pushName`), y `descripcion` que incluye nombre + número + producto/arreglo actual (`productoPersonalizado`/`arreglo` o estado) + texto del interés.
+2. `enviarAlertaCotizacion` renombrada a mensaje genérico "INTERÉS / COTIZACIÓN" que muestra el teléfono real (vía `formatearNumero`) y el detalle completo, en vez de "COTIZACIÓN CON FOTO/REFERENCIA" que no aplica a interés de texto.
+
+**Impacto:** El equipo ya no ve falsas "VENTA CERRADA". Las alertas de interés llevan datos reales y accionables. La venta real sigue emitiéndose desde `pedido.service.ts` / `bot.ts` solo cuando hay token `[VENTA_CERRADA]` válido (DEC-001 / Error #4 respetados).
+
+**Rollback:** Revertir los 2 archivos a la versión anterior del commit `993a9df`.
+
+---
+
+## 2026-07-17
+
 ### Feature — Fase 2 Observabilidad: métricas (latencia IA, errores Supabase, eventos) + health endpoint
 
 **Problema:** No había visibilidad de la latencia de la IA, la tasa de error de Supabase ni el estado de salud de los motores en producción.
