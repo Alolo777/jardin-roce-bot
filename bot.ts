@@ -1256,7 +1256,7 @@ async function procesarMensaje(msg: any): Promise<void> {
       if (fechaHoraDetectada.fecha) pedido.fechaEntrega = fechaHoraDetectada.fecha
       if (fechaHoraDetectada.hora) pedido.horaEntrega = fechaHoraDetectada.hora
     }
-    if (fechaHoraDetectada.hora && tieneArregloVerificado(clienteId) && esHorarioAnticipado(fechaHoraDetectada.hora)) {
+    if (fechaHoraDetectada.hora && esHorarioAnticipado(fechaHoraDetectada.hora)) {
       esHorarioAnticipadoFlag = true
       const pedido = pedidoActual(clienteId)
       pedido.estadoFlujo = 'esperando_fecha_hora'
@@ -1586,6 +1586,7 @@ async function procesarMensaje(msg: any): Promise<void> {
         `Si aparece $10 por nota/tarjeta/dedicatoria, es solo extra; nunca digas que el ramo cuesta $10.`
     }
 
+    let ventaCerrada = false
     const tipoMediaProcesada = await procesarMediaAcumulado(clienteId, await numeroRealPromise, textoCliente, msg.pushName)
     if (tipoMediaProcesada === 'referencia') {
       const respuesta = 'Ya recibí la foto de referencia 🌷 Se la paso al equipo para que la revise y te confirme el precio.'
@@ -1600,13 +1601,22 @@ async function procesarMensaje(msg: any): Promise<void> {
       return
     }
     if (tipoMediaProcesada === 'comprobante') {
-      const respuesta = 'Gracias, ya recibí tu comprobante 🌷 Lo registro para que el equipo continúe con tu pedido.'
-      await responderMensaje(msg, respuesta)
-      await agregarAlHistorial(telefono, 'assistant', respuesta)
+      const venta = ventaDesdeEstado(clienteId)
+      if (venta && ventaListaParaCerrar(clienteId) && !VENTAS_CERRADAS.has(clienteId)) {
+        const confirmacion = `¡Gracias, ${venta.cliente}! 🌸 Recibí tu comprobante. Tu pedido queda registrado. Total: ${venta.total}.`
+        await responderMensaje(msg, confirmacion)
+        await agregarAlHistorial(telefono, 'assistant', confirmacion)
+        await ventaCerradaHandler(clienteId, venta, await numeroRealPromise)
+        ventaCerrada = true
+      } else {
+        const respuesta = 'Gracias, ya recibí tu comprobante 🌷 Lo registro para que el equipo continúe con tu pedido.'
+        await responderMensaje(msg, respuesta)
+        await agregarAlHistorial(telefono, 'assistant', respuesta)
+      }
       return
     }
 
-    if (seleccionaFotoDisponible && /\b(precio|cu[aá]nto|cuanto|saldr[ií]a|costar[ií]a)\b/i.test(textoCliente) && !tienePrecioConfirmado(clienteId)) {
+    if (seleccionaFotoDisponible && !tienePrecioConfirmado(clienteId)) {
       const telefonoReal = await numeroRealPromise
       await persistirPedido(clienteId, telefonoReal, 'cotizacion', 'Cliente eligio foto disponible, falta precio del equipo')
       notificarEmpleadosWhatsApp(sock,
@@ -1654,8 +1664,6 @@ async function procesarMensaje(msg: any): Promise<void> {
       const op = obtenerPedido(clienteId)
       if (op) op.nombre = pedidoActual(clienteId).nombre
     }
-
-    let ventaCerrada = false
 
     // ── MÉTODO DE PAGO ──────────────────────────────────────────
     const consultaPagoEnviado = /(?:ya\s*)?pag[uú]e|comprobante|recibo|ticket|transferencia|ya\s*transfer|transfer[ií]|transfiero|le\s+transfiero|devi\s+america|devi\s+américa/i.test(textoCliente)
@@ -2475,6 +2483,25 @@ async function gracefulShutdown(signal: string): Promise<void> {
   process.exit(0)
 }
 
+function getDiagnosticoChat(chatId: string): import('./src/api/server').DiagnosticoChat | null {
+  const pedido = PEDIDO_EN_CURSO.get(chatId) ?? null
+  const pedidoEngine = obtenerPedido(chatId)
+  const arreglo = ARREGLO_ELEGIDO.get(chatId) ?? null
+  return {
+    clienteId: chatId,
+    pedidoEnCurso: pedido as unknown as Record<string, unknown> | null,
+    ventaCerrada: VENTAS_CERRADAS.has(chatId),
+    arregloElegido: arreglo,
+    pedidoEngine: (pedidoEngine ? { ...pedidoEngine, fotoReferenciaBase64: pedidoEngine.fotoReferenciaBase64 ? '(presente)' : undefined } : null) as unknown as Record<string, unknown> | null,
+    casoActivo: null,
+    tienePrecio: tienePrecioConfirmado(chatId),
+    tieneNombre: tieneNombreValido(chatId),
+    fechaHora: pedido ? { fecha: pedido.fechaEntrega, hora: pedido.horaEntrega } : null,
+    tieneFotoReferencia: Boolean(pedido?.fotoReferenciaBase64),
+    estadoFlujo: pedido?.estadoFlujo ?? null,
+  }
+}
+
 process.on('SIGINT',  () => gracefulShutdown('SIGINT'))
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
 process.on('uncaughtException',  (err) => console.error('❌ Excepción:', err))
@@ -2495,4 +2522,5 @@ startServer({
   getSock: () => sock,
   obtenerVentasHoy: () => obtenerVentasHoy(),
   obtenerClientesAtendidosHoy: () => obtenerClientesAtendidosHoy(),
+  getDiagnosticoChat,
 })

@@ -18,8 +18,10 @@ Situación actual:
 - El bot ya recibe imágenes de referencia y puede reenviarlas a Telegram/WhatsApp empleados.
 - El historial ya se subió a 30 turnos.
 - Se corrigió el crash de media `buffer.toString(...) is not a function`.
-- Se corrigió parcialmente la clasificación de foto referencia vs comprobante.
-- Sigue faltando formalizar el flujo completo de estados para evitar mezclas y mejorar alertas/dashboard.
+- Se corrigió parcialmente la clasificación de foto referencia vs comprobante y ahora existe apoyo visual con GitHub Models para casos ambiguos.
+- Se agrego deteccion de extras basicos del pedido, como nota/tarjeta/dedicatoria de $10, separados del precio del ramo.
+- Los numeros silenciados ahora se comparan con variantes de JID/telefono para evitar respuestas a contactos ignorados.
+- Sigue faltando formalizar el flujo completo de estados en dashboard y migraciones especificas para extras.
 
 ## Decisiones De Negocio Confirmadas
 
@@ -108,15 +110,23 @@ Comportamiento requerido:
 
 ### 2. Clasificación De Imágenes Por Última Acción
 
+Estado: parcialmente implementado en `bot.ts` y `lib/ai.ts`.
+
 Funciones relacionadas:
 - `esTextoComprobante(texto)`
 - `esTextoReferenciaOCotizacion(texto)`
 - Bloque `MEDIA_POR_CLIENTE` dentro de `procesarMensaje`.
+- `clasificarImagenVenta(...)` en `lib/ai.ts`.
 
 Regla requerida:
 - Si el turno actual dice `ramo así`, `cotizar`, `precio`, `foto de referencia`, `como la imagen`, gana cotización/referencia.
 - No marcar comprobante solo porque en historial viejo aparece `BBVA`, `transferencia`, `pago`.
 - Solo marcar comprobante si el turno actual o contexto muy reciente habla de pago/comprobante.
+
+Implementado adicional:
+- Si la heuristica queda ambigua, el bot usa vision de GitHub Models para clasificar maximo 2 imagenes por lote.
+- La vision solo se llama cuando hay riesgo de confusion entre pago y referencia, no en todos los mensajes.
+- Si el modelo falla, el bot conserva fallback seguro y no se cae.
 
 ### 3. Guardar Foto De Referencia En Pedido
 
@@ -180,6 +190,8 @@ Regla:
 
 ### 8. Resumen Operativo Del Pedido
 
+Estado: implementado parcialmente en `resumirPedidoOperativo(clienteId, telefono)`.
+
 Crear helper recomendado:
 - `resumirPedidoOperativo(clienteId, historial)`
 
@@ -196,12 +208,54 @@ Debe devolver:
 - fecha/hora
 - metodo_pago
 - tiene_foto_referencia
+- extras separados del ramo y envio
 
 Usarlo para:
 - Telegram venta.
 - Telegram apartado.
 - Dashboard.
 - Persistencia en `pedidos_bot.resumen_pedido`.
+
+### 9. Extras Y Cobros Adicionales
+
+Estado: implementado para extras basicos en `bot.ts` y `lib/telegram.ts`.
+
+Funciones relacionadas:
+- `detectarExtrasPedido(texto)`
+- `agregarExtrasPedido(clienteId, extras)`
+- `totalExtrasPedido(clienteId)`
+- `extrasPedidoTexto(clienteId)`
+- `detallesConExtras(clienteId, detalles)`
+- `totalPedidoNumerico(clienteId)`
+- `ventaDesdeEstado(clienteId)`
+
+Comportamiento implementado:
+- Detecta nota/tarjeta/dedicatoria/mensaje/papelito como `Nota personalizada` de `$10 MXN`.
+- Suma extras al total operativo.
+- Mantiene el precio del ramo separado del extra.
+- Inyecta contexto a la IA para que `$10` no sea tratado como precio del ramo.
+- Muestra `Extras` en alertas de Telegram.
+- Persiste extras dentro de `detalles_especiales` y `resumen_pedido` mientras no exista columna dedicada.
+
+Pendiente recomendado:
+- Crear columna `extras jsonb` en `pedidos_bot` si se quiere administrar extras desde dashboard.
+- Crear configuracion editable de extras si cambian precios o se agregan globos, chocolates, peluches, envolturas, etc.
+
+### 10. Numeros Silenciados
+
+Estado: implementado en `bot.ts`.
+
+Funciones relacionadas:
+- `variantesTelefono(numero)`
+- `cargarIgnorados()`
+- `obtenerNumeroReal(msg)`
+- `jidANumero(jid)`
+- `manejarMensajeEntrante(msg)`
+
+Comportamiento implementado:
+- El bot consulta `numeros_ignorados` y compara contra variantes del telefono real.
+- Se consideran campos alternos de Baileys como `remoteJidAlt`, `participantAlt` y `senderPn`.
+- Evita responder a contactos silenciados aunque WhatsApp entregue el JID en formato `@lid` o similar.
 
 ## Cambios En Alertas Telegram
 
@@ -234,8 +288,9 @@ Formato deseado:
 📝 Detalles: flores de la foto + 3 hortensias
 🖼️ Foto referencia: sí
 🌷 Ramo: $400
+➕ Extras: Nota personalizada $10.00 MXN
 🚚 Envío: $0 / No aplica
-💰 Total: $400
+💰 Total: $410
 📍 Entrega: Sucursal Norte
 📅 Fecha/hora: Viernes, hora por confirmar
 💳 Pago: Efectivo al recoger
@@ -275,6 +330,8 @@ Reglas a reforzar:
 - Cotizaciones personalizadas pasan al equipo.
 - No cerrar pedido si falta fecha/hora.
 - No seguir vendiendo después de cerrar; responder breve y cerrar interacción.
+- Extras como nota/tarjeta/dedicatoria de $10 no son precio del ramo.
+- Mantener separados ramo, extras, envio y total.
 
 ## Pruebas Manuales Recomendadas
 
@@ -328,10 +385,43 @@ Esperado:
 - Registro en `reporte_ventas`.
 - Limpia pedido activo.
 
+### Caso 6: Foto De Flores Despues De Pago
+
+Cliente:
+- Ya se le habia mandado BBVA o se esperaba comprobante.
+- Luego manda una nueva foto de flores sin texto claro.
+
+Esperado:
+- Vision clasifica como `referencia` si la imagen muestra flores.
+- Se manda alerta de cotizacion/referencia, no venta pagada.
+- No se dispara comprobante si la imagen no parece recibo/banco/ticket.
+
+### Caso 7: Extra De Nota Personalizada
+
+Cliente:
+- `Quiero el ramo de $300 con una notita`
+
+Esperado:
+- El pedido conserva ramo $300.
+- Agrega extra `Nota personalizada $10.00 MXN`.
+- Total operativo $310.
+- La IA no dice que el ramo cuesta $10.
+- Telegram muestra `Ramo`, `Extras` y `Total` separados.
+
+### Caso 8: Numero Silenciado
+
+Cliente:
+- Numero guardado en `/admin/ignorados` o tabla `numeros_ignorados`.
+
+Esperado:
+- Flora no responde.
+- Log esperado: `Número ignorado`.
+
 ## Archivos A Tocar
 
 - `bot.ts`
 - `lib/telegram.ts`
+- `lib/ai.ts`
 - `app/api/bot/status/route.ts`
 - `app/api/pedidos/[id]/route.ts`
 - `app/admin/page.tsx`
@@ -348,9 +438,11 @@ npx tsc --noEmit
 ```
 
 Últimos commits relevantes:
+- `714ed83 feat: mejora clasificacion de imagenes y extras`
+- `3206fe0 fix: respeta numeros silenciados`
 - `bd2850d fix: prioriza ultimo pedido en alertas`
 - `80b4a4c fix: procesa referencias y metricas de pedidos`
 - `d5ca852 fix: rescata pendientes y mejora alertas WhatsApp`
 
 Objetivo de la siguiente sesión:
-Implementar el sistema de estados y persistencia operativa completa sin romper compatibilidad si aún no se ha corrido la migración.
+Probar en conversaciones reales los cambios recientes y despues implementar dashboard/migracion para extras (`extras jsonb`) y estados operativos sin romper compatibilidad si aún no se ha corrido la migración.

@@ -539,3 +539,65 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 **Ventajas:** Soluciona el bug. Cero impacto en otros casos porque los separadores explícitos cubren exactamente los mismos contextos que `\b` para `no`.
 
 **Desventajas:** La lógica queda en 3 reglas (STOP_PATTERN, NO_ES_NOMBRE_REGEX, NO_INDEPENDIENTE) en vez de una sola. Es más mantenible que un regex monolítico.
+
+---
+
+## DEC-027: Comprobante cierra venta directamente
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** Conversación 2411237222: cliente envió comprobante pero `procesarMediaAcumulado` retornaba temprano sin cerrar venta ni notificar Telegram, causando pedido perdido.
+
+**Alternativas:**
+1. Mover comprobante a flag y continuar flujo (riesgo de doble respuesta)
+2. Enviar solo agradecimiento y delegar a humano (pierde automatización)
+3. Cerrar venta directamente desde el handler si está lista (elegida)
+
+**Resultado:** Cuando se recibe comprobante y `ventaListaParaCerrar()` es true, el handler llama `ventaCerradaHandler` (emite eventos, registra en Supabase, notifica Telegram). Si faltan datos, solo agradece.
+
+---
+
+## DEC-028: Sincronizar Order Engine a pedidos_bot
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** El dashboard leía de `pedidos_bot` pero las mutaciones del Order Engine (`crearPedido`, `transitar`, `archivarPedido`) solo escribían a `bot_cache`. El dashboard mostraba datos obsoletos.
+
+**Alternativas:**
+1. Que el dashboard lea de `bot_cache` (rompe compatibilidad)
+2. Migrar dashboard a leer del Order Engine (cambio mayor)
+3. Escribir ambas tablas desde `persistir()` (elegida)
+
+**Resultado:** `sincronizarPedidosBot()` transforma `PedidoActual` de cada pedido activo al schema de `pedidos_bot` y upserta en cada mutación. Mapeo `EstadoPedido → cotizacion/apartado/pagado/entregado/cancelado`.
+
+---
+
+## DEC-029: Detección de entrega anticipada sin arreglo verificado
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** Cliente pidió 9am pero `esHorarioAnticipado` no se ejecutaba porque `tieneArregloVerificado(clienteId)` era falso (arreglo aún sin confirmar). El sistema no detectaba la entrega antes de apertura.
+
+**Alternativas:**
+1. Mover validación horaria a un paso posterior (retrasa alerta)
+2. Eliminar el guard de `tieneArregloVerificado` (elegida)
+
+**Resultado:** `esHorarioAnticipado` se evalúa cuando el cliente pide una hora, independientemente del estado de verificación del arreglo.
+
+---
+
+## DEC-030: Notificación de selección de foto sin keyword precio
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** Cliente dijo "Me gustó mucho este" seleccionando foto disponible. `seleccionaFotoDisponible` era true pero no se notificaba al equipo porque faltaba keyword `precio|cuánto`.
+
+**Alternativas:**
+1. Agregar patrones de gusto/like al regex (más keywords que mantener)
+2. Eliminar el requisito de keyword de precio si `seleccionaFotoDisponible` es true (elegida)
+
+**Resultado:** Siempre que `seleccionaFotoDisponible && !tienePrecioConfirmado`, se notifica al equipo. No depende del texto exacto del cliente.

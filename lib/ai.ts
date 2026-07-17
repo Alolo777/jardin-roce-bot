@@ -190,6 +190,8 @@ Pagos:
 - Transferencia BBVA: 4152314097305273 a nombre de Devi America Cerenil.
 - En transferencia, pide que pongan su nombre en concepto y envíen comprobante.
 - Efectivo o tarjeta solo si recogen en sucursal.
+- Anticipo mínimo del 50% del total para apartar el pedido. El resto se paga al recoger o antes de la entrega.
+- Si el cliente quiere depositar en efectivo en sucursal, puede hacerlo días antes de la entrega. Coordina con el equipo para recibir el pago anticipado.
 
 Sucursales:
 - Centro: https://maps.app.goo.gl/GN9yPJZZjQEyHFWXA

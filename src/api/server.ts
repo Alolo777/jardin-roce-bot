@@ -4,6 +4,20 @@ import express from 'express'
 const BOT_QR_TTL_MS = 60_000
 const QR_SCAN_GRACE_MS = 15 * 60_000
 
+export interface DiagnosticoChat {
+  clienteId: string
+  pedidoEnCurso: Record<string, unknown> | null
+  ventaCerrada: boolean
+  arregloElegido: unknown | null
+  pedidoEngine: Record<string, unknown> | null
+  casoActivo: unknown | null
+  tienePrecio: boolean
+  tieneNombre: boolean
+  fechaHora: { fecha?: string; hora?: string } | null
+  tieneFotoReferencia: boolean
+  estadoFlujo: string | null
+}
+
 export interface BotContext {
   getPausado: () => boolean
   setPausado: (v: boolean) => void
@@ -18,6 +32,7 @@ export interface BotContext {
   getSock: () => any | null
   obtenerVentasHoy: () => Promise<{ total: number; cantidad: number }>
   obtenerClientesAtendidosHoy: () => Promise<number>
+  getDiagnosticoChat: (chatId: string) => DiagnosticoChat | null
 }
 
 export function startServer(ctx: BotContext): void {
@@ -106,6 +121,14 @@ export function startServer(ctx: BotContext): void {
         estadoDetalle: ctx.getEstadoDetalle(),
       })
     }
+  })
+
+  app.get('/diag/:chatId', (req, res) => {
+    const { chatId } = req.params
+    if (!chatId) return res.status(400).json({ error: 'Falta chatId' })
+    const diag = ctx.getDiagnosticoChat(chatId)
+    if (!diag) return res.status(404).json({ error: 'Chat no encontrado' })
+    res.json(diag)
   })
 
   app.listen(port, () => {

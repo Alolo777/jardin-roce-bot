@@ -114,3 +114,176 @@ Resultado:
 - `npm run test:flows` ya venia fallando porque `_prompt_actualizado.txt` no contiene la frase esperada `No adivines`.
 - `npm run build:local` ya venia fallando por un `implicit any` en `lib/googleSheets.ts`.
 - El archivo `_PLAN_MEJORAS_FLUJO_PEDIDOS.md` sigue sin seguimiento y no fue incluido en estos commits porque ya existia como archivo pendiente separado.
+
+---
+
+# Actualizacion de Sesion - Imagenes, Silenciados y Extras
+
+Fecha: 2026-07-02
+
+## Objetivo
+
+Resolver problemas recientes del bot en conversaciones reales:
+- Numeros silenciados seguian recibiendo respuesta.
+- Fotos posteriores dentro de una venta se confundian entre referencia floral y comprobante de pago.
+- Cobros extras, como nota personalizada de $10, podian confundirse con precio del ramo.
+
+## Cambios Realizados
+
+### 1. Numeros silenciados ahora respetan variantes de WhatsApp/Baileys
+
+Problema:
+- El bot comparaba solo `remoteJid` limpiado contra `numeros_ignorados`.
+- Baileys puede entregar el remitente como `@lid`, `@s.whatsapp.net`, con sufijo de dispositivo o en campos alternos como `senderPn`, `remoteJidAlt`, `participantAlt`.
+- Por eso un numero guardado como digitos en Supabase podia no coincidir y Flora respondia igual.
+
+Archivos modificados:
+- `bot.ts`
+
+Cambio:
+- En `manejarMensajeEntrante()` ahora se resuelve `obtenerNumeroReal(msg)` antes de decidir responder.
+- Se comparan variantes de varios candidatos:
+  - `numeroRealParaIgnorar`
+  - `remoteJid`
+  - `participant`
+  - `remoteJidAlt`
+  - `participantAlt`
+  - `senderPn`
+- Cada candidato pasa por `jidANumero()` y `variantesTelefono()`.
+
+Resultado esperado:
+- Si un numero esta en `numeros_ignorados`, Flora no responde aunque WhatsApp lo entregue con otro formato.
+
+Commit relacionado:
+- `3206fe0 fix: respeta numeros silenciados`
+
+### 2. Clasificacion visual de imagenes con GitHub Models
+
+Problema:
+- `procesarMediaAcumulado()` clasificaba imagenes solo por texto/historial.
+- Si el pedido estaba en `esperando_pago`, una foto sin texto podia asumirse como comprobante aunque fuera otra foto de flores.
+- Si el cliente volvia a pedir cotizacion o mandaba otra referencia despues de hablar de pago, se podian mandar alertas equivocadas.
+
+Archivos modificados:
+- `lib/ai.ts`
+- `bot.ts`
+
+Cambio en `lib/ai.ts`:
+- Se agrego `clasificarImagenVenta()`.
+- Usa GitHub Models con entrada multimodal para clasificar imagenes en:
+  - `comprobante`
+  - `referencia`
+  - `otra`
+  - `incierto`
+- Pide respuesta JSON corta para evitar texto libre.
+- Envia maximo 2 imagenes por lote.
+- Usa timeout de 12 segundos y retry limitado.
+- Si falla, devuelve `incierto` y no rompe el bot.
+
+Cambio en `bot.ts`:
+- `procesarMediaAcumulado()` mantiene las reglas rapidas por texto.
+- Solo llama vision cuando hay ambiguedad:
+  - hay imagen,
+  - no hay texto claro de pago,
+  - no hay texto claro de cotizacion/referencia,
+  - el contexto previo sugiere comprobante o pago.
+- Si vision dice `referencia`, se fuerza cotizacion/referencia aunque el historial venia de pago.
+- Si vision dice `comprobante`, se mantiene flujo de pago.
+- Si vision dice `otra`, se manda como imagen generica/atencion humana.
+
+Resultado esperado:
+- Foto de flores enviada despues de contexto de pago ya no debe cerrarse como comprobante.
+- Captura/ticket/recibo enviado despues de cuenta BBVA debe seguir como comprobante.
+- Menos llamadas al modelo: solo en casos ambiguos, no en cada imagen.
+
+Commit relacionado:
+- `714ed83 feat: mejora clasificacion de imagenes y extras`
+
+### 3. Extras de pedido separados del precio del ramo
+
+Problema:
+- Extras como nota, tarjeta o dedicatoria cuestan $10.
+- La IA podia interpretar esos $10 como precio del ramo o mezclarlo con flores/envio.
+
+Archivos modificados:
+- `bot.ts`
+- `lib/telegram.ts`
+
+Cambio en `bot.ts`:
+- Se agrego `PedidoExtra` y `extras?: PedidoExtra[]` al estado `PedidoEnCurso`.
+- Se agregaron helpers:
+  - `detectarExtrasPedido(texto)`
+  - `agregarExtrasPedido(clienteId, extras)`
+  - `totalExtrasPedido(clienteId)`
+  - `extrasPedidoTexto(clienteId)`
+  - `detallesConExtras(clienteId, detalles)`
+- Actualmente detecta como extra de $10:
+  - `nota`
+  - `notita`
+  - `nota personalizada`
+  - `tarjeta`
+  - `dedicatoria`
+  - `mensaje escrito`
+  - `mensaje impreso`
+  - `papelito`
+- `totalPedidoNumerico()` ahora suma ramo + extras + envio.
+- `ventaDesdeEstado()` muestra desglose: `ramo $X + extras $Y + envio $Z`.
+- `resumirPedidoOperativo()` incluye `extras`.
+- `persistirPedido()` guarda extras dentro de `detalles_especiales` si no existe columna especifica.
+- `procesarMensaje()` inyecta contexto a la IA:
+  - los extras no son precio del ramo,
+  - `$10` por nota/tarjeta/dedicatoria es solo extra,
+  - mantener ramo, extras, envio y total separados.
+
+Cambio en `lib/telegram.ts`:
+- `DatosVentaCerrada` y `DatosApartadoPedido` aceptan `precioExtras`.
+- Las alertas muestran linea separada `Extras`.
+
+Resultado esperado:
+- Flora no debe decir que el ramo cuesta $10 si el cliente pidio nota/tarjeta/dedicatoria.
+- Telegram muestra:
+  - `Ramo: $...`
+  - `Extras: Nota personalizada $10.00 MXN`
+  - `Envio: $...` si aplica
+  - `Total: $...`
+
+Commit relacionado:
+- `714ed83 feat: mejora clasificacion de imagenes y extras`
+
+## Archivos Tocados En Esta Actualizacion
+
+- `bot.ts`: silenciamiento robusto, clasificacion de media con vision en casos ambiguos, extras del pedido, totales y contexto IA.
+- `lib/ai.ts`: funcion `clasificarImagenVenta()` para vision con GitHub Models.
+- `lib/telegram.ts`: soporte de `precioExtras` en alertas de venta y apartado.
+
+## Verificacion Hecha
+
+Comandos ejecutados:
+
+```bash
+npx tsc --noEmit
+npm run test:flows
+```
+
+Resultado:
+- `npx tsc --noEmit` paso sin errores.
+- `npm run test:flows` sigue fallando por una asercion existente del prompt: falta texto `No adivines` en `_prompt_actualizado.txt`. No fue causado por estos cambios.
+
+## Estado Actual Del Proyecto
+
+- Los cambios ya fueron commiteados y subidos a `origin/main`.
+- Ultimos commits relevantes:
+  - `3206fe0 fix: respeta numeros silenciados`
+  - `714ed83 feat: mejora clasificacion de imagenes y extras`
+- El bot en VM debe actualizarse haciendo pull/redeploy desde `main`.
+
+## Pendientes Recomendados
+
+- Probar en conversacion real:
+  - numero silenciado con formato normal y con LID si aparece,
+  - foto de flores despues de pedir comprobante,
+  - comprobante despues de cuenta BBVA,
+  - ramo con nota personalizada de $10.
+- Actualizar prompt activo en Supabase con la seccion `Extras Y Cobros Adicionales`.
+- Si se quiere reporteria mas limpia, crear columna dedicada para extras en `pedidos_bot`, por ejemplo `extras jsonb`, en vez de guardarlos dentro de `detalles_especiales`.
+- Ajustar `_prompt_actualizado.txt` o las pruebas para resolver el fallo existente de `npm run test:flows` por `No adivines`.

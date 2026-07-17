@@ -2,6 +2,45 @@
 
 ## 2026-07-17
 
+Versión: 2.0.6
+
+### Fix — 6 issues de producción
+
+**Problema:** Conversación 2411237222 (17-Jul, cliente Noé Gallardo, $180 ramo rosas, sucursal Centro, domingo 9am, transferencia): comprobante recibido pero venta nunca se cerró, equipo no notificado, pedido perdido.
+
+**Archivos modificados:**
+- `bot.ts`
+- `src/pedidos/pedido.repository.ts`
+- `src/pedidos/pedido.service.ts`
+- `lib/ai.ts`
+- `src/api/server.ts`
+- `app/api/bot/diag/[chatId]/route.ts` (NEW)
+- `scripts/update-system-prompt.ts` (NEW)
+
+**Cambios:**
+
+1. **Fix 1 — Comprobante no cierra venta (`bot.ts:1602`)**: Cuando `tipoMediaProcesada === 'comprobante'` y la venta es closable (`ventaListaParaCerrar` y no cerrada), llama `ventaCerradaHandler` directamente (emite ORDER_CREATED, PAYMENT_RECEIVED, PAYMENT_CONFIRMED, resetea pedido). Si la venta no está lista, envía el agradecimiento simple previo.
+
+2. **Fix 2 — Photo selection sin notificación (`bot.ts:1618`)**: Elimina el requisito de keyword `precio|cuánto|saldría|costaría` para notificar al equipo cuando el cliente selecciona una foto disponible. Ahora `seleccionaFotoDisponible && !tienePrecioConfirmado` basta para alertar.
+
+3. **Fix 3 — Early delivery no detectado (`bot.ts:1259`)**: Elimina el guard `tieneArregloVerificado(clienteId)` de la condición de `esHorarioAnticipado`. Ahora se detectan entregas antes de las 10:00 incluso sin arreglo verificado, emitiendo `HUMAN_REQUIRED` a Telegram.
+
+4. **Fix 4 — Order Engine no escribe a `pedidos_bot` (`pedido.repository.ts`, `pedido.service.ts`)**: Agrega `sincronizarPedidosBot()` que mapea `EstadoPedido → estado (cotizacion/apartado/pagado/entregado/cancelado)` y upserta cada pedido activo a `pedidos_bot`. Se llama desde `persistir()` (cada vez que se crea, transita, archiva o cancela un pedido). El dashboard ahora refleja cambios del Order Engine.
+
+5. **Fix 5 — System prompt sin política de anticipo (`lib/ai.ts`, `scripts/update-system-prompt.ts`)**: Agrega en la sección Pagos:
+   - "Anticipo mínimo del 50% del total para apartar el pedido. El resto se paga al recoger o antes de la entrega."
+   - "Si el cliente quiere depositar en efectivo en sucursal, puede hacerlo días antes de la entrega. Coordina con el equipo para recibir el pago anticipado."
+   - Script `scripts/update-system-prompt.ts` para sincronizar con Supabase (`tsx scripts/update-system-prompt.ts`).
+
+6. **Fix 6 — Endpoint de diagnóstico (`src/api/server.ts`, `app/api/bot/diag/[chatId]/route.ts`, `bot.ts`)**: Agrega `GET /diag/:chatId` en Express + Next.js route `/api/bot/diag/[chatId]` que expone: `pedidoEnCurso`, `ventaCerrada`, `arregloElegido`, `pedidoEngine`, `tienePrecio`, `tieneNombre`, `fechaHora`, `tieneFotoReferencia`, `estadoFlujo`.
+
+**Impacto:** Compatible.
+**Rollback:** Sí.
+
+---
+
+## 2026-07-17
+
 Versión: 2.0.5
 
 ### Fix — nombre.parser.ts: rechazar frases conversacionales como nombre de cliente

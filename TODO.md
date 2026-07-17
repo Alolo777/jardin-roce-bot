@@ -124,6 +124,12 @@
 | #3 — Horarios anticipados derivados a equipo humano | horario.validator.ts + bot.ts | 100% |
 | #4 — Order Engine persiste en bot_cache (sobrevive reinicios) | pedido.repository.ts + pedido.service.ts + bot.ts | 100% |
 | #5 — `\bno\b` en NO_ES_NOMBRE bloqueaba "Noé" | nombre.parser.ts | 100% |
+| Fix1 — Comprobante cierra venta directamente | bot.ts | 100% |
+| Fix2 — Photo selection notifica sin keyword precio | bot.ts | 100% |
+| Fix3 — Early delivery sin arreglo verificado | bot.ts | 100% |
+| Fix4 — Order Engine escribe a pedidos_bot | pedido.repository.ts + pedido.service.ts | 100% |
+| Fix5 — System prompt con política 50% anticipo | lib/ai.ts + scripts/update-system-prompt.ts | 100% |
+| Fix6 — Endpoint /api/bot/diag/:chatId | src/api/server.ts + app/api/bot/diag/[chatId]/route.ts + bot.ts | 100% |
 
 - [x] P0.1 — Express duplicado de bot.ts ✅
 - [x] P1.5 — Parsers conectados a bot.ts ✅
@@ -158,3 +164,5 @@ Tras el commit/push, probar flujo completo en producción. Luego continuar extra
 ## Notas para Producción
 
 - M9 requiere ejecutar `supabase_migration_bot_cache.sql` en Supabase SQL Editor antes del próximo reinicio del bot.
+- Fix5 requiere ejecutar: `npx tsx --env-file=.env.local scripts/update-system-prompt.ts` en la VM para sincronizar la política de anticipo 50% a Supabase.
+- Fix6 da acceso a: `GET http://localhost:10000/diag/<clienteId>` (bot Express) o `GET https://<vercel>/api/bot/diag/<clienteId>` (Next.js).

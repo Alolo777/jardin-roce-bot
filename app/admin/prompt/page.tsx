@@ -198,14 +198,9 @@ export default function PromptPage() {
           <div className="flex-1">
             <h3 className="font-semibold text-amber-900 mb-1">Token de Venta Cerrada</h3>
             <p className="text-sm text-amber-800/80 mb-3">
-              Flora genera automáticamente este token al final del mensaje cuando el cliente confirma el pago.
-              No necesitas hacer nada. Si ves que no lo detecta, el bot tiene un fallback que notifica igual.
+              El backend cierra las ventas automáticamente cuando el cliente confirma compra,
+              precio y forma de pago. Ya no depende de tokens generados por la IA.
             </p>
-            <div className="bg-white/80 backdrop-blur-sm border border-amber-200/60 rounded-xl px-4 py-3">
-              <code className="text-xs font-mono text-amber-900 break-all">
-                {'[VENTA_CERRADA: {nombre} | {producto} | ${precio} | {direccion}]'}
-              </code>
-            </div>
           </div>
         </div>
       </div>

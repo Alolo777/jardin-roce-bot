@@ -1,7 +1,7 @@
 import { EstadoPedido, PedidoActual } from '../models/types'
 import { eventBus } from '../events/event-bus'
 import { EventType } from '../events/types'
-import { guardarPedidos, cargarPedidos } from './pedido.repository'
+import { guardarPedidos, cargarPedidos, sincronizarPedidosBot } from './pedido.repository'
 
 const TRANSICIONES_VALIDAS: Record<string, EstadoPedido[]> = {
   [EstadoPedido.NUEVO]: [EstadoPedido.COTIZANDO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
@@ -28,6 +28,7 @@ function generarId(): string {
 
 function persistir(): void {
   guardarPedidos(PEDIDOS).catch(() => {})
+  sincronizarPedidosBot(PEDIDOS).catch(() => {})
 }
 
 export async function cargarPedidosDesdeBD(): Promise<void> {
