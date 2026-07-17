@@ -32,6 +32,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     if (error) throw error
+
+    if (data?.cliente_id) {
+      const botHost = process.env.BOT_SYNC_HOST || 'localhost'
+      const botPort = process.env.BOT_PORT || '10000'
+      fetch(`http://${botHost}:${botPort}/api/pedidos/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cliente_id: data.cliente_id, updates: update }),
+        signal: AbortSignal.timeout(5000),
+      }).catch(() => {})
+    }
+
     return NextResponse.json({ ok: true, pedido: data })
   } catch (error) {
     console.error('[API /pedidos PATCH]', error)

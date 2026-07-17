@@ -605,6 +605,42 @@ async function simularEscritura(jid: string, ms: number): Promise<void> {
 // FLUJO: PEDIDO DEL COTIZADOR WEB
 // ════════════════════════════════════════════════════════════════
 
+async function syncPedidoFromDashboard(clienteId: string, updates: Record<string, unknown>): Promise<void> {
+  const pedido = obtenerPedido(clienteId)
+  if (!pedido) return
+
+  if (typeof updates.cliente_nombre === 'string') pedido.nombre = updates.cliente_nombre
+  if (typeof updates.producto === 'string') pedido.productoPersonalizado = updates.producto
+  if (typeof updates.precio_arreglo === 'number') pedido.precioPersonalizado = updates.precio_arreglo
+  if (typeof updates.sucursal === 'string') pedido.sucursal = updates.sucursal
+  if (typeof updates.direccion === 'string') pedido.direccion = updates.direccion
+  if (typeof updates.metodo_pago === 'string') pedido.metodoPago = updates.metodo_pago as any
+  if (typeof updates.nota === 'string') pedido.nota = updates.nota
+  if (typeof updates.fecha_entrega === 'string') pedido.fechaEntrega = updates.fecha_entrega
+  if (typeof updates.hora_entrega === 'string') pedido.horaEntrega = updates.hora_entrega
+  if (typeof updates.detalles_especiales === 'string') pedido.detallesEspeciales = updates.detalles_especiales
+  if (typeof updates.zona_envio === 'string') {
+    const base = pedido.envio ?? { zona: updates.zona_envio, precio: 0 }
+    pedido.envio = { ...base, zona: updates.zona_envio }
+  }
+  if (typeof updates.precio_envio === 'number') {
+    const base = pedido.envio ?? { zona: '', precio: updates.precio_envio }
+    pedido.envio = { ...base, precio: updates.precio_envio }
+  }
+
+  if (typeof updates.estado === 'string') {
+    const estadoMap: Record<string, EstadoPedido> = {
+      cotizacion: EstadoPedido.COTIZANDO,
+      apartado: EstadoPedido.APARTADO,
+      pagado: EstadoPedido.EN_PRODUCCION,
+      entregado: EstadoPedido.ENTREGADO,
+      cancelado: EstadoPedido.CANCELADO,
+    }
+    const nuevo = estadoMap[updates.estado]
+    if (nuevo && pedido.estado !== nuevo) transitar(pedido, nuevo)
+  }
+}
+
 async function procesarPedidoWeb(msg: any): Promise<void> {
   const clienteId        = msg.key?.remoteJid as string
   const texto            = getMensajeTexto(msg) || ''
@@ -1198,4 +1234,5 @@ startServer({
   obtenerVentasHoy: () => obtenerVentasHoy(),
   obtenerClientesAtendidosHoy: () => obtenerClientesAtendidosHoy(),
   getDiagnosticoChat,
+  syncPedidoFromDashboard,
 })

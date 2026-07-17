@@ -33,6 +33,7 @@ export interface BotContext {
   obtenerVentasHoy: () => Promise<{ total: number; cantidad: number }>
   obtenerClientesAtendidosHoy: () => Promise<number>
   getDiagnosticoChat: (chatId: string) => DiagnosticoChat | null
+  syncPedidoFromDashboard: (clienteId: string, updates: Record<string, unknown>) => Promise<void>
 }
 
 export function startServer(ctx: BotContext): void {
@@ -120,6 +121,18 @@ export function startServer(ctx: BotContext): void {
         estado: ctx.getEstado(),
         estadoDetalle: ctx.getEstadoDetalle(),
       })
+    }
+  })
+
+  app.post('/api/pedidos/sync', async (req, res) => {
+    const { cliente_id, updates } = req.body || {}
+    if (!cliente_id || !updates) return res.status(400).json({ error: 'Falta cliente_id o updates' })
+    try {
+      await ctx.syncPedidoFromDashboard(cliente_id, updates)
+      res.json({ ok: true })
+    } catch (err) {
+      console.error('[server] Error syncing pedido:', err)
+      res.status(500).json({ error: 'Error syncing pedido' })
     }
   })
 
