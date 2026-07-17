@@ -32,7 +32,7 @@ async function fetchConTimeout(
   }
 }
 
-export const supabaseAdmin = createClient(
+export const supabaseAdminRaw = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY,
   {
@@ -40,3 +40,35 @@ export const supabaseAdmin = createClient(
     global: { fetch: fetchConTimeout },
   }
 )
+
+// Proxy que cuenta errores de Supabase sin alterar el comportamiento de la API.
+// Cualquier promesa resultante de una query registra el error en metrics (non-swallowing).
+import { metrics } from './metrics.service'
+
+function wrapWithMetrics<T>(target: T): T {
+  const handler: ProxyHandler<object> = {
+    get(obj, prop, receiver) {
+      const value = Reflect.get(obj, prop, receiver)
+      if (typeof value === 'function') {
+        return (...args: unknown[]) => {
+          const result = (value as (...a: unknown[]) => unknown).apply(obj, args)
+          if (result && typeof (result as Promise<unknown>).then === 'function') {
+            const promise = result as Promise<unknown>
+            promise.catch((err) => {
+              metrics.recordSupabaseError(err instanceof Error ? err.message : String(err), 'supabase')
+            })
+            return promise
+          }
+          return result
+        }
+      }
+      if (value && typeof value === 'object') {
+        return new Proxy(value as object, handler)
+      }
+      return value
+    },
+  }
+  return new Proxy(target as object, handler) as T
+}
+
+export const supabaseAdmin = wrapWithMetrics(supabaseAdminRaw)

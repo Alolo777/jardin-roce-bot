@@ -20,12 +20,25 @@ CREATE INDEX IF NOT EXISTS idx_logs_module_created ON logs(module, created_at DE
 -- Política de seguridad: solo lectura para anon (si RLS está activo)
 ALTER TABLE logs ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY IF NOT EXISTS "Todos pueden insertar logs"
-  ON logs FOR INSERT
-  TO anon, authenticated
-  WITH CHECK (true);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'logs' AND policyname = 'Todos pueden insertar logs'
+  ) THEN
+    CREATE POLICY "Todos pueden insertar logs"
+      ON logs FOR INSERT
+      TO anon, authenticated
+      WITH CHECK (true);
+  END IF;
 
-CREATE POLICY IF NOT EXISTS "Solo authenticated puede leer logs"
-  ON logs FOR SELECT
-  TO authenticated
-  USING (true);
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'logs' AND policyname = 'Solo authenticated puede leer logs'
+  ) THEN
+    CREATE POLICY "Solo authenticated puede leer logs"
+      ON logs FOR SELECT
+      TO authenticated
+      USING (true);
+  END IF;
+END $$;

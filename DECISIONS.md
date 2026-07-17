@@ -742,3 +742,22 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 
 **Desventajas:** No hay métricas ni health endpoint todavía (Módulo 16 fase 2). El buffer es por-proceso (en serverless el API no ve el buffer del bot; se mitiga leyendo de Supabase). La tabla `logs` requiere ejecución manual del SQL (`supabase_migration_logs.sql`).
 
+---
+
+## DEC-038: Proxy transparente de Supabase para contar errores + snapshot de métricas a Supabase
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** Para la Fase 2 de Observabilidad se requiere la tasa de error de Supabase y la latencia de la IA sin tocar los ~200 call sites existentes de `supabaseAdmin`.
+
+**Alternativas consideradas:**
+1. Envolver cada `.from()` en un helper `db()` y migrar todos los call sites (invasivo, riesgo alto)
+2. Proxy recursivo sobre `supabaseAdmin` que adjunta un `.catch` non-swallowing a toda promesa (elegida)
+
+**Resultado:** `lib/supabase.ts` exporta `supabaseAdmin` como Proxy de `supabaseAdminRaw`. Cualquier propiedad que devuelva una función la invoca y, si el resultado es thenable, registra el error en `metrics.recordSupabaseError` sin tragarlo (devuelve la promesa original). El bot persiste `metrics.getSnapshot()` a `configuracion_bot` (clave `bot_metrics`) cada 30s y en `beforeExit`; `app/api/health` lo lee.
+
+**Ventajas:** Cero cambios en call sites de Supabase. Errores contados de forma centralizada. El dashboard en Vercel lee el snapshot desde Supabase (mismo patrón que `bot_status`).
+
+**Desventajas:** El Proxy recursivo puede envolver objetos anidados innecesariamente en llamadas calientes (costo despreciable). Las métricas viven en memoria del proceso del bot; en Vercel solo se ven tras el flush a Supabase (hasta 30s de retraso). No hay persistencia histórica de métricas (solo último snapshot).
+

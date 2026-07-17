@@ -1,6 +1,7 @@
 import { supabaseAdmin } from './supabase'
 import { eventBus } from '../src/events/event-bus'
 import { EventType } from '../src/events/types'
+import { metrics } from './metrics.service'
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -83,6 +84,7 @@ export const logger = {
 
 export function subscribeLogEvents(): void {
   eventBus.subscribeAll((event) => {
+    metrics.recordEvent(event.type)
     logger.info('event', `Evento ${event.type}`, {
       telefono: event.payload.telefono,
       cliente: event.payload.cliente,

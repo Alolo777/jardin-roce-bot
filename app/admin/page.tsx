@@ -53,6 +53,14 @@ const FEATURES = [
     gradient: 'from-slate-400 to-gray-500',
     shadow: 'shadow-slate-200/40',
   },
+  {
+    href: '/admin/health',
+    icon: '💓',
+    title: 'Salud del Sistema',
+    desc: 'Latencia de la IA, tasa de error de Supabase y eventos/segundo en tiempo real.',
+    gradient: 'from-rose-400 to-red-400',
+    shadow: 'shadow-rose-200/40',
+  },
 ]
 
 function BotStatusPanel() {

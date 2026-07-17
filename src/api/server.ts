@@ -1,4 +1,5 @@
 import express from 'express'
+import { metrics } from '../../lib/metrics.service'
 
 // Constantes de configuración
 const BOT_QR_TTL_MS = 60_000
@@ -142,6 +143,10 @@ export function startServer(ctx: BotContext): void {
     const diag = ctx.getDiagnosticoChat(chatId)
     if (!diag) return res.status(404).json({ error: 'Chat no encontrado' })
     res.json(diag)
+  })
+
+  app.get('/metrics', (_req, res) => {
+    res.json(metrics.getSnapshot())
   })
 
   app.listen(port, () => {

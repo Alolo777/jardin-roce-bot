@@ -2,6 +2,35 @@
 
 ## 2026-07-17
 
+### Feature — Fase 2 Observabilidad: métricas (latencia IA, errores Supabase, eventos) + health endpoint
+
+**Problema:** No había visibilidad de la latencia de la IA, la tasa de error de Supabase ni el estado de salud de los motores en producción.
+
+**Archivos modificados/creados:**
+- `lib/metrics.service.ts` (nuevo) — store en memoria: `recordAiLatency`, `recordAiError`, `recordSupabaseError`, `recordEvent`, `getSnapshot()`.
+- `lib/supabase.ts` — `supabaseAdmin` envuelto en Proxy que cuenta errores de Supabase en toda query sin cambiar call sites ni tragar errores.
+- `lib/ai.ts` — `getAIResponse` registra latencia y errores de IA.
+- `lib/logger.service.ts` — `subscribeLogEvents` ahora también registra cada evento en métricas.
+- `bot.ts` — persiste snapshot de métricas a Supabase (`configuracion_bot` clave `bot_metrics`) cada 30s + en `beforeExit`.
+- `src/api/server.ts` — ruta `GET /metrics` (VM) devuelve snapshot local.
+- `app/api/health/route.ts` (nuevo) — lee `bot_metrics` de Supabase (funciona en Vercel y VM).
+- `app/admin/health/page.tsx` (nuevo) — dashboard con latencia, tasa de error IA, errores Supabase, eventos/min, gráfica de latencia y eventos por tipo.
+- `app/admin/layout.tsx` y `app/admin/page.tsx` — link "Salud".
+
+**Cambios:**
+1. Latencia de IA medida en `getAIResponse` (promedio + p95 + muestras recientes).
+2. Errores de Supabase contados por un Proxy transparente sobre `supabaseAdmin` (non-swallowing `.catch`).
+3. Cada evento del EventBus incrementa contador + ventana de 60s para tasa/min.
+4. Health endpoint con evaluación `saludable`/`degradado`.
+
+**Impacto:** Diagnóstico proactivo de rendimiento. Sin nuevas dependencias. El Proxy de Supabase es transparente: no altera resultados ni errores.
+
+**Rollback:** Revertir los 9 archivos del módulo. No requiere migración SQL (reusa tabla `configuracion_bot`).
+
+---
+
+## 2026-07-17
+
 ### Feature — Sistema de Observabilidad (logging estructurado + dashboard de logs)
 
 **Problema:** Los errores de producción solo aparecían en `console.log` dispersos. Cuando el proveedor IA cayó (ver entrada previa del mismo día), no había forma centralizada de ver *dónde* y *cuándo* falló el bot.

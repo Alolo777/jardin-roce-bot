@@ -24,7 +24,7 @@
 | Persistencia Supabase | 100% | ✅ | 14 tablas consolidadas en supabase_migration_completa.sql. Pendiente ejecución manual en SQL Editor. |
 | Modelos / Tipos / Enums | 100% | ✅ | EstadoPedido, EstadoCaso, TipoCaso, Intencion, Prioridad, interfaces |
 | Dashboard | 100% | ✅ | Panel admin + Operaciones (botones, edición, filtros, sync) + Reportes históricos con export CSV |
-| Observabilidad | 55% | 🟡 | Logger estructurado + dashboard /admin/logs + auto-log de eventos. Faltan métricas y health endpoint. Migración SQL logs pendiente de ejecutar |
+| Observabilidad | 80% | 🟢 | Logger estructurado + dashboard /admin/logs + métricas (latencia IA, errores Supabase, eventos) + health endpoint /admin/health. Migración SQL logs pendiente de ejecutar en producción |
 | Testing | 5% | 🔴 | Sin tests automatizados (vitest/supertest recomendado pero no implementado) |
 | Documentación | 85% | 🟢 | AGENTS, DECISIONS, CHANGELOG, TODO, PLAN_MEJORAS, MANUAL, SYSTEM_ARCHITECTURE, MIGRACION BAILEYS, PROJECT_TRACKER (nuevo) |
 | README | 0% | 🔴 | Sigue siendo boilerplate de create-next-app; no refleja el proyecto real |
@@ -378,8 +378,10 @@
 - [x] Auto-log de todos los eventos del EventBus (`subscribeLogEvents`)
 - [x] Captura `uncaughtException` / `unhandledRejection` → logger.error
 - [x] Integración en `procesarMensaje` catch → logger.error
-- [ ] Métricas: tiempo de respuesta OpenAI, tasa de error Supabase, eventos/segundo
-- [ ] Health endpoint con estado de todos los motores
+- [x] Métricas: latencia IA (prom/p95), tasa error Supabase (Proxy), eventos/segundo
+- [x] Health endpoint (`/api/health` + `/metrics` en Express) con salud saludable/degradado
+- [x] Dashboard `/admin/health` con latencia, errores, eventos/min
+- [ ] Persistencia histórica de métricas (solo último snapshot en bot_metrics)
 - [ ] Migración SQL logs ejecutada en producción
 
 ### Módulo 17: Código Muerto / Limpieza

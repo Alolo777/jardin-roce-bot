@@ -5,6 +5,7 @@ import OpenAI from 'openai'
 import { supabaseAdmin } from './supabase'
 import { eventBus } from '../src/events/event-bus'
 import { EventType } from '../src/events/types'
+import { metrics } from './metrics.service'
 import type { AIResponse, VentaCerrada } from './types'
 
 // ─── Cliente OpenAI apuntando a GitHub Models ───────────────────────────────
@@ -639,6 +640,7 @@ export async function getAIResponse(
     }
 
     console.time('[ai.ts] LLM call')
+    const inicioIA = Date.now()
     const respuestaRaw = await (async () => {
         const completion = await conRetry(async () => {
           const controller = new AbortController()
@@ -666,6 +668,7 @@ export async function getAIResponse(
           : 'Lo siento, no pude procesar tu mensaje. ¿Puedes repetirlo? 🌸'
       })()
     console.timeEnd('[ai.ts] LLM call')
+    metrics.recordAiLatency(Date.now() - inicioIA)
 
     // Detectar si hay un token de venta cerrada
     const ventaCerrada = parsearTokenVenta(respuestaRaw)
@@ -677,6 +680,7 @@ export async function getAIResponse(
 
     return { mensaje: mensajeLimpio, ventaCerrada }
   } catch (error) {
+    metrics.recordAiError()
     console.error('[ai.ts] 🔴 Error en getAIResponse (ambos proveedores fallaron):', error)
     try {
       eventBus.emit(EventType.PROVIDER_FAILURE, {

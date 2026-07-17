@@ -153,6 +153,7 @@ const NAV_LINKS = [
   { href: '/admin/empleados', label: 'Empleados', icon: '👥' },
   { href: '/admin/ignorados', label: 'Silenciados', icon: '🔇' },
   { href: '/admin/logs', label: 'Logs', icon: '📜' },
+  { href: '/admin/health', label: 'Salud', icon: '💓' },
 ]
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

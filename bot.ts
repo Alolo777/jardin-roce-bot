@@ -25,6 +25,7 @@ import { eventBus } from './src/events/event-bus'
 import { EventType } from './src/events/types'
 import { subscribeTelegramEvents } from './src/events/telegram.subscriber'
 import { subscribeLogEvents, logger, flushLogsNow } from './lib/logger.service'
+import { metrics } from './lib/metrics.service'
 import { supabaseAdmin } from './lib/supabase'
 import type { VentaCerrada } from './lib/types'
 import { startServer } from './src/api/server'
@@ -1170,6 +1171,13 @@ cargarEstado().catch(() => {})
 subscribeTelegramEvents()
 subscribeLogEvents()
 logger.info('bot', 'Bot iniciado — observabilidad activa')
+setInterval(() => {
+  Promise.resolve(
+    supabaseAdmin
+      .from('configuracion_bot')
+      .upsert({ clave: 'bot_metrics', valor: JSON.stringify(metrics.getSnapshot()) })
+  ).catch(() => {})
+}, 30_000).unref?.()
 iniciarPersistenciaPeriodica()
 cargarPedidosDesdeBD().catch(() => {})
 iniciarBaileys().catch((err) => { console.error('❌ Error:', err); registrarCrash(); process.exit(1) })
@@ -1224,7 +1232,14 @@ process.on('uncaughtException',  (err) => {
 process.on('unhandledRejection', (r) => {
   logger.error('bot', 'Promesa rechazada sin manejar', { reason: String(r) })
 })
-process.on('beforeExit', () => { void flushLogsNow() })
+process.on('beforeExit', () => {
+  void flushLogsNow()
+  Promise.resolve(
+    supabaseAdmin
+      .from('configuracion_bot')
+      .upsert({ clave: 'bot_metrics', valor: JSON.stringify(metrics.getSnapshot()) })
+  ).catch(() => {})
+})
 
 
 startServer({
