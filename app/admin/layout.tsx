@@ -152,6 +152,7 @@ const NAV_LINKS = [
   { href: '/admin/prompt', label: 'Cerebro', icon: '🧠' },
   { href: '/admin/empleados', label: 'Empleados', icon: '👥' },
   { href: '/admin/ignorados', label: 'Silenciados', icon: '🔇' },
+  { href: '/admin/logs', label: 'Logs', icon: '📜' },
 ]
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

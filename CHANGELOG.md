@@ -2,6 +2,36 @@
 
 ## 2026-07-17
 
+### Feature — Sistema de Observabilidad (logging estructurado + dashboard de logs)
+
+**Problema:** Los errores de producción solo aparecían en `console.log` dispersos. Cuando el proveedor IA cayó (ver entrada previa del mismo día), no había forma centralizada de ver *dónde* y *cuándo* falló el bot.
+
+**Archivos modificados/creados:**
+- `lib/logger.service.ts` (nuevo) — logger estructurado (niveles debug/info/warn/error), buffer circular en memoria (500) + escritura batch a Supabase, `subscribeLogEvents()` que auto-loguea todos los eventos del `eventBus`.
+- `supabase_migration_logs.sql` (nuevo) — tabla `logs` (id, level, module, message, metadata jsonb, created_at) + índices + RLS.
+- `app/api/logs/route.ts` (nuevo) — `GET` con filtros (level, module, search, since, limit, offset) + fallback a buffer si Supabase falla.
+- `app/admin/logs/page.tsx` (nuevo) — dashboard visual: tabla, filtros, auto-refresh 5s, expandir metadata.
+- `bot.ts` — importa `subscribeLogEvents`, lo llama en arranque, log de inicio, y reemplaza handlers `uncaughtException`/`unhandledRejection` por `logger.error` (+ `flushLogsNow` en `beforeExit`).
+- `src/whatsapp/message-handler.ts` — catch de `procesarMensaje` usa `logger.error` en vez de `console.error`.
+- `app/admin/layout.tsx` — link "Logs" en nav.
+- `app/admin/page.tsx` — card "Logs del Sistema" en FEATURES.
+
+**Cambios:**
+1. Logger propio sin dependencia externa (evita pino/winston — coherente con política de mínimas dependencias de AGENTS.md).
+2. Todos los eventos del EventBus se auto-registran como `info` en el módulo `event`.
+3. `uncaughtException`/`unhandledRejection` ahora se registran con stack en el módulo `bot`.
+4. Dashboard `/admin/logs` lee de `/api/logs` en tiempo real para diagnosticar fallos rápido.
+
+**Impacto:** Mayor capacidad de diagnóstico en producción. La escritura a Supabase es fire-and-forget con buffer de respaldo; un fallo de Supabase no rompe el flujo del bot.
+
+**Rollback:** Revertir los 9 archivos/commits del módulo; no requiere cambios en lógica de ventas/pagos/casos.
+
+**Pendiente:** Ejecutar `supabase_migration_logs.sql` manualmente en el SQL Editor de Supabase (por política de migraciones SQL el sistema no lo ejecuta automáticamente).
+
+---
+
+## 2026-07-17
+
 ### Fix — Eliminar Gemini fallback, getAIResponse ya no lanza error, concurrencia mejorada
 
 **Problema:** Cuando ambos proveedores de IA fallaban (Azure OpenAI timeout + Gemini quota 429), `getAIResponse` lanzaba throw y `procesarMensaje` atrapaba el error enviando "mareo digital". Esto ocurría porque Gemini free tier (cuota 150/día) se agotaba y el semáforo de concurrencia (2 slots, 60s timeout) causaba contención de cola.

@@ -722,3 +722,23 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 **Ventajas:** 50% más capacidad concurrente. Los clientes esperan la mitad del tiempo antes de que su request "force" el slot.
 
 **Desventajas:** Mayor probabilidad de alcanzar rate-limit de Azure si hay muchos mensajes simultáneos (mitigado por conRetry con backoff).
+
+---
+
+## DEC-037: Logger estructurado propio (sin pino/winston)
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** Los errores de producción solo aparecían en `console.log` dispersos. No había forma centralizada de ver *dónde* y *cuándo* falló el bot (se evidenció cuando la IA se cayó el mismo día).
+
+**Alternativas consideradas:**
+1. Usar pino o winston (maduros, pero agregan dependencia externa)
+2. Logger propio ligero con buffer + Supabase (elegida)
+
+**Resultado:** `lib/logger.service.ts` implementa `logger.{debug,info,warn,error}` con niveles, buffer circular en memoria (500 entradas, siempre disponible para el API como respaldo) y escritura batch asíncrona a Supabase (`from('logs').insert`). `subscribeLogEvents()` suscribe `eventBus.subscribeAll` para auto-registrar cada evento como `info`. `bot.ts` reemplaza los handlers `uncaughtException`/`unhandledRejection` por `logger.error` con stack.
+
+**Ventajas:** Cero dependencias nuevas (coherente con política de mínimas dependencias de AGENTS.md). Observabilidad inmediata vía `/admin/logs`. Fallo de Supabase no rompe el bot (fire-and-forget + buffer).
+
+**Desventajas:** No hay métricas ni health endpoint todavía (Módulo 16 fase 2). El buffer es por-proceso (en serverless el API no ve el buffer del bot; se mitiga leyendo de Supabase). La tabla `logs` requiere ejecución manual del SQL (`supabase_migration_logs.sql`).
+

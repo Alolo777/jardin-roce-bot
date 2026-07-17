@@ -24,6 +24,7 @@ import { clasificarConversacion, clasificarImagenVenta, getAIResponse, revisarRe
 import { eventBus } from './src/events/event-bus'
 import { EventType } from './src/events/types'
 import { subscribeTelegramEvents } from './src/events/telegram.subscriber'
+import { subscribeLogEvents, logger, flushLogsNow } from './lib/logger.service'
 import { supabaseAdmin } from './lib/supabase'
 import type { VentaCerrada } from './lib/types'
 import { startServer } from './src/api/server'
@@ -1167,6 +1168,8 @@ const messageEntry = createMessageEntry({
 })
 cargarEstado().catch(() => {})
 subscribeTelegramEvents()
+subscribeLogEvents()
+logger.info('bot', 'Bot iniciado — observabilidad activa')
 iniciarPersistenciaPeriodica()
 cargarPedidosDesdeBD().catch(() => {})
 iniciarBaileys().catch((err) => { console.error('❌ Error:', err); registrarCrash(); process.exit(1) })
@@ -1215,8 +1218,13 @@ function getDiagnosticoChat(chatId: string): import('./src/api/server').Diagnost
 
 process.on('SIGINT',  () => gracefulShutdown('SIGINT'))
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
-process.on('uncaughtException',  (err) => console.error('❌ Excepción:', err))
-process.on('unhandledRejection', (r)   => console.error('❌ Rechazo:', r))
+process.on('uncaughtException',  (err) => {
+  logger.error('bot', 'Excepción no capturada', { error: String(err), stack: (err as Error)?.stack })
+})
+process.on('unhandledRejection', (r) => {
+  logger.error('bot', 'Promesa rechazada sin manejar', { reason: String(r) })
+})
+process.on('beforeExit', () => { void flushLogsNow() })
 
 
 startServer({

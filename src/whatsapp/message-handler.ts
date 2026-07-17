@@ -21,6 +21,7 @@ import { buscarEnvio, pareceConsultaEnvio } from '../validators/envio.validator'
 import { evaluarCancelacion } from '../validators/cancelacion.validator'
 import { evaluarQueja } from '../validators/queja.validator'
 import { clasificarConversacion, getAIResponse, revisarRespuestaFlora, clasificarImagenVenta } from '../../lib/ai'
+import { logger } from '../../lib/logger.service'
 import type { PedidoActual, EstadoPedido } from '../models/types'
 
 export interface MsgHandlerDeps {
@@ -1092,7 +1093,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         }
       }
     } catch (err) {
-      console.error('[bot] Error en procesarMensaje:', err)
+      logger.error('message-handler', 'Error en procesarMensaje', { error: String(err), stack: (err as Error)?.stack })
       try {
         if (msg?.key?.remoteJid) {
           await deps.responderMensaje(msg, '🌷 Perdón, un pequeño mareo digital. ¿Me repites?')

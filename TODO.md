@@ -13,6 +13,7 @@
 | Persistencia Supabase | 100% | ✅ |
 | Prompt Builder | 100% | ✅ |
 | Event Engine | 98% | 🟢 |
+| Observabilidad | 55% | 🟡 |
 | Telegram Engine | 100% | ✅ |
 | Parsers | 100% | ✅ |
 | Modelos/Tipos | 100% | ✅ |

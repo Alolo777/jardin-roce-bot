@@ -24,7 +24,7 @@
 | Persistencia Supabase | 100% | ✅ | 14 tablas consolidadas en supabase_migration_completa.sql. Pendiente ejecución manual en SQL Editor. |
 | Modelos / Tipos / Enums | 100% | ✅ | EstadoPedido, EstadoCaso, TipoCaso, Intencion, Prioridad, interfaces |
 | Dashboard | 100% | ✅ | Panel admin + Operaciones (botones, edición, filtros, sync) + Reportes históricos con export CSV |
-| Observabilidad | 30% | 🔴 | Logs console.log básicos; sin logging estructurado, sin métricas, sin alertas internas |
+| Observabilidad | 55% | 🟡 | Logger estructurado + dashboard /admin/logs + auto-log de eventos. Faltan métricas y health endpoint. Migración SQL logs pendiente de ejecutar |
 | Testing | 5% | 🔴 | Sin tests automatizados (vitest/supertest recomendado pero no implementado) |
 | Documentación | 85% | 🟢 | AGENTS, DECISIONS, CHANGELOG, TODO, PLAN_MEJORAS, MANUAL, SYSTEM_ARCHITECTURE, MIGRACION BAILEYS, PROJECT_TRACKER (nuevo) |
 | README | 0% | 🔴 | Sigue siendo boilerplate de create-next-app; no refleja el proyecto real |
@@ -367,15 +367,20 @@
 - [ ] Tests para flujo completo (Lizet, Noé, casos PLAN_MEJORAS)
 
 ### Módulo 16: Observabilidad
-**Estado:** No iniciado 🔴
+**Estado:** En progreso 🟡 (Fase 1: logging estructurado + dashboard)
 **Prioridad:** P2
 
 **Checklist:**
-- [ ] Reemplazar console.log con logging estructurado (pino, winston)
-- [ ] Eventos de auditoría para cada acción importante
+- [x] Logger estructurado propio (sin dependencia externa) en `lib/logger.service.ts`
+- [x] Tabla `logs` en Supabase (`supabase_migration_logs.sql`)
+- [x] Endpoint `GET /api/logs` con filtros + fallback a buffer
+- [x] Dashboard `/admin/logs` con filtros, auto-refresh y metadata expandible
+- [x] Auto-log de todos los eventos del EventBus (`subscribeLogEvents`)
+- [x] Captura `uncaughtException` / `unhandledRejection` → logger.error
+- [x] Integración en `procesarMensaje` catch → logger.error
 - [ ] Métricas: tiempo de respuesta OpenAI, tasa de error Supabase, eventos/segundo
 - [ ] Health endpoint con estado de todos los motores
-- [ ] Alertas internas cuando un motor falla
+- [ ] Migración SQL logs ejecutada en producción
 
 ### Módulo 17: Código Muerto / Limpieza
 **Estado:** Pendiente 🔴

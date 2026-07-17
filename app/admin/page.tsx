@@ -45,6 +45,14 @@ const FEATURES = [
     gradient: 'from-violet-400 to-purple-400',
     shadow: 'shadow-violet-200/40',
   },
+  {
+    href: '/admin/logs',
+    icon: '📜',
+    title: 'Logs del Sistema',
+    desc: 'Observabilidad en tiempo real: errores y eventos del bot para diagnosticar fallos rápido.',
+    gradient: 'from-slate-400 to-gray-500',
+    shadow: 'shadow-slate-200/40',
+  },
 ]
 
 function BotStatusPanel() {
