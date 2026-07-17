@@ -12,12 +12,12 @@ const client = new OpenAI({
   apiKey: process.env.GITHUB_TOKEN,
 })
 
-const MODEL = process.env.GITHUB_MODEL ?? 'gpt-4o'
+const MODEL = process.env.GITHUB_MODEL ?? 'gpt-4o-mini'
 const REVIEW_MODEL = process.env.GITHUB_REVIEW_MODEL ?? MODEL
 
 // ─── Semáforo global: máximo 2 llamadas concurrentes a la API ───────────────
 const MAX_CONCURRENT = 2
-const SLOT_TIMEOUT_MS = 30_000
+const SLOT_TIMEOUT_MS = 60_000
 let activeRequests = 0
 const requestQueue: Array<() => void> = []
 
@@ -48,7 +48,7 @@ function releaseSlot(): void {
   else activeRequests--
 }
 
-const API_CALL_TIMEOUT_MS = 30_000
+const API_CALL_TIMEOUT_MS = 60_000
 
 async function withLimit<T>(fn: () => Promise<T>): Promise<T> {
   await concurrencySlot()
