@@ -48,7 +48,7 @@ export function subscribeTelegramEvents(): void {
       detalles: event.payload.descripcion,
       fechaHora: (event.payload as any).fechaHora,
       tieneFotoReferencia: (event.payload as any).tieneFotoReferencia,
-    }).catch(() => {})
+    })
   })
 
   eventBus.subscribe(EventType.ORDER_UPDATED, (event) => {
@@ -65,19 +65,19 @@ export function subscribeTelegramEvents(): void {
       detalles: event.payload.descripcion,
       fechaHora: (event.payload as any).fechaHora,
       tieneFotoReferencia: (event.payload as any).tieneFotoReferencia,
-    }).catch(() => {})
+    })
   })
 
   eventBus.subscribe(EventType.ORDER_READY, (event) => {
     enviarAlertaPedidoListo(
       event.payload.telefono,
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.ORDER_DELIVERED, (event) => {
     enviarAlertaPedidoEntregado(
       event.payload.telefono,
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.HUMAN_REQUIRED, (event) => {
@@ -85,14 +85,14 @@ export function subscribeTelegramEvents(): void {
       enviarAlertaClienteFrustrado(
         event.payload.telefono,
         event.payload.descripcion ?? '',
-      ).catch(() => {})
+      )
     } else {
       enviarAlertaAtencionHumana(
         event.payload.telefono,
         event.payload.cliente,
         event.payload.descripcion,
         (event.payload as any).contexto,
-      ).catch(() => {})
+      )
     }
   })
 
@@ -100,28 +100,28 @@ export function subscribeTelegramEvents(): void {
     enviarAlertaQueja(
       event.payload.telefono,
       event.payload.descripcion ?? '',
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.PHOTO_REQUESTED, (event) => {
     enviarAlertaEmpleadoFotos(
       event.payload.telefono,
       event.payload.cliente ?? '',
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.COTIZACION_REQUESTED, (event) => {
     enviarAlertaCotizacion(
       event.payload.telefono,
       event.payload.descripcion ?? '',
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.ENVIO_REQUESTED, (event) => {
     enviarAlertaEmpleadoEnvio(
       event.payload.telefono,
       event.payload.descripcion ?? '',
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.CASE_CREATED, (event) => {
@@ -129,14 +129,14 @@ export function subscribeTelegramEvents(): void {
       event.payload.telefono,
       event.payload.descripcion ?? '',
       event.payload.prioridad ?? 'media',
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.CASE_ARCHIVED, (event) => {
     enviarAlertaCasoArchivado(
       event.payload.telefono,
       event.payload.descripcion ?? '',
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.PAYMENT_RECEIVED, (event) => {
@@ -146,7 +146,7 @@ export function subscribeTelegramEvents(): void {
       event.payload.producto ?? '',
       event.payload.total ?? 0,
       event.payload.metodoPago ?? '',
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.PAYMENT_PENDING, (event) => {
@@ -157,7 +157,7 @@ export function subscribeTelegramEvents(): void {
       event.payload.total ?? 0,
       event.payload.sucursal ?? '',
       event.payload.metodoPago ?? '',
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.ZONA_AMBIGUA, (event) => {
@@ -165,14 +165,14 @@ export function subscribeTelegramEvents(): void {
       event.payload.telefono,
       event.payload.descripcion ?? '',
       (event.payload as any).candidatos,
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.CANCELACION_REQUESTED, (event) => {
     enviarAlertaCancelacion(
       event.payload.telefono,
       event.payload.descripcion ?? '',
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.PAYMENT_CONFIRMED, (event) => {
@@ -181,50 +181,50 @@ export function subscribeTelegramEvents(): void {
       event.payload.cliente ?? '',
       event.payload.total ?? 0,
       event.payload.metodoPago ?? '',
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.PRICE_CONFIRMED, (event) => {
     enviarAlertaPrecioConfirmado(
       event.payload.telefono,
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.DELIVERY_COMPLETED, (event) => {
     enviarAlertaEntregaCompletada(
       event.payload.telefono,
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.BOT_DISCONNECTED, (event) => {
     enviarAlertaBotDesconectado(
       event.payload.descripcion ?? 'Sin motivo',
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.CUSTOMER_WAITING, (event) => {
     enviarAlertaClienteEsperando(
       event.payload.telefono,
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.PHOTO_SENT, (event) => {
     enviarAlertaFotoEnviada(
       event.payload.telefono,
       event.payload.descripcion ?? '',
-    ).catch(() => {})
+    )
   })
 
   eventBus.subscribe(EventType.QR_GENERATED, () => {
-    enviarAlertaQr().catch(() => {})
+    enviarAlertaQr()
   })
 
   eventBus.subscribe(EventType.BOT_CONNECTED, () => {
-    enviarAlertaReconectado().catch(() => {})
+    enviarAlertaReconectado()
   })
 
   eventBus.subscribe(EventType.BOT_DAILY_ALERT, () => {
-    enviarAlertaDiariaDesconexion().catch(() => {})
+    enviarAlertaDiariaDesconexion()
   })
 
   eventBus.subscribe(EventType.PHOTO_RECEIVED, (event) => {
@@ -235,6 +235,6 @@ export function subscribeTelegramEvents(): void {
         ? '📷 *Foto de referencia*'
         : '📸 *Imagen del cliente*'
     const texto = `${prefix} — ${telefono}${caption ? `\n\n${caption}` : ''}`
-    enviarFotoTelegram(base64, texto, mimetype).catch(() => {})
+    enviarFotoTelegram(base64, texto, mimetype)
   })
 }

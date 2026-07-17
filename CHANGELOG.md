@@ -2,6 +2,178 @@
 
 ## 2026-07-17
 
+### Feature — Extracción de manejarMensajeEntrante a message-entry.ts
+
+**Archivos modificados:**
+- `src/whatsapp/message-entry.ts` (nuevo)
+- `bot.ts`
+
+**Cambios:**
+- Extraído `manejarMensajeEntrante` (~80 líneas) + `rescatarMensajesNoLeidos` (~40) + `timestampMensajeMs` (~5) + `avisarRateLimitUnaVez` (~5) + `registrarActividad` de bot.ts a `src/whatsapp/message-entry.ts` como factory `createMessageEntry(deps)`
+- `bot.ts` ahora pasa 9 dependencias: `responderMensaje`, `marcarFotosDisponibles`, `encolarPorCliente`, `encolarMensajeAgrupado`, `procesarMensajeEquipo`, `verificarSiBotPausado`, `mediaToBase64`, `TIPOS_MEDIA_NO_SOPORTADOS`, `registrarActividad`
+- `registrarActividad` se inyecta como dep compartida para mantener el watchdog de bot.ts actualizado
+- `messageEntry.procesarMensajeEntrante(msg)` reemplaza llamadas a `manejarMensajeEntrante(msg)` en `messages.upsert`
+- `messageEntry.rescatarMensajesNoLeidos(chats, messages)` reemplaza llamada en `messaging-history.set`
+- Exportaciones añadidas en bot.ts: `responderMensaje`, `marcarFotosDisponibles`, `encolarPorCliente`, `encolarMensajeAgrupado`, `procesarMensajeEquipo`, `verificarSiBotPausado`, `mediaToBase64`, `TIPOS_MEDIA_NO_SOPORTADOS`, `registrarActividad`, `ultimaActividad`, `COLA_POR_CLIENTE`, `MENSAJES_POR_AGRUPAR`, `AGRUPAR_MENSAJES_MS`
+
+**Impacto:** bot.ts de ~1333 → ~1201 líneas (-132). message-entry.ts añade ~150 líneas de código modularizado. Compilación 100% exitosa.
+
+**Rollback:** Revertir cambios en bot.ts + eliminar message-entry.ts.
+
+---
+
+## 2026-07-17
+
+### Fix — Eliminación de código muerto duplicado en bot.ts
+
+**Archivos modificados:**
+- `bot.ts`
+- `PROJECT_TRACKER.md`
+
+**Cambios:**
+- Eliminadas ~381 líneas de funciones duplicadas entre bot.ts y message-handler.ts que eran código muerto (solo llamadas desde el antiguo `procesarMensaje` ya extraído)
+- Funciones eliminadas: `esTextoComprobante`, `contextoEsperaComprobante`, `respuestaPideComprobante`, `detectarExtrasPedido`, `agregarExtrasPedido`, `limpiarDireccionCliente`, `sincronizarPedidoConCaso`, `extraerNombrePedido`, `aplicarDatosPedidoDesdeTexto`, `pedirFechaHoraSiFalta`, `procesarMediaAcumulado`, `registrarReclamacion`, `registrarZonaAmbigua`, `obtenerZonasEnvio`, `obtenerMunicipiosEnvio`, `buscarPrecioEnvio`, `contieneFrase`, `detectarLinkMaps`, `formatearZonasParaPrompt`, `limpiarRespuestaIA`, `calcularDelayEscritura`, `detectarIntencion`, `esSolicitudFotosDisponibles`, `clienteEligeFotoDisponible`, interfaces/constantes asociadas
+- `esMensajeFotosDisponiblesEquipo` preservada (sigue viva en `procesarMensajeEquipo`)
+
+**Impacto:** bot.ts de ~1540 → 1159 líneas. Sin duplicación de helpers entre bot.ts y message-handler.ts.
+
+**Rollback:** Revertir cambios en bot.ts.
+
+---
+
+## 2026-07-17
+
+### Feature — Extracción de procesarMensaje a message-handler.ts
+
+**Archivos modificados:**
+- `src/whatsapp/message-handler.ts` (nuevo)
+- `bot.ts`
+
+**Cambios:**
+- Extraído `procesarMensaje` (~658 líneas) de `bot.ts` a `src/whatsapp/message-handler.ts` como factory `createMessageHandler(deps)`
+- `bot.ts` ahora pasa 22 helpers compartidos como dependencias (MsgHandlerDeps): pedidoActual, responderMensaje, ventaCerradaHandler, pedidoApartadoHandler, ventaDesdeEstado, persistirPedido, ventaListaParaCerrar, ventaListaParaPagoTransferencia, pedidoEstaCerrado, tieneArregloVerificado, tienePrecioConfirmado, tieneNombreValido, resetearPedidoActivo, marcarFotosDisponibles, hayFotosDisponiblesRecientes, totalExtrasPedido, extrasPedidoTexto, totalDashboardPedido, precioArregloTexto, MEDIA_POR_CLIENTE, apartadoSucursalListo
+- Corregido import de `Intencion`: ahora desde `models/types` en vez de `decision.engine.ts`
+- Corregido import de `EstadoPedido`: de `import type` a `import` regular (usado como valor)
+- Exportada `esTextoReferenciaOCotizacion` desde `message-handler.ts` para uso en `bot.ts`
+- `msgHandler.procesarMensaje(base, sock)` reemplaza llamada legacy `procesarMensaje(base)`
+- Corregidos errores de compilación: `extraerTelefono` desde conversation.service.ts, `sock` como parámetro en `procesarMediaAcumulado`, `apartadoSucursalListo` añadido a MsgHandlerDeps
+
+**Impacto:** `bot.ts` se reduce en ~658 líneas. El handler recibe `sock` por parámetro (se reasigna en reconexión). Compilación 100% exitosa.
+
+**Rollback:** Revertir cambios en bot.ts + eliminar message-handler.ts.
+
+---
+
+## 2026-07-17
+
+Versión: 2.1.2
+
+### Fix — Retry Queue para EventBus (Telegram)
+
+**Archivos modificados:**
+- `src/events/event-bus.ts`
+- `src/events/telegram.subscriber.ts`
+
+**Cambios:**
+- Agregado `executeWithRetry()` en EventBus con exponential backoff: 1s → 2s → 4s, max 3 retries
+- Eliminados 24+ `.catch(() => {})` silenciosos en telegram.subscriber.ts — errores ahora llegan al bus para reintentar
+- Agregado método `setRetryConfig()` para ajustar configuración en runtime
+- Logs de warning en cada reintento, error después de agotar retries
+
+**Impacto:** Los eventos fallidos (rate-limit de Telegram, error de red) ya no se pierden silenciosamente. El bus reintenta y solo loggea error si se agotan los 3 intentos.
+
+**Rollback:** Restaurar event-bus.ts original + restaurar `.catch(() => {})` en telegram.subscriber.ts.
+
+---
+
+## 2026-07-17
+
+### Fix — LLM ya no fija precios
+
+**Archivos modificados:**
+- `bot.ts`
+
+**Cambios:**
+- Eliminado bloque 1755-1765 que extraía `extraerPrecioRespuesta(mensajeFinal)` de la respuesta del LLM y lo aplicaba como `pedido.precioPersonalizado`
+- Eliminada función `describirPedidoPersonalizado` (código muerto tras eliminar el bloque)
+- El precio solo lo fija el equipo vía `procesarMensajeEquipo`; el LLM solo lee precios del contexto
+
+**Impacto:** Compatible. Se cumple Principio 4 (LLM nunca inventar información) y Regla Absoluta (OpenAI solo escribe texto, backend decide). Riesgo de precios inventados por LLM eliminado.
+
+**Rollback:** Restaurar bloque 1755-1765 + función describirPedidoPersonalizado.
+
+---
+
+## 2026-07-17
+
+Versión: 2.1.0-paso10
+
+### PASO 10 — Eliminar PEDIDO_EN_CURSO y ARREGLO_ELEGIDO (legacy Maps)
+
+**Archivos modificados:**
+- `bot.ts`
+
+**Cambios:**
+- Eliminado `PEDIDO_EN_CURSO` Map (7 refs) + `PedidoEnCurso` interface (~25 líneas)
+- Simplificado `pedidoActual()` de 16 líneas a 1 línea: `obtenerPedido() ?? crearPedido()`
+- Eliminado `ARREGLO_ELEGIDO` Map (17 refs, código muerto — nunca `.set()`) + `ArregloConFoto` interface
+- Eliminados 15 fallbacks `?? ARREGLO_ELEGIDO.get(...)` → `pedido.arreglo`
+- Eliminado `!ARREGLO_ELEGIDO.has(...)` → `!pedido.arreglo`
+- Eliminado `syncLegacyToEngine` del import (ya no se usa en bot.ts)
+- Eliminados PEDIDO_EN_CURSO.delete() y ARREGLO_ELEGIDO.delete() de reset functions
+
+**Impacto:** Compatible. El Order Engine es la única fuente de verdad para pedidos en memoria. RIESGO ELIMINADO: ya no hay dos fuentes de verdad (causa raíz del caso Lizet).
+
+**Rollback:** Restaurar `PEDIDO_EN_CURSO` y `ARREGLO_ELEGIDO` Maps + interfaces + `syncLegacyToEngine` + revertir `pedidoActual()`.
+
+---
+
+## 2026-07-17
+
+Versión: 2.1.0-paso9
+
+### PASO 9 — Eliminar VENTAS_CERRADAS
+
+**Archivos modificados:**
+- `bot.ts`
+
+**Cambios:**
+- Creada función `pedidoEstaCerrado(clienteId)` que consulta el estado del Order Engine
+- Eliminada declaración `const VENTAS_CERRADAS = new Set<string>()`
+- Reemplazadas 10 guardias `!VENTAS_CERRADAS.has(clienteId)` → `!pedidoEstaCerrado(clienteId)`
+- Eliminados guardia y `add()` dentro de `ventaCerradaHandler`
+- Eliminado `VENTAS_CERRADAS.delete(clienteId)` en `resetearPedidoCliente`
+- Actualizado diagnóstico `GET /api/bot/diag/:chatId`
+- Agregado `EstadoPedido` a imports desde `./src/models/types`
+
+**Impacto:** Compatible. VENTAS_CERRADAS era redundante tras PASO 3 (cola por cliente) + PASO 8 (engine state via transitarDesdeFlujo).
+
+**Rollback:** Revertir las 16 ediciones + restaurar declaración del Set.
+
+---
+
+## 2026-07-17
+
+Versión: 2.1.0-paso8
+
+### PASO 8 — transitarDesdeFlujo conectado a todos los puntos de estadoFlujo
+
+**Archivos modificados:**
+- `bot.ts`
+- `src/pedidos/pedido.service.ts`
+
+**Cambios:**
+- Agregada llamada `transitarDesdeFlujo(clienteId, '...')` después de cada una de las 15 asignaciones de `estadoFlujo` en bot.ts
+- Añadido `'esperando_precio_equipo'` → `EstadoPedido.COTIZANDO` al mapping de `transitarDesdeFlujo`
+
+**Impacto:** Compatible — cada cambio de flujo ahora sincroniza automáticamente la máquina de estados del Order Engine.
+
+**Rollback:** Revertir las 16 ediciones (15 en bot.ts + 1 en pedido.service.ts)
+
+---
+
+## 2026-07-17
+
 Versión: 2.0.7
 
 ### Fix — Google Maps links no detectados como dirección
