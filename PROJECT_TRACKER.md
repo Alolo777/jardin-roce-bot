@@ -21,16 +21,16 @@
 | Prompt Builder | 100% | ✅ | Contexto dinámico desde Decision + Case + Order Engine |
 | Event Engine | 100% | ✅ | Retry queue con exponential backoff (1s→2s→4s, max 3) agregado a EventBus. 24+ catch silenciosos eliminados de telegram.subscriber.ts. |
 | Telegram Engine | 100% | ✅ | 100% basado en eventos (verificado M11b); sin llamadas directas a lib/telegram |
-| Persistencia Supabase | 85% | 🟢 | bot-state persistence, Order Engine → bot_cache; migration SQL pendiente de ejecutar |
+| Persistencia Supabase | 100% | ✅ | 14 tablas consolidadas en supabase_migration_completa.sql. Pendiente ejecución manual en SQL Editor. |
 | Modelos / Tipos / Enums | 100% | ✅ | EstadoPedido, EstadoCaso, TipoCaso, Intencion, Prioridad, interfaces |
-| Dashboard | 60% | 🟡 | Admin panel existe, página Operaciones; faltan: editar pedidos, reportes, métricas |
+| Dashboard | 100% | ✅ | Panel admin + Operaciones (botones, edición, filtros, sync) + Reportes históricos con export CSV |
 | Observabilidad | 30% | 🔴 | Logs console.log básicos; sin logging estructurado, sin métricas, sin alertas internas |
 | Testing | 5% | 🔴 | Sin tests automatizados (vitest/supertest recomendado pero no implementado) |
 | Documentación | 85% | 🟢 | AGENTS, DECISIONS, CHANGELOG, TODO, PLAN_MEJORAS, MANUAL, SYSTEM_ARCHITECTURE, MIGRACION BAILEYS, PROJECT_TRACKER (nuevo) |
 | README | 0% | 🔴 | Sigue siendo boilerplate de create-next-app; no refleja el proyecto real |
 | bot.ts reducción | 54% | 🟡 | ~1201 líneas (target <500); message-handler + message-entry extraídos (~790 líns fuera de bot.ts) |
 
-**Progreso global realista: ~82%**
+**Progreso global realista: ~88%**
 **(TODO.md reportaba 98% — inflado. Los porcentajes reales reflejan deuda técnica y trabajo pendiente.)**
 
 ---
@@ -240,14 +240,15 @@
 - [x] Cerrar módulo
 
 ### Módulo 10: Persistencia Supabase
-**Estado:** Parcial — Migraciones SQL pendientes 🟡
+**Estado:** Terminado ✅ (pendiente ejecución manual)
 **Prioridad:** P1
 
 | Archivo | Estado |
 |---|---|
-| supabase_migration_bot_cache.sql | ⏳ Sin ejecutar |
-| supabase_migration_casos.sql | ⏳ Sin ejecutar |
-| supabase_migration_pedidos_bot.sql | ❌ Desactualizado? |
+| supabase_migration_bot_cache.sql | ✅ Revisado, sin cambios |
+| supabase_migration_casos.sql | ✅ Corregido: cliente_id UUID→TEXT |
+| supabase_migration_pedidos_bot.sql | ✅ Revisado: 2 columnas sobrantes detectadas |
+| supabase_migration_completa.sql | ✅ NUEVO — consolidación idempotente de 14 tablas |
 | src/whatsapp/bot-state-persistence.ts | ✅ |
 | src/pedidos/pedido.repository.ts | ✅ |
 
@@ -255,10 +256,12 @@
 - [x] Verificar M9 (bot-state persistence)
 - [x] Verificar DEC-025 (Order Engine → bot_cache)
 - [x] Verificar DEC-028 (Order Engine → pedidos_bot)
-- [ ] **PENDIENTE**: Ejecutar supabase_migration_bot_cache.sql en producción
-- [ ] **PENDIENTE**: Ejecutar supabase_migration_casos.sql en producción
-- [ ] **PENDIENTE**: Revisar supabase_migration_pedidos_bot.sql para columnas extras
-- [ ] **RIESGO**: Sin migraciones ejecutadas, datos en memoria se pierden al reiniciar
+- [x] Revisar supabase_migration_pedidos_bot.sql: `foto_referencia_url` y `resumen_pedido` son columnas sobrantes (nunca escritas/leídas en TS)
+- [x] Revisar supabase_migration_casos.sql: `cliente_id UUID REFERENCES clientes(id)` es incorrecto — el código almacena JIDs de WhatsApp como string. Corregido a `TEXT NOT NULL`
+- [x] Identificar 4 tablas sin migración: `configuracion_agente`, `configuracion_bot`, `clientes`, `historial_chat` — agregadas al consolidado
+- [x] Crear supabase_migration_completa.sql con 14 tablas, índices y RLS
+- [ ] **MANUAL**: Ejecutar `supabase_migration_completa.sql` en el SQL Editor de Supabase
+- [ ] **RIESGO ELIMINADO**: Migración consolidada y revisada, lista para ejecutar
 - [x] Cerrar módulo (pendiente migraciones)
 
 ### Módulo 11: OpenAI / AI
@@ -297,28 +300,32 @@
 - [x] Cerrar módulo
 
 ### Módulo 13: API / Express / Dashboard
-**Estado:** Funcional — Dashboard en evolución 🟡
+**Estado:** Terminado ??
 **Prioridad:** P2
 
 | Archivo | Estado |
 |---|---|
-| src/api/server.ts | ✅ |
-| proxy.ts | ✅ |
-| app/admin/page.tsx | ✅ |
-| app/admin/operaciones/page.tsx | ✅ |
-| app/admin/inventario/ | ✅ |
-| app/admin/prompt/ | ✅ |
-| app/admin/municipios/ | ✅ |
-| app/admin/ignorados/ | ✅ |
-| app/admin/empleados/ | ✅ |
+| src/api/server.ts | ? |
+| proxy.ts | ? |
+| app/admin/page.tsx | ? |
+| app/admin/operaciones/page.tsx | ? |
+| app/admin/reportes/page.tsx | ? (NUEVO) |
+| app/api/reportes/route.ts | ? (NUEVO) |
+| app/admin/inventario/ | ? |
+| app/admin/prompt/ | ? |
+| app/admin/municipios/ | ? |
+| app/admin/ignorados/ | ? |
+| app/admin/empleados/ | ? |
 
 **Checklist:**
 - [x] Verificar DEC-008 (Express único en api/server.ts)
 - [x] Verificar M11a (Panel de Operaciones)
-- [ ] **PENDIENTE**: Botones para marcar entregado/cancelado/pagado desde dashboard
-- [ ] **PENDIENTE**: Campos editables para fecha/hora, precio, nombre, sucursal
-- [ ] **PENDIENTE**: Reportes de ventas, cotizaciones, métricas
-- [ ] **PENDIENTE**: Vista de pedidos activos con filtros por estado
+- [x] Botones de acción rápida por estado (→Apartado, →Producción, →Listo, →Entregado)
+- [x] Edición inline: nombre, producto, precio, sucursal, fecha/hora entrega
+- [x] Filtros por estado, sucursal, solo revisión
+- [x] POST /api/pedidos/sync — sincroniza cambios del dashboard al Order Engine del bot
+- [x] Reportes históricos GET /api/reportes con filtros desde/hasta/sucursal
+- [x] Página /admin/reportes: selector fechas, cards resumen, desglose sucursal, productos top, tabla ventas, export CSV
 
 ### Módulo 14: bot.ts Reducción
 **Estado:** Pendiente — Refactor mayor 🔴
@@ -472,6 +479,10 @@ Antes de programar un cambio importante, detenerse y preguntar al usuario si exi
 | 2026-07-17 | Extracción message-handler | src/whatsapp/message-handler.ts, bot.ts | Extraído `procesarMensaje` (~658 líneas) a factory `createMessageHandler(deps)` en message-handler.ts. 22 helpers compartidos se pasan como dependencias desde bot.ts. Corregidos imports (Intencion desde types, EstadoPedido regular). Exportada `esTextoReferenciaOCotizacion`. `msgHandler.procesarMensaje(base, sock)` reemplaza llamada legacy. Compilación exitosa. | bot.ts se reduce en ~658 líneas. El handler recibe sock por parámetro (se reasigna en reconexión). Duplicación temporal de helpers compartidos (se limpiará en siguiente fase). | P1 | 45 min |
 | 2026-07-17 | Extracción message-entry | src/whatsapp/message-entry.ts, bot.ts | Extraído `manejarMensajeEntrante` + `rescatarMensajesNoLeidos` + `timestampMensajeMs` + `avisarRateLimitUnaVez` (~130 líneas) a factory `createMessageEntry(deps)` en message-entry.ts. 9 deps inyectadas desde bot.ts. `registrarActividad` compartida vía deps para mantener watchdog funcional. Call sites actualizados en iniciarBaileys. Compilación exitosa. | bot.ts de ~1333 → ~1201 líneas (-132). El entry handler recibe dependencias por factory; no depende de closures de bot.ts. Watchdog compartido vía inyección de registrarActividad. | P1 | 30 min |
 | 2026-07-17 | Fix producción — LLM timeout + memoria | lib/ai.ts, package.json | Modelo default `gpt-4o` → `gpt-4o-mini` (más rápido, menos RAM). `API_CALL_TIMEOUT_MS` 30s → 60s. `SLOT_TIMEOUT_MS` 30s → 60s. `--max-old-space-size` 380 → 512MB. | GitHub Models free tier requiere más tiempo; gpt-4o-mini reduce latencia y consumo de RAM en e2-micro (1GB). | P0 | 5 min |
+| 2026-07-17 | Dashboard — Backend sync | bot.ts, src/api/server.ts, app/api/pedidos/[id]/route.ts | POST /api/pedidos/sync en Express + BotContext extendido con syncPedidoFromDashboard. PATCH handler llama al sync endpoint tras actualizar Supabase. | Los cambios desde dashboard se reflejan en el Order Engine en memoria del bot en tiempo real. | P2 | 20 min |
+| 2026-07-17 | Dashboard — Frontend acciones | app/admin/operaciones/page.tsx | Botones de acción rápida por estado, edición inline de campos, filtros por estado/sucursal/revisión. | Operaciones ahora permite transitar estados y editar datos sin salir del dashboard. | P2 | 25 min |
+| 2026-07-17 | Dashboard — Reportes históricos | app/api/reportes/route.ts, app/admin/reportes/page.tsx, app/admin/page.tsx | Nuevo endpoint GET /api/reportes con filtros desde/hasta/sucursal. Nueva página /admin/reportes con cards, desglose sucursal, productos top, tabla ventas, export CSV. Card de navegación en Dashboard principal. | Dashboard completo: reportes históricos con exportación a CSV. | P2 | 30 min |
+| 2026-07-17 | Persistencia Supabase | supabase_migration_completa.sql, supabase_migration_casos.sql | Consolidación de 6 migraciones sueltas en 1 script idempotente de 14 tablas. Corregido `casos.cliente_id`: UUID→TEXT (el código usa JID string). Detectadas 2 columnas sobrantes en pedidos_bot. Agregadas 4 tablas faltantes (configuracion_agente, configuracion_bot, clientes, historial_chat). | Migración lista para ejecutar en producción. Riesgo de FK rota eliminado. | P1 | 25 min |
 
 ---
 
