@@ -1,5 +1,6 @@
 import { Decision } from '../decision/decision.engine'
 import { Caso, PedidoActual, EstadoPedido } from '../models/types'
+import { horarioHoyManana } from '../validators/horario.validator'
 
 export interface ContextoPrompt {
   decision: Decision
@@ -36,6 +37,12 @@ export function construirContextoPrompt(ctx: ContextoPrompt): string {
 
   partes.push(`[FECHA ACTUAL: ${ctx.fechaActual}]`)
   partes.push(`[HORA ACTUAL: ${ctx.horaActual}]`)
+
+  // BUG-006: horario de HOY y MAÑANA calculado por el backend (fuente confiable).
+  // El LLM debe obedecer estas anotaciones y NO inventar horarios.
+  const horario = horarioHoyManana()
+  partes.push(`[HORARIO HOY: ${horario.hoy}]`)
+  partes.push(`[HORARIO MAÑANA: ${horario.manana}]`)
 
   partes.push(`[CASO ACTIVO: ${formatearCaso(ctx.caso)}]`)
   partes.push(`[PEDIDO ACTIVO: ${formatearPedido(ctx.pedido)}]`)

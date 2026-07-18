@@ -2,6 +2,28 @@
 
 ## 2026-07-17
 
+### Fix — Bug 006 (Alto): Horario inventado por el LLM — horario dinámico inyectado por backend (DEC-046)
+
+**Problema:** El bot dijo "mañana cerramos a las 7:00 pm" siendo sábado (cierra 5pm). El LLM no aplicó la tabla de horarios.
+
+**Archivos modificados:**
+- `src/validators/horario.validator.ts` (nueva `horarioHoyManana`)
+- `src/openai/prompt.builder.ts` (inyecta `[HORARIO HOY]` / `[HORARIO MAÑANA]`)
+- `tests/horario.test.mts` (nuevo)
+
+**Cambios:**
+1. `horarioHoyManana()`: L-V 10:00-19:00, S-D 10:00-17:00, calculado con `ahoraCdmx`.
+2. `construirContextoPrompt` inyecta ambas anotaciones como información confiable del sistema que el LLM debe obedecer (AGENTS.md ERROR #3).
+3. Se benefician message-handler y orchestrator (ambos usan el builder).
+
+**Impacto:** El bot responderá el horario real de hoy/mañana; no inventará. Test automático incluido.
+
+**Rollback:** Revertir `src/validators/horario.validator.ts` y `src/openai/prompt.builder.ts` a commit `13e227e`.
+
+---
+
+## 2026-07-17
+
 ### Fix — Bug 005 (Alto): Nombre en alertas Telegram incorrecto / pedir nombre antes de cerrar (DEC-045)
 
 **Problema:** Alertas Telegram de pedido mostraban `cliente:"Me pasa su cuenya pla"` (texto del mensaje). El sistema cerraba sin nombre válido.

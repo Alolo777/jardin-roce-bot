@@ -588,7 +588,7 @@ Un módulo solo puede marcarse como **Terminado** si:
 | BUG-003 — Alerta "pide fotos" sin contexto ni número real | ✅ Resuelto (DEC-043, 2026-07-17) | PHOTO_REQUESTED con número real + contexto, ambos canales |
 | BUG-004 — Máquina de estados rota (pedido no llega a APARTADO) | ✅ Resuelto (DEC-044, 2026-07-17) | Transiciones +APARTADO; sin forceo de estados inválidos; test cubre caso |
 | BUG-005 — Nombre en alertas Telegram incorrecto / no se pide nombre | ✅ Resuelto (DEC-045, 2026-07-17) | `nombreParaAlerta` prioriza pedido.nombre; guarda de no-cierre si falta nombre |
-| BUG-006 — Horario inventado por LLM | 🔴 Abierto | Pendiente: inyectar horario dinámico hoy/mañana desde backend |
+| BUG-006 — Horario inventado por LLM | ✅ Resuelto (DEC-046, 2026-07-17) | `horarioHoyManana()` + anotaciones `[HORARIO HOY]`/`[HORARIO MAÑANA]` en contexto |
 | BUG-007 — Dirección Maps short-link sin calle | 🔴 Abierto | Pendiente: guardar link + pedir confirmación de calle (opción A) |
 | Verificación de cableado de eventos (flujo e2e) | ✅ Test automatizable | `tests/event-wire-flow.test.mts` — emite PHOTO_REQUESTED, COTIZACION_REQUESTED, crearPedido→ORDER_UPDATED, PHOTO_RECEIVED, ORDER_CREATED y verifica payloads + orden + BUG-004. `npm run test:wire` |
 

@@ -54,13 +54,12 @@
 
 ## BUG-006: Horario inventado por el LLM
 - **Prioridad:** Alta
-- **Estado:** 🔴 Abierto
+- **Estado:** ✅ Resuelto (DEC-046, 2026-07-17)
 - **Reportado:** 2026-07-17
 - **Síntomas:** Cliente preguntó "a qué hora cierran" un viernes; bot dijo "Mañana cerramos a las 7:00 pm" (era sábado, cierra 5pm).
-- **Causa raíz:** El LLM calculó "mañana" sin usar la tabla de horarios del prompt; backend no inyecta el horario calculado.
-- **Decisión de negocio (2026-07-17):** El backend debe inyectar dinámicamente el horario de hoy/mañana en el contexto (calculado en código, no por el LLM) — cumple AGENTS.md ERROR #3.
-- **Versión donde apareció:** 3.0.0
-- **Versión donde se corrigió:** —
+- **Causa raíz:** El LLM calculó "mañana" sin usar la tabla de horarios del prompt; backend no inyectaba el horario calculado como anotación confiable.
+- **Corrección (DEC-046):** Nueva `horarioHoyManana()` en `horario.validator.ts` (L-V 10-19, S-D 10-17, calculado con `ahoraCdmx`). `construirContextoPrompt` inyecta `[HORARIO HOY: ...]` y `[HORARIO MAÑANA: ...]` como anotaciones de sistema que el LLM debe obedecer (cumple AGENTS.md ERROR #3).
+- **Versión donde se corrigió:** 3.0.4
 
 ## BUG-007: Dirección Maps short-link repetido sin calle
 - **Prioridad:** Media

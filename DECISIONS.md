@@ -889,3 +889,26 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 
 **Desventajas:** Si el LLM no logra obtener el nombre, la venta queda en espera (el bot debe pedirlo). Aceptable según regla de negocio.
 
+---
+
+## DEC-046: Inyección de horario dinámico por backend (BUG-006)
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** El bot inventó "mañana cerramos a las 7:00 pm" siendo sábado (cierra 5pm). El LLM no aplicó la tabla del prompt.
+
+**Decisión de negocio (usuario 2026-07-17):** El backend debe inyectar dinámicamente el horario de hoy/mañana calculado en código (no por el LLM) — cumple AGENTS.md ERROR #3 (horarios solo validados por backend).
+
+**Alternativas consideradas:**
+1. Solo reforzar el prompt con la tabla — insuficiente (el LLM ya la tenía y falló).
+2. Inyectar anotaciones `[HORARIO HOY]` / `[HORARIO MAÑANA]` calculadas en backend (elegida).
+
+**Resultado:**
+- `horarioHoyManana()` en `horario.validator.ts`: L-V 10:00-19:00, S-D 10:00-17:00, usando `ahoraCdmx`.
+- `construirContextoPrompt` inyecta `[HORARIO HOY: ...]` y `[HORARIO MAÑANA: ...]` como anotaciones de sistema confiables.
+- Cubierto por `tests/horario.test.mts` (`npm run test:horario`).
+
+**Ventajas:** El LLM obedece horarios reales del backend; coherente con AGENTS.md ERROR #3.
+
+**Desventajas:** Ninguna relevante.
+
