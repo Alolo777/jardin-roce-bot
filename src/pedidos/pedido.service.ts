@@ -4,9 +4,9 @@ import { EventType, EventPayload } from '../events/types'
 import { guardarPedidos, cargarPedidos, sincronizarPedidosBot } from './pedido.repository'
 
 const TRANSICIONES_VALIDAS: Record<string, EstadoPedido[]> = {
-  [EstadoPedido.NUEVO]: [EstadoPedido.COTIZANDO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
-  [EstadoPedido.COTIZANDO]: [EstadoPedido.PRECIO_CONFIRMADO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
-  [EstadoPedido.PRECIO_CONFIRMADO]: [EstadoPedido.ESPERANDO_DATOS, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
+  [EstadoPedido.NUEVO]: [EstadoPedido.COTIZANDO, EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
+  [EstadoPedido.COTIZANDO]: [EstadoPedido.PRECIO_CONFIRMADO, EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
+  [EstadoPedido.PRECIO_CONFIRMADO]: [EstadoPedido.ESPERANDO_DATOS, EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
   [EstadoPedido.ESPERANDO_DATOS]: [EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
   [EstadoPedido.ESPERANDO_PAGO]: [EstadoPedido.APARTADO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
   [EstadoPedido.APARTADO]: [EstadoPedido.EN_PRODUCCION, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
@@ -230,7 +230,7 @@ export function transitarDesdeFlujo(clienteId: string, flujo: string, motivo?: s
     esperando_pago: EstadoPedido.ESPERANDO_PAGO,
     esperando_entrega: EstadoPedido.ESPERANDO_PAGO,
     apartado_sucursal: EstadoPedido.APARTADO,
-    pagado_transferencia: EstadoPedido.EN_PRODUCCION,
+    pagado_transferencia: EstadoPedido.APARTADO,
     cerrado: EstadoPedido.ENTREGADO,
     cancelado: EstadoPedido.CANCELADO,
   }
@@ -238,10 +238,9 @@ export function transitarDesdeFlujo(clienteId: string, flujo: string, motivo?: s
   const nuevo = mapping[flujo]
   if (!nuevo) return false
 
-  if (!transitar(pedido, nuevo)) {
-    pedido.estado = nuevo
-    pedido.actualizadoEn = new Date().toISOString()
-  }
+  // No forzar transiciones inválidas: si transitar() las rechaza, el estado
+  // se queda en el anterior y queda registrado en el log (ver BUG-004).
+  transitar(pedido, nuevo)
   return true
 }
 

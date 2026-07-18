@@ -2,6 +2,28 @@
 
 ## 2026-07-17
 
+### Fix — Bug 004 (Crítico): Máquina de estados rota — pedido nunca llegaba a APARTADO (DEC-044)
+
+**Problema:** El cliente fue de cotización a "quiero pagar/envío". Transiciones `COTIZANDO → ESPERANDO_PAGO` y `ESPERANDO_PAGO → EN_PRODUCCION` eran inválidas. `transitarDesdeFlujo` forzaba el estado aunque fuera inválido, permitiendo saltos imposibles. El pedido nunca pasó por APARTADO, así que la alerta "Pedido Apartado" no salió con dirección/total; al enviar comprobante se emitió `ORDER_CREATED` con datos vacíos.
+
+**Archivos modificados:**
+- `src/pedidos/pedido.service.ts` (TRANSICIONES_VALIDAS, mapping pagado_transferencia→APARTADO, quitar forceo en transitarDesdeFlujo)
+- `tests/event-wire-flow.test.mts` (caso BUG-004)
+
+**Cambios:**
+1. Transiciones válidas agregadas: `NUEVO/COTIZANDO/PRECIO_CONFIRMADO/ESPERANDO_DATOS → ESPERANDO_PAGO`.
+2. `pagado_transferencia` ahora mapea a `APARTADO` (antes `EN_PRODUCCION`).
+3. `transitarDesdeFlujo` ya NO fuerza estados inválidos; si `transitar()` las rechaza, el estado se queda en el anterior y queda en el log.
+4. Pago confirmado = APARTADO con datos; `ORDER_CREATED` solo al cierre real.
+
+**Impacto:** Cumple AGENTS.md (nunca saltar estados). Alertas de apartado saldrán con datos reales. Cubierto por test automático.
+
+**Rollback:** Revertir `src/pedidos/pedido.service.ts` a commit `21d47d4`.
+
+---
+
+## 2026-07-17
+
 ### Fix — Bug B: Alerta "cliente pide fotos" con número real y contexto (ambos canales)
 
 **Problema:** Cuando el cliente pedía ver fotos de arreglos, la alerta a Telegram (`PHOTO_REQUESTED` → `enviarAlertaEmpleadoFotos`) llegaba sin número legible ni contexto útil (se emitía con `cliente: ''`). El equipo no sabía a quién escribir ni qué buscaba el cliente. El canal WhatsApp-a-empleados ya funcionaba.

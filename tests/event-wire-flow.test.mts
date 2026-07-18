@@ -108,4 +108,18 @@ const creadosAntes = events.filter(
 )
 assert.equal(creadosAntes.length, 0, 'No debe emitirse ORDER_CREATED (VENTA CERRADA) en pasos intermedios')
 
+// BUG-004: pago confirmado debe transitar COTIZANDO -> ESPERANDO_PAGO -> APARTADO
+// (nunca directo a EN_PRODUCCION). Verificamos con la maquina de estados real.
+{
+  const { eventBus: bus2 } = await import('../src/events/event-bus.ts')
+  const { crearPedido: cp2, transitarDesdeFlujo: td2 } = await import('../src/pedidos/pedido.service.ts')
+  const { EstadoPedido } = await import('../src/models/types.ts')
+  const p2 = cp2('cli_bug4', '5215559999999')
+  // tras crearPedido el estado es NUEVO; simulamos cotizando
+  td2('cli_bug4', 'cotizando')
+  td2('cli_bug4', 'esperando_pago') // COTIZANDO -> ESPERANDO_PAGO (antes inválida)
+  td2('cli_bug4', 'pagado_transferencia') // -> APARTADO (antes EN_PRODUCCION)
+  assert.equal(p2.estado, EstadoPedido.APARTADO, 'BUG-004: pago debe llevar a APARTADO, no EN_PRODUCCION')
+}
+
 console.log('event-wire-flow.test.mts: ok — flujo completo cableado correctamente')

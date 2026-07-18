@@ -25,7 +25,7 @@
 | Modelos / Tipos / Enums | 100% | ✅ | EstadoPedido, EstadoCaso, TipoCaso, Intencion, Prioridad, interfaces |
 | Dashboard | 100% | ✅ | Panel admin + Operaciones (botones, edición, filtros, sync) + Reportes históricos con export CSV |
 | Observabilidad | 80% | 🟢 | Logger estructurado + dashboard /admin/logs + métricas (latencia IA, errores Supabase, eventos) + health endpoint /admin/health. Migración SQL logs pendiente de ejecutar en producción |
-| Testing | 5% | 🔴 | Sin tests automatizados (vitest/supertest recomendado pero no implementado) |
+| Testing | 15% | 🟡 | `tests/event-wire-flow.test.mts` (npm run test:wire) cubre cableado de eventos + máquina de estados (BUG-004). Falta suite vitest/supertest |
 | Documentación | 85% | 🟢 | AGENTS, DECISIONS, CHANGELOG, TODO, PLAN_MEJORAS, MANUAL, SYSTEM_ARCHITECTURE, MIGRACION BAILEYS, PROJECT_TRACKER (nuevo) |
 | README | 0% | 🔴 | Sigue siendo boilerplate de create-next-app; no refleja el proyecto real |
 | bot.ts reducción | 54% | 🟡 | ~1201 líneas (target <500); message-handler + message-entry extraídos (~790 líns fuera de bot.ts) |
@@ -586,7 +586,11 @@ Un módulo solo puede marcarse como **Terminado** si:
 | BUG-001 — Alertas Telegram sin datos (producto/total/cliente vacíos) | ✅ Resuelto (DEC-041, 2026-07-17) | buildOrderPayload + crearPedido→ORDER_UPDATED |
 | BUG-002 — "VENTA CERRADA" falsa por interés de compra | ✅ Resuelto (DEC-039, 2026-07-17) | Emitía ORDER_CREATED en bloque esInteresCompra |
 | BUG-003 — Alerta "pide fotos" sin contexto ni número real | ✅ Resuelto (DEC-043, 2026-07-17) | PHOTO_REQUESTED con número real + contexto, ambos canales |
-| Verificación de cableado de eventos (flujo e2e) | ✅ Test automatizable | `tests/event-wire-flow.test.mts` — emite PHOTO_REQUESTED, COTIZACION_REQUESTED, crearPedido→ORDER_UPDATED, PHOTO_RECEIVED, ORDER_CREATED y verifica payloads + orden. `npm run test:wire` |
+| BUG-004 — Máquina de estados rota (pedido no llega a APARTADO) | ✅ Resuelto (DEC-044, 2026-07-17) | Transiciones +APARTADO; sin forceo de estados inválidos; test cubre caso |
+| BUG-005 — Nombre en alertas Telegram incorrecto / no se pide nombre | 🔴 Abierto | Pendiente Módulo siguiente (regla: pedir nombre+teléfono antes de cerrar) |
+| BUG-006 — Horario inventado por LLM | 🔴 Abierto | Pendiente: inyectar horario dinámico hoy/mañana desde backend |
+| BUG-007 — Dirección Maps short-link sin calle | 🔴 Abierto | Pendiente: guardar link + pedir confirmación de calle (opción A) |
+| Verificación de cableado de eventos (flujo e2e) | ✅ Test automatizable | `tests/event-wire-flow.test.mts` — emite PHOTO_REQUESTED, COTIZACION_REQUESTED, crearPedido→ORDER_UPDATED, PHOTO_RECEIVED, ORDER_CREATED y verifica payloads + orden + BUG-004. `npm run test:wire` |
 
 ### Módulo 19: Corrección de Bugs de Alertas (P1)
 

@@ -844,3 +844,25 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 
 **Desventajas:** Ninguna relevante.
 
+---
+
+## DEC-044: Corrección de máquina de estados (BUG-004)
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** El pedido nunca llegaba a APARTADO. Logs mostraban transiciones inválidas y el `transitarDesdeFlujo` forzaba estados imposibles, permitiendo saltos como `COTIZANDO → ESPERANDO_PAGO` y `ESPERANDO_PAGO → EN_PRODUCCION`. Resultado: alertas de cierre con datos vacíos.
+
+**Alternativas consideradas:**
+1. Mantener forceo de estado y solo ampliar transiciones — rechazada (el forceo enmascara bugs y permite saltos no deseados como EN_PRODUCCION directo).
+2. Quitar forceo + ampliar transiciones + pago → APARTADO (elegida).
+
+**Resultado:**
+- Transiciones válidas agregadas: `NUEVO/COTIZANDO/PRECIO_CONFIRMADO/ESPERANDO_DATOS → ESPERANDO_PAGO`.
+- `pagado_transferencia` mapea a `APARTADO` (antes `EN_PRODUCCION`).
+- `transitarDesdeFlujo` ya no fuerza estados inválidos; si `transitar()` rechaza, el estado se queda en el anterior y queda en el log.
+- `EN_PRODUCCION` solo cuando el equipo confirma el apartado.
+
+**Ventajas:** Máquina de estados fiel al AGENTS.md (nunca saltar estados). Pago = APARTADO con datos; ORDER_CREATED solo al cierre real.
+
+**Desventajas:** Flujos que dependían del forceo silencioso ahora se detendrán en el estado anterior (visible en logs, más fácil de diagnosticar).
+
