@@ -2,6 +2,26 @@
 
 ## 2026-07-17
 
+### Fix — Bug 005 (Alto): Nombre en alertas Telegram incorrecto / pedir nombre antes de cerrar (DEC-045)
+
+**Problema:** Alertas Telegram de pedido mostraban `cliente:"Me pasa su cuenya pla"` (texto del mensaje). El sistema cerraba sin nombre válido.
+
+**Archivos modificados:**
+- `bot.ts` (`nombreParaAlerta`, `ventaCerradaHandler`, `pedidoApartadoHandler`)
+
+**Cambios:**
+1. `nombreParaAlerta()`: prioriza `pedido.nombre` (fuente de verdad backend) → nombre válido del token VENTA_CERRADA → `Verificar en chat`. Sincroniza nombre del token al pedido si falta.
+2. `ventaCerradaHandler`: si no hay nombre válido, NO emite ORDER_CREATED/PAYMENT_*; deja el pedido en `esperando_nombre` para que el bot pida el nombre (cumple regla de negocio).
+3. `pedidoApartadoHandler` usa `nombreParaAlerta` para la alerta PAYMENT_PENDING.
+
+**Impacto:** Alertas con nombre real; se cumple regla de pedir nombre antes de cerrar. Sin romper cierres donde sí hay nombre.
+
+**Rollback:** Revertir `bot.ts` a commit `91689a7`.
+
+---
+
+## 2026-07-17
+
 ### Fix — Bug 004 (Crítico): Máquina de estados rota — pedido nunca llegaba a APARTADO (DEC-044)
 
 **Problema:** El cliente fue de cotización a "quiero pagar/envío". Transiciones `COTIZANDO → ESPERANDO_PAGO` y `ESPERANDO_PAGO → EN_PRODUCCION` eran inválidas. `transitarDesdeFlujo` forzaba el estado aunque fuera inválido, permitiendo saltos imposibles. El pedido nunca pasó por APARTADO, así que la alerta "Pedido Apartado" no salió con dirección/total; al enviar comprobante se emitió `ORDER_CREATED` con datos vacíos.

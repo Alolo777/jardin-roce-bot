@@ -866,3 +866,26 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 
 **Desventajas:** Flujos que dependían del forceo silencioso ahora se detendrán en el estado anterior (visible en logs, más fácil de diagnosticar).
 
+---
+
+## DEC-045: Nombre en alertas y pedir nombre antes de cerrar (BUG-005)
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** Las alertas Telegram de pedido mostraban el texto del mensaje del cliente ("Me pasa su cuenya pla") en lugar del nombre. El sistema cerraba ventas sin nombre válido.
+
+**Decisión de negocio (usuario 2026-07-17):** El sistema DEBE pedir nombre de quien aparta/recibe (y teléfono si es envío) antes de cerrar.
+
+**Alternativas consideradas:**
+1. Solo corregir el texto mostrado (usar pushName) — insuficiente, no cumple "pedir nombre".
+2. Priorizar `pedido.nombre` (fuente de verdad) + guarda de no-cierre si falta nombre (elegida).
+
+**Resultado:**
+- `nombreParaAlerta(clienteId, tokenCliente)`: `pedido.nombre` → token válido → "Verificar en chat". Sincroniza nombre del token al pedido si hace falta.
+- `ventaCerradaHandler`: si no hay nombre válido, NO emite ORDER_CREATED/PAYMENT_*; deja el pedido en `esperando_nombre` para que el bot pida el nombre.
+- `pedidoApartadoHandler` usa `nombreParaAlerta` para la alerta.
+
+**Ventajas:** Alertas con nombre real; se cumple la regla de negocio de pedir nombre antes de cerrar; el número real ya viaja siempre (Bug B).
+
+**Desventajas:** Si el LLM no logra obtener el nombre, la venta queda en espera (el bot debe pedirlo). Aceptable según regla de negocio.
+

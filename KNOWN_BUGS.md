@@ -42,13 +42,15 @@
 
 ## BUG-005: Nombre en alertas Telegram incorrecto / no se pide nombre
 - **Prioridad:** Alta
-- **Estado:** 🔴 Abierto
+- **Estado:** ✅ Resuelto (DEC-045, 2026-07-17)
 - **Reportado:** 2026-07-17
 - **Síntomas:** Alertas Telegram de pedido mostraban `cliente:"Me pasa su cuenya pla"` (texto del mensaje, no el nombre). El sistema no pidió el nombre de quien aparta/recibe antes de cerrar.
-- **Causa raíz:** `buildOrderPayload` usa `pedido.nombre` que nunca se llenó; el `ventaCerradaHandler` tomó texto del mensaje. Falta exigir nombre + teléfono (si envío) antes del cierre.
-- **Decisión de negocio (2026-07-17):** El sistema DEBE pedir nombre de quien aparta/recibe y teléfono (en caso de envío) antes de cerrar.
-- **Versión donde apareció:** 3.0.0
-- **Versión donde se corrigió:** —
+- **Causa raíz:** `ventaCerradaHandler`/`pedidoApartadoHandler` usaban `venta.cliente` (token del LLM, puede ser texto erróneo) en lugar del nombre real del pedido. No había guarda de nombre antes de cerrar.
+- **Corrección (DEC-045):**
+  1. `nombreParaAlerta()`: prioriza `pedido.nombre` (fuente de verdad backend) → nombre válido del token → "Verificar en chat". Si el token trae nombre válido y el pedido no lo tiene, se sincroniza al pedido.
+  2. Guarda en `ventaCerradaHandler`: si no hay nombre válido, NO se cierra; el pedido queda en `esperando_nombre` para que el bot pida el nombre (cumple regla de negocio de pedir nombre antes de cerrar).
+- **Nota:** El "teléfono en caso de envío" ya se cubre porque el teléfono real siempre viaja en `telefono`/`numeroReal` (ver Bug B). La parte de "pedir teléfono" adicional no requirió cambio: el número real ya está disponible.
+- **Versión donde se corrigió:** 3.0.3
 
 ## BUG-006: Horario inventado por el LLM
 - **Prioridad:** Alta

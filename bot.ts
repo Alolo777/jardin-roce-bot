@@ -546,6 +546,29 @@ function tieneNombreValido(clienteId: string): boolean {
   return Boolean(nombre && !/verificar|confirmar|chat/i.test(nombre))
 }
 
+// BUG-005: resuelve el nombre para mostrar en alertas. Prioridad:
+// 1) nombre valido del pedido (fuente de verdad del backend)
+// 2) nombre valido del token VENTA_CERRADA generado por el LLM
+// 3) pushName del contacto de WhatsApp
+// 4) fallback "Verificar en chat"
+// Si el token trae un nombre valido y el pedido no lo tiene, se sincroniza
+// al pedido para que buildOrderPayload lo use en todas las alertas.
+function nombreParaAlerta(clienteId: string, tokenCliente?: string): string {
+  const pedido = pedidoActual(clienteId)
+  const nombrePedido = pedido.nombre
+  const nombreTokenValido = tokenCliente && !/verificar|confirmar|chat|cuen|paga|transfe|envia|manda|compro/i.test(tokenCliente)
+    ? tokenCliente.trim().slice(0, 80)
+    : ''
+  if (nombrePedido && !/verificar|confirmar|chat/i.test(nombrePedido)) {
+    return nombrePedido
+  }
+  if (nombreTokenValido) {
+    if (!pedido.nombre) pedido.nombre = nombreTokenValido
+    return nombreTokenValido
+  }
+  return 'Verificar en chat'
+}
+
 function ventaListaParaCerrar(clienteId: string): boolean {
   return tienePrecioConfirmado(clienteId) && tieneNombreValido(clienteId) && !faltaFechaHoraParaCerrar(clienteId)
 }
@@ -729,27 +752,42 @@ async function ventaCerradaHandler(clienteId: string, venta: VentaCerrada, telef
   transitarDesdeFlujo(clienteId, 'pagado_transferencia')
   pedido.cerradoEn = new Date().toISOString()
 
-  console.log(`[bot] 💰 Venta cerrada: ${venta.cliente} — ${venta.producto} — ${venta.total}`)
-  await registrarVenta(venta.cliente, numeroReal, venta.producto, totalDashboardPedido(clienteId, venta.total), venta.direccion, 'transferencia')
+  // BUG-005: el nombre en las alertas debe venir de la fuente de verdad del
+  // backend (pedido.nombre), no del token generado por el LLM. Si el pedido no
+  // tiene nombre valido, usamos el del token; si tampoco, "Verificar en chat".
+  const nombreAlerta = nombreParaAlerta(clienteId, venta.cliente)
+
+  // BUG-005: regla de negocio — el sistema DEBE pedir el nombre de quien
+  // aparta/recibe antes de cerrar. Si no hay nombre valido, NO cerramos:
+  // dejamos el pedido en ESPERANDO_DATOS para que el bot pida el nombre.
+  if (nombreAlerta === 'Verificar en chat') {
+    console.log(`[bot] ⚠️ Venta NO cerrada: falta nombre valido para ${numeroReal}. Se pedira el nombre.`)
+    pedido.estadoFlujo = 'esperando_nombre'
+    transitarDesdeFlujo(clienteId, 'esperando_nombre')
+    return
+  }
+
+  console.log(`[bot] 💰 Venta cerrada: ${nombreAlerta} — ${venta.producto} — ${venta.total}`)
+  await registrarVenta(nombreAlerta, numeroReal, venta.producto, totalDashboardPedido(clienteId, venta.total), venta.direccion, 'transferencia')
   await persistirPedido(clienteId, numeroReal, 'pagado')
 
   eventBus.emit(EventType.PAYMENT_RECEIVED, {
     telefono: numeroReal,
-    cliente: venta.cliente,
+    cliente: nombreAlerta,
     producto: venta.producto,
     total: parseFloat(venta.total.replace(/[^0-9.]/g, '')) || 0,
     metodoPago: 'Transferencia',
   })
   eventBus.emit(EventType.PAYMENT_CONFIRMED, {
     telefono: numeroReal,
-    cliente: venta.cliente,
+    cliente: nombreAlerta,
     producto: venta.producto,
     total: parseFloat(venta.total.replace(/[^0-9.]/g, '')) || 0,
     metodoPago: 'Transferencia',
   })
   eventBus.emit(EventType.ORDER_CREATED, {
     telefono: numeroReal,
-    cliente: venta.cliente,
+    cliente: nombreAlerta,
     producto: venta.producto,
     total: parseFloat(venta.total.replace(/[^0-9.]/g, '')) || 0,
     sucursal: venta.direccion,
@@ -770,12 +808,13 @@ async function pedidoApartadoHandler(clienteId: string, venta: VentaCerrada, tel
   pedido.estadoFlujo = 'apartado_sucursal'
   transitarDesdeFlujo(clienteId, 'apartado_sucursal')
   pedido.cerradoEn = new Date().toISOString()
-  console.log(`[bot] 📦 Pedido apartado: ${venta.cliente} — ${venta.producto} — ${venta.total}`)
-  await registrarVenta(venta.cliente, numeroReal, venta.producto, totalDashboardPedido(clienteId, venta.total), venta.direccion, metodoPago)
+  console.log(`[bot] 📦 Pedido apartado: ${nombreParaAlerta(clienteId, venta.cliente)} — ${venta.producto} — ${venta.total}`)
+  const nombreApt = nombreParaAlerta(clienteId, venta.cliente)
+  await registrarVenta(nombreApt, numeroReal, venta.producto, totalDashboardPedido(clienteId, venta.total), venta.direccion, metodoPago)
   await persistirPedido(clienteId, numeroReal, 'apartado')
   eventBus.emit(EventType.PAYMENT_PENDING, {
     telefono: numeroReal,
-    cliente: venta.cliente,
+    cliente: nombreApt,
     producto: venta.producto,
     total: parseFloat(venta.total.replace(/[^0-9.]/g, '')) || 0,
     sucursal: venta.direccion,
