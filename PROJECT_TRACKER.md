@@ -600,3 +600,7 @@ Un módulo solo puede marcarse como **Terminado** si:
 - [x] **Bug C** — Intereses de compra no emiten ORDER_CREATED falsa (DEC-039). Payload robusto con datos reales.
 - [x] **Bug A** — Payloads de ORDER_CREATED/ORDER_UPDATED traen producto/total/cliente reales (DEC-041). crearPedido ya no emite VENTA CERRADA falsa.
 - [x] **Bug B (fotos)** — PHOTO_REQUESTED a Telegram con número real mapeado + contexto (DEC-043). Ambos canales.
+- [x] **BUG-004 (crítico)** — Máquina de estados rota; pedido ahora llega a APARTADO (DEC-044). `test:wire` cubre caso.
+- [x] **BUG-005 (alto)** — Nombre real en alertas + pedir nombre antes de cerrar (DEC-045).
+- [x] **BUG-006 (alto)** — Horario dinámico inyectado por backend (DEC-046). `test:horario` cubre caso.
+- [x] **BUG-007 (medio)** — Dirección Maps: guardar link + pedir calle (DEC-047).

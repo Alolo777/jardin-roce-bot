@@ -2,6 +2,22 @@
 
 ## 2026-07-17
 
+### Resumen de sesión — Módulo 19 (Bugs de producción)
+
+Se corrigieron 4 bugs críticos/alto/medio reportados en prueba real de producción:
+- BUG-004 (crítico): máquina de estados rota → pedido no llegaba a APARTADO (DEC-044, commit `91689a7`).
+- BUG-005 (alto): nombre incorrecto en alertas / no se pedía nombre (DEC-045, commit `13e227e`).
+- BUG-006 (alto): horario inventado por LLM → horario dinámico del backend (DEC-046, commit `7fc1c75`).
+- BUG-007 (medio): dirección Maps repetida sin calle → guardar link + pedir calle (DEC-047, commit `848e15f`).
+
+Tests agregados: `tests/event-wire-flow.test.mts` (`npm run test:wire`, BUG-004), `tests/horario.test.mts` (`npm run test:horario`, BUG-006).
+
+Próximo paso sugerido: prueba en producción del flujo completo y luego Módulo 17 (código muerto) o 18 (unificación de pedidos).
+
+---
+
+## 2026-07-17
+
 ### Fix — Bug 007 (Medio): Dirección Maps short-link — guardar link y pedir calle (DEC-047)
 
 **Problema:** Cliente envió `maps.app.goo.gl/...`; el bot lo repetía como dirección sin calle legible.
