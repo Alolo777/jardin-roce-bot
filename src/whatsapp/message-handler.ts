@@ -145,6 +145,11 @@ function limpiarRespuestaIA(texto: string): string {
 }
 
 function limpiarDireccionCliente(texto: string): string {
+  // BUG-007 (opcion A): si es un link de Maps, se CONSERVA como direccion
+  // (el short-link no trae calle legible; luego se pedira confirmar calle).
+  if (GOOGLE_MAPS_REGEX.test(texto)) {
+    return texto.trim().slice(0, 200).replace(/\s+/g, ' ')
+  }
   return String(texto || '')
     .replace(GOOGLE_MAPS_REGEX, '')
     .replace(/https?:\/\/\S+/gi, '')
@@ -718,11 +723,20 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           pedido.direccion = limpiarDireccionCliente(textoCliente)
           pedido.esperandoPrecioEnvio = true
         }
-        contextoExtra +=
+        let instruccionEnvio =
           `\n\n[CLIENTE PREGUNTA POR ENVÍO] El cliente quiere saber sobre envío a domicilio. ` +
           `INSTRUCCION: Responde que el costo exacto de envío depende de la ubicación, ` +
           `y que una compañera del equipo le confirmará el precio exacto. ` +
           `Menciona que el equipo le contactará pronto. Máximo 3 líneas.`
+        // BUG-007 (opcion A): si la direccion es un link de Maps, se guardo el
+        // link pero NO trae calle legible; pedir que confirme la calle en texto.
+        if (detectarLinkMaps(textoCliente)) {
+          instruccionEnvio +=
+            ` El cliente envió un link de Google Maps como ubicación; ` +
+            `GUARDA el link como su dirección, pero PIDE que confirme la calle y número en texto ` +
+            `para poder registrarla bien. No repitas el link como si fuera la calle.`
+        }
+        contextoExtra += instruccionEnvio
       }
 
       const resultadoEnvio = pareceEnvio ? await buscarPrecioEnvio(textoCliente).catch(() => null) : null

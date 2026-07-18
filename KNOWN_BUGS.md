@@ -63,10 +63,12 @@
 
 ## BUG-007: Dirección Maps short-link repetido sin calle
 - **Prioridad:** Media
-- **Estado:** 🔴 Abierto
+- **Estado:** ✅ Resuelto (DEC-047, 2026-07-17)
 - **Reportado:** 2026-07-17
 - **Síntomas:** Cliente envió `maps.app.goo.gl/...`; bot repitió el link como dirección sin calle legible.
-- **Causa raíz:** El parser de dirección acepta el short-link como dirección válida y no pide confirmación de calle en texto.
-- **Decisión de negocio (2026-07-17):** Opción A — guardar el link Y pedir que el cliente confirme la calle en texto.
-- **Versión donde apareció:** 3.0.0
-- **Versión donde se corrigió:** —
+- **Causa raíz:** `parseDireccion` aceptaba el short-link como dirección y `limpiarDireccionCliente` lo borraba; el LLM lo repetía del historial. No se pedía calle.
+- **Corrección (DEC-047, opción A):**
+  1. `parseDireccion` marca `esLinkMaps: true` y conserva el link como dirección.
+  2. `limpiarDireccionCliente` (message-handler) ahora conserva el link Maps.
+  3. En el flujo de envío, si la dirección es link Maps, se inyecta instrucción al LLM para GUARDAR el link y PEDIR confirmación de calle/número en texto (no repetir el link como calle).
+- **Versión donde se corrigió:** 3.0.5

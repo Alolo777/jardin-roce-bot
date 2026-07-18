@@ -912,3 +912,26 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 
 **Desventajas:** Ninguna relevante.
 
+---
+
+## DEC-047: Dirección desde link de Maps — guardar link y pedir calle (BUG-007)
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** El cliente envió `maps.app.goo.gl/...`; el bot lo repetía como dirección sin calle legible. Un short-link de Maps no trae la calle en el texto.
+
+**Decisión de negocio (usuario 2026-07-17):** Opción A — guardar el link Y pedir que el cliente confirme la calle en texto.
+
+**Alternativas consideradas:**
+1. Borrar el link y pedir dirección completa — rechazada (pierde la ubicación de referencia).
+2. Guardar el link y pedir calle en texto (elegida).
+
+**Resultado:**
+- `parseDireccion` devuelve `esLinkMaps: true` y conserva el link.
+- `limpiarDireccionCliente` (message-handler) conserva el link Maps.
+- En el flujo de envío, si la dirección es link Maps, se inyecta instrucción al LLM: GUARDAR link + PEDIR calle/número en texto; no repetir el link como calle.
+
+**Ventajas:** Se conserva la ubicación de referencia y se obtiene la calle legible para el equipo/alertas.
+
+**Desventajas:** El cliente debe escribir la calle; si no lo hace, la dirección queda como link (aceptable).
+

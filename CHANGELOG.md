@@ -2,6 +2,27 @@
 
 ## 2026-07-17
 
+### Fix — Bug 007 (Medio): Dirección Maps short-link — guardar link y pedir calle (DEC-047)
+
+**Problema:** Cliente envió `maps.app.goo.gl/...`; el bot lo repetía como dirección sin calle legible.
+
+**Archivos modificados:**
+- `src/parser/direccion.parser.ts` (`parseDireccion` marca `esLinkMaps`, conserva link)
+- `src/whatsapp/message-handler.ts` (`limpiarDireccionCliente` conserva link; flujo de envío pide calle)
+
+**Cambios:**
+1. `parseDireccion` devuelve `esLinkMaps: true` y conserva el link como dirección (confianza alta).
+2. `limpiarDireccionCliente` (message-handler) ya no borra el link Maps.
+3. En el flujo de envío, si la dirección es link Maps, se inyecta instrucción al LLM para GUARDAR el link y PEDIR confirmación de calle/número en texto (no repetir el link como calle).
+
+**Impacto:** Se conserva la ubicación de referencia y se obtiene calle legible. Compatible con `buscarEnvio` (ya devuelve null para link solo).
+
+**Rollback:** Revertir `src/parser/direccion.parser.ts` y `src/whatsapp/message-handler.ts` a commit `7fc1c75`.
+
+---
+
+## 2026-07-17
+
 ### Fix — Bug 006 (Alto): Horario inventado por el LLM — horario dinámico inyectado por backend (DEC-046)
 
 **Problema:** El bot dijo "mañana cerramos a las 7:00 pm" siendo sábado (cierra 5pm). El LLM no aplicó la tabla de horarios.

@@ -5,11 +5,19 @@ const NUMERO_EXTERNO = /\b(?:no\.?\s*|número\s*|num\s*)?(\d{1,5})\s*(?:,\s*)?/i
 export interface DireccionParseada {
   direccion: string | null
   confianza: 'alta' | 'baja' | 'ninguna'
+  esLinkMaps?: boolean
 }
 
 export function parseDireccion(texto: string): DireccionParseada {
-  if (GOOGLE_MAPS_REGEX.test(texto)) {
-    return { direccion: texto.trim().slice(0, 100).replace(/\s+/g, ' '), confianza: 'alta' }
+  const esLink = GOOGLE_MAPS_REGEX.test(texto)
+  if (esLink) {
+    // BUG-007 (opcion A): conservar el link como direccion, pero se marca para
+    // que el flujo pida confirmar la calle en texto (el short-link no trae calle).
+    return {
+      direccion: texto.trim().slice(0, 200).replace(/\s+/g, ' '),
+      confianza: 'alta',
+      esLinkMaps: true,
+    }
   }
 
   if (DIRECCION_PATTERN.test(texto)) {
