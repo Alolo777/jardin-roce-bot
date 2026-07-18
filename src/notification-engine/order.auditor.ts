@@ -3,11 +3,11 @@ import type { EventType, EventPayload } from '../events/types'
 import type { TimelineData } from './types'
 import type { ReconstructorResult } from './order.reconstructor'
 
-const IA2_TOKEN = process.env.IA2_TOKEN ?? ''
-const IA2_MODEL = process.env.IA2_MODEL ?? 'gpt-4o'
-const IA2_BASE_URL = process.env.IA2_BASE_URL ?? 'https://models.inference.ai.azure.com'
-
 const TIMEOUT_MS = 15_000
+
+function ia2Token(): string { return process.env.IA2_TOKEN ?? '' }
+function ia2Model(): string { return process.env.IA2_MODEL ?? 'gpt-4o' }
+function ia2BaseUrl(): string { return process.env.IA2_BASE_URL ?? 'https://models.inference.ai.azure.com' }
 
 export interface AuditorResult {
   approved: boolean
@@ -21,13 +21,14 @@ export async function auditReconstruction(
   timeline: TimelineData,
   reconstruction: ReconstructorResult
 ): Promise<AuditorResult> {
-  if (!IA2_TOKEN) {
+  const token = ia2Token()
+  if (!token) {
     return { approved: true, errors: ['IA #2 sin token — auditoría saltada'], corrections: [] }
   }
 
   const client = new OpenAI({
-    baseURL: IA2_BASE_URL,
-    apiKey: IA2_TOKEN,
+    baseURL: ia2BaseUrl(),
+    apiKey: token,
   })
 
   const systemPrompt = `Eres un auditor de reconstrucción de pedidos florales. Tu función es verificar que el Order Reconstructor (IA #1) no haya alucinado ni inventado información.
@@ -78,7 +79,7 @@ Verifica que IA #1:
   try {
     const response = await Promise.race([
       client.chat.completions.create({
-        model: IA2_MODEL,
+        model: ia2Model(),
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },

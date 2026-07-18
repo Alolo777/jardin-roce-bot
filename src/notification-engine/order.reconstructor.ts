@@ -2,11 +2,11 @@ import OpenAI from 'openai'
 import type { EventType, EventPayload } from '../events/types'
 import type { TimelineData } from './types'
 
-const IA1_TOKEN = process.env.IA1_TOKEN ?? ''
-const IA1_MODEL = process.env.IA1_MODEL ?? 'gpt-4o-mini'
-const IA1_BASE_URL = process.env.IA1_BASE_URL ?? 'https://models.inference.ai.azure.com'
-
 const TIMEOUT_MS = 15_000
+
+function ia1Token(): string { return process.env.IA1_TOKEN ?? '' }
+function ia1Model(): string { return process.env.IA1_MODEL ?? 'gpt-4o-mini' }
+function ia1BaseUrl(): string { return process.env.IA1_BASE_URL ?? 'https://models.inference.ai.azure.com' }
 
 export interface ReconstructorResult {
   verified: boolean
@@ -29,13 +29,14 @@ export async function reconstructOrder(
   payload: EventPayload,
   timeline: TimelineData
 ): Promise<ReconstructorResult> {
-  if (!IA1_TOKEN) {
+  const token = ia1Token()
+  if (!token) {
     return fallbackSinToken(eventType, payload, timeline)
   }
 
   const client = new OpenAI({
-    baseURL: IA1_BASE_URL,
-    apiKey: IA1_TOKEN,
+    baseURL: ia1BaseUrl(),
+    apiKey: token,
   })
 
   const systemPrompt = `Eres un reconstructor de pedidos florales. Tu función es tomar datos de un evento del sistema y una línea de tiempo de base de datos, y devolver SOLO un JSON estructurado.
@@ -72,7 +73,7 @@ Devuelve SOLO este JSON (sin markdown, sin texto extra):
   try {
     const response = await Promise.race([
       client.chat.completions.create({
-        model: IA1_MODEL,
+        model: ia1Model(),
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
