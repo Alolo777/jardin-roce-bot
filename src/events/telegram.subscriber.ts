@@ -34,213 +34,257 @@ import {
   enviarFotoTelegram,
 } from '../../lib/telegram'
 
+import { withPipeline } from '../notification-engine'
+
 export function subscribeTelegramEvents(): void {
   eventBus.subscribe(EventType.ORDER_CREATED, (event) => {
-    enviarAlertaVentaCerrada({
-      cliente: event.payload.cliente ?? '',
-      producto: event.payload.producto ?? '',
-      total: event.payload.total?.toString() ?? '',
-      direccion: event.payload.sucursal ?? '',
-      numeroCliente: event.payload.telefono,
-      precioArreglo: (event.payload as any).precioArreglo,
-      precioExtras: (event.payload as any).precioExtras,
-      precioEnvio: (event.payload as any).precioEnvio,
-      metodoPago: event.payload.metodoPago,
-      detalles: event.payload.descripcion,
-      fechaHora: (event.payload as any).fechaHora,
-      tieneFotoReferencia: (event.payload as any).tieneFotoReferencia,
+    return withPipeline(event, async () => {
+      enviarAlertaVentaCerrada({
+        cliente: event.payload.cliente ?? '',
+        producto: event.payload.producto ?? '',
+        total: event.payload.total?.toString() ?? '',
+        direccion: event.payload.sucursal ?? '',
+        numeroCliente: event.payload.telefono,
+        precioArreglo: (event.payload as any).precioArreglo,
+        precioExtras: (event.payload as any).precioExtras,
+        precioEnvio: (event.payload as any).precioEnvio,
+        metodoPago: event.payload.metodoPago,
+        detalles: event.payload.descripcion,
+        fechaHora: (event.payload as any).fechaHora,
+        tieneFotoReferencia: (event.payload as any).tieneFotoReferencia,
+      })
     })
   })
 
   eventBus.subscribe(EventType.ORDER_UPDATED, (event) => {
-    enviarAlertaPedidoApartado({
-      cliente: event.payload.cliente ?? '',
-      producto: event.payload.producto ?? '',
-      precioArreglo: (event.payload as any).precioArreglo ?? '',
-      precioExtras: (event.payload as any).precioExtras,
-      precioEnvio: (event.payload as any).precioEnvio,
-      total: event.payload.total?.toString() ?? '',
-      entrega: event.payload.sucursal ?? '',
-      metodoPago: event.payload.metodoPago ?? '',
-      numeroCliente: event.payload.telefono,
-      detalles: event.payload.descripcion,
-      fechaHora: (event.payload as any).fechaHora,
-      tieneFotoReferencia: (event.payload as any).tieneFotoReferencia,
+    return withPipeline(event, async () => {
+      enviarAlertaPedidoApartado({
+        cliente: event.payload.cliente ?? '',
+        producto: event.payload.producto ?? '',
+        precioArreglo: (event.payload as any).precioArreglo ?? '',
+        precioExtras: (event.payload as any).precioExtras,
+        precioEnvio: (event.payload as any).precioEnvio,
+        total: event.payload.total?.toString() ?? '',
+        entrega: event.payload.sucursal ?? '',
+        metodoPago: event.payload.metodoPago ?? '',
+        numeroCliente: event.payload.telefono,
+        detalles: event.payload.descripcion,
+        fechaHora: (event.payload as any).fechaHora,
+        tieneFotoReferencia: (event.payload as any).tieneFotoReferencia,
+      })
     })
   })
 
   eventBus.subscribe(EventType.ORDER_READY, (event) => {
-    enviarAlertaPedidoListo(
-      event.payload.telefono,
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaPedidoListo(event.payload.telefono)
+    })
   })
 
   eventBus.subscribe(EventType.ORDER_DELIVERED, (event) => {
-    enviarAlertaPedidoEntregado(
-      event.payload.telefono,
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaPedidoEntregado(event.payload.telefono)
+    })
   })
 
   eventBus.subscribe(EventType.HUMAN_REQUIRED, (event) => {
-    if (event.payload.prioridad === 'critica') {
-      enviarAlertaClienteFrustrado(
-        event.payload.telefono,
-        event.payload.descripcion ?? '',
-      )
-    } else {
-      enviarAlertaAtencionHumana(
-        event.payload.telefono,
-        event.payload.cliente,
-        event.payload.descripcion,
-        (event.payload as any).contexto,
-      )
-    }
+    return withPipeline(event, async () => {
+      if (event.payload.prioridad === 'critica') {
+        enviarAlertaClienteFrustrado(
+          event.payload.telefono,
+          event.payload.descripcion ?? '',
+        )
+      } else {
+        enviarAlertaAtencionHumana(
+          event.payload.telefono,
+          event.payload.cliente,
+          event.payload.descripcion,
+          (event.payload as any).contexto,
+        )
+      }
+    })
   })
 
   eventBus.subscribe(EventType.CUSTOMER_ANGRY, (event) => {
-    enviarAlertaQueja(
-      event.payload.telefono,
-      event.payload.descripcion ?? '',
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaQueja(
+        event.payload.telefono,
+        event.payload.descripcion ?? '',
+      )
+    })
   })
 
   eventBus.subscribe(EventType.PHOTO_REQUESTED, (event) => {
-    enviarAlertaEmpleadoFotos(
-      event.payload.telefono,
-      event.payload.cliente ?? '',
-      event.payload.descripcion,
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaEmpleadoFotos(
+        event.payload.telefono,
+        event.payload.cliente ?? '',
+        event.payload.descripcion,
+      )
+    })
   })
 
   eventBus.subscribe(EventType.COTIZACION_REQUESTED, (event) => {
-    enviarAlertaCotizacion(
-      event.payload.telefono,
-      event.payload.descripcion ?? '',
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaCotizacion(
+        event.payload.telefono,
+        event.payload.descripcion ?? '',
+      )
+    })
   })
 
   eventBus.subscribe(EventType.ENVIO_REQUESTED, (event) => {
-    enviarAlertaEmpleadoEnvio(
-      event.payload.telefono,
-      event.payload.descripcion ?? '',
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaEmpleadoEnvio(
+        event.payload.telefono,
+        event.payload.descripcion ?? '',
+      )
+    })
   })
 
   eventBus.subscribe(EventType.CASE_CREATED, (event) => {
-    enviarAlertaCasoNuevo(
-      event.payload.telefono,
-      event.payload.descripcion ?? '',
-      event.payload.prioridad ?? 'media',
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaCasoNuevo(
+        event.payload.telefono,
+        event.payload.descripcion ?? '',
+        event.payload.prioridad ?? 'media',
+      )
+    })
   })
 
   eventBus.subscribe(EventType.CASE_ARCHIVED, (event) => {
-    enviarAlertaCasoArchivado(
-      event.payload.telefono,
-      event.payload.descripcion ?? '',
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaCasoArchivado(
+        event.payload.telefono,
+        event.payload.descripcion ?? '',
+      )
+    })
   })
 
   eventBus.subscribe(EventType.PAYMENT_RECEIVED, (event) => {
-    enviarAlertaPagoRecibido(
-      event.payload.telefono,
-      event.payload.cliente ?? '',
-      event.payload.producto ?? '',
-      event.payload.total ?? 0,
-      event.payload.metodoPago ?? '',
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaPagoRecibido(
+        event.payload.telefono,
+        event.payload.cliente ?? '',
+        event.payload.producto ?? '',
+        event.payload.total ?? 0,
+        event.payload.metodoPago ?? '',
+      )
+    })
   })
 
   eventBus.subscribe(EventType.PAYMENT_PENDING, (event) => {
-    enviarAlertaPagoPendiente(
-      event.payload.telefono,
-      event.payload.cliente ?? '',
-      event.payload.producto ?? '',
-      event.payload.total ?? 0,
-      event.payload.sucursal ?? '',
-      event.payload.metodoPago ?? '',
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaPagoPendiente(
+        event.payload.telefono,
+        event.payload.cliente ?? '',
+        event.payload.producto ?? '',
+        event.payload.total ?? 0,
+        event.payload.sucursal ?? '',
+        event.payload.metodoPago ?? '',
+      )
+    })
   })
 
   eventBus.subscribe(EventType.ZONA_AMBIGUA, (event) => {
-    enviarAlertaZonaAmbigua(
-      event.payload.telefono,
-      event.payload.descripcion ?? '',
-      (event.payload as any).candidatos,
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaZonaAmbigua(
+        event.payload.telefono,
+        event.payload.descripcion ?? '',
+        (event.payload as any).candidatos,
+      )
+    })
   })
 
   eventBus.subscribe(EventType.CANCELACION_REQUESTED, (event) => {
-    enviarAlertaCancelacion(
-      event.payload.telefono,
-      event.payload.descripcion ?? '',
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaCancelacion(
+        event.payload.telefono,
+        event.payload.descripcion ?? '',
+      )
+    })
   })
 
   eventBus.subscribe(EventType.PAYMENT_CONFIRMED, (event) => {
-    enviarAlertaPagoConfirmado(
-      event.payload.telefono,
-      event.payload.cliente ?? '',
-      event.payload.total ?? 0,
-      event.payload.metodoPago ?? '',
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaPagoConfirmado(
+        event.payload.telefono,
+        event.payload.cliente ?? '',
+        event.payload.total ?? 0,
+        event.payload.metodoPago ?? '',
+      )
+    })
   })
 
   eventBus.subscribe(EventType.PRICE_CONFIRMED, (event) => {
-    enviarAlertaPrecioConfirmado(
-      event.payload.telefono,
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaPrecioConfirmado(event.payload.telefono)
+    })
   })
 
   eventBus.subscribe(EventType.DELIVERY_COMPLETED, (event) => {
-    enviarAlertaEntregaCompletada(
-      event.payload.telefono,
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaEntregaCompletada(event.payload.telefono)
+    })
   })
 
   eventBus.subscribe(EventType.BOT_DISCONNECTED, (event) => {
-    enviarAlertaBotDesconectado(
-      event.payload.descripcion ?? 'Sin motivo',
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaBotDesconectado(
+        event.payload.descripcion ?? 'Sin motivo',
+      )
+    })
   })
 
   eventBus.subscribe(EventType.CUSTOMER_WAITING, (event) => {
-    enviarAlertaClienteEsperando(
-      event.payload.telefono,
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaClienteEsperando(event.payload.telefono)
+    })
   })
 
   eventBus.subscribe(EventType.PHOTO_SENT, (event) => {
-    enviarAlertaFotoEnviada(
-      event.payload.telefono,
-      event.payload.descripcion ?? '',
-    )
+    return withPipeline(event, async () => {
+      enviarAlertaFotoEnviada(
+        event.payload.telefono,
+        event.payload.descripcion ?? '',
+      )
+    })
   })
 
-  eventBus.subscribe(EventType.QR_GENERATED, () => {
-    enviarAlertaQr()
+  eventBus.subscribe(EventType.QR_GENERATED, (event) => {
+    return withPipeline(event, async () => {
+      enviarAlertaQr()
+    })
   })
 
-  eventBus.subscribe(EventType.BOT_CONNECTED, () => {
-    enviarAlertaReconectado()
+  eventBus.subscribe(EventType.BOT_CONNECTED, (event) => {
+    return withPipeline(event, async () => {
+      enviarAlertaReconectado()
+    })
   })
 
-  eventBus.subscribe(EventType.BOT_DAILY_ALERT, () => {
-    enviarAlertaDiariaDesconexion()
+  eventBus.subscribe(EventType.BOT_DAILY_ALERT, (event) => {
+    return withPipeline(event, async () => {
+      enviarAlertaDiariaDesconexion()
+    })
   })
 
   eventBus.subscribe(EventType.PHOTO_RECEIVED, (event) => {
-    const { telefono, base64, mimetype, caption, tipo } = event.payload as any
-    const prefix = tipo === 'comprobante'
-      ? '📸 *Comprobante de pago*'
-      : tipo === 'referencia'
-        ? '📷 *Foto de referencia*'
-        : '📸 *Imagen del cliente*'
-    const texto = `${prefix} — ${telefono}${caption ? `\n\n${caption}` : ''}`
-    enviarFotoTelegram(base64, texto, mimetype)
+    return withPipeline(event, async () => {
+      const { telefono, base64, mimetype, caption, tipo } = event.payload as any
+      const prefix = tipo === 'comprobante'
+        ? '📸 *Comprobante de pago*'
+        : tipo === 'referencia'
+          ? '📷 *Foto de referencia*'
+          : '📸 *Imagen del cliente*'
+      const texto = `${prefix} — ${telefono}${caption ? `\n\n${caption}` : ''}`
+      enviarFotoTelegram(base64, texto, mimetype)
+    })
   })
 
   eventBus.subscribe(EventType.PROVIDER_FAILURE, (event) => {
-    enviarAlertaProveedorCaido(event.payload.descripcion ?? 'Error desconocido')
+    return withPipeline(event, async () => {
+      enviarAlertaProveedorCaido(event.payload.descripcion ?? 'Error desconocido')
+    })
   })
 }

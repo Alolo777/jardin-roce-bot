@@ -935,3 +935,130 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 
 **Desventajas:** El cliente debe escribir la calle; si no lo hace, la dirección queda como link (aceptable).
 
+---
+
+## DEC-048: Notification Engine — Pipeline de verificación de 3 capas
+
+**Fecha:** 2026-07-18
+**Estado:** Aceptada (basada en respuestas del desarrollador del 2026-07-18)
+
+**Motivo:** El sistema actual notifica a Telegram con datos vacíos, incorrectos o duplicados. No hay verificación entre el evento emitido y la base de datos. Los 11 weak points identificados comparten la misma causa raíz: no existe separación entre la "fuente de datos" (estado en memoria) y el "mensaje a notificar".
+
+**Decisión de negocio (desarrollador):**
+- Un solo canal de Telegram para todas las notificaciones
+- Las notificaciones se envían después de responder al cliente (sin presión de latencia)
+- IA #1 e IA #2 como LLM calls con modelos diferentes desde GitHub Models
+- Híbrido: críticas siempre ✅ con alerta, informativas ❌ bloquear si conflicto, vacías ❌ bloquear
+- WhatsApp a empleados como canal secundario
+
+**Alternativas consideradas:**
+1. Seguir notificando directamente desde eventBus → Telegram (status quo — datos vacíos/incorrectos)
+2. Agregar validación solo en el builder de mensajes (insuficiente, no detecta contradicciones)
+3. Pipeline de 3 capas: Timeline Builder → Decision Extractor → Conflict Detector (elegida)
+
+**Resultado:**
+- `src/notification-engine/types.ts`: 10 interfaces para datos del pipeline
+- `src/notification-engine/timeline.builder.ts`: Reconstruye estado desde Supabase (casos, pedidos_bot, historial_chat)
+- `src/notification-engine/decision.extractor.ts`: Extrae campos relevantes con nivel de confianza, detecta nombres inválidos
+- `src/notification-engine/conflict.detector.ts`: Detecta contradicciones y decide acción (NOTIFICAR/ALERTA/BLOQUEAR)
+- Fase 6.1 completa, compilación exitosa
+
+**Ventajas:**
+- Las notificaciones se construyen desde la base de datos, no desde memoria volátil
+- Los conflictos se detectan antes de notificar
+- Los datos vacíos o inválidos no llegan a Telegram
+- El equipo puede confiar en las notificaciones que sí llegan
+
+**Desventajas:**
+- Latencia adicional (aceptable — notificaciones van después de la respuesta)
+- Dependencia de Supabase para construir la línea de tiempo
+- Más código que mantener
+
+### Fase 6.8 — Auditoría Post-Migración
+
+**Decisión:** No eliminar funciones deprecadas que aún son importadas en `telegram.subscriber.ts` (sirven como fallback). Solo eliminar funciones sin ninguna referencia externa.
+
+**Eliminadas:** `enviarArchivoTelegram`, `enviarAlertaTelegram` — 0 referencias en todo el código.
+
+**Deprecadas:** 24 funciones con `/** @deprecated */` JSDoc. Las firmas se mantienen intactas para no romper compilación.
+
+**Activas:** 5 funciones de sistema + `enviarFotoTelegram` + `enviarMensajeTelegram`.
+
+**Impacto:** Bajo. Notification Engine completado al 100%.
+
+### Fase 6.7 — Migración Automática de Handlers
+
+**Decisión:** No migrar handlers uno por uno. Modificar `withPipeline` para que envíe el mensaje del pipeline si existe. Esto migra todos los handlers comerciales automáticamente.
+
+**Excepción:** `PHOTO_RECEIVED` requiere enviar la foto (no solo texto), por lo que se excluye del auto-send y sigue usando el callback.
+
+**Archivo:** `src/notification-engine/notification.engine.ts` (`withPipeline` + `EVENTOS_MEDIA`)
+**Archivo:** `lib/telegram.ts` (nuevo export `enviarMensajeTelegram`)
+
+**Impacto:** Medio-alto. Cambia el origen de los mensajes de Telegram: de datos crudos del payload a datos verificados por el pipeline.
+
+### Fase 6.6 — Pipeline Event Logger
+
+**Motivo:** Cada ejecución del pipeline debe quedar registrada para auditoría, debugging y trazabilidad. Se reutiliza la infraestructura existente en lugar de crear una nueva tabla.
+
+**Decisión:** Usar `logger.service.ts` + tabla `logs` existente con `module = 'pipeline'`. No crear tabla nueva. Metadata estructurada en JSONB. 4 funciones de log que cubren inicio, fin, error y paso intermedio.
+
+**Archivo:** `src/notification-engine/pipeline-logger.ts`
+
+**Impacto:** Bajo. Logger asíncrono no bloquea el pipeline.
+
+### Fase 6.5 — Template Builder
+
+**Motivo:** Separar la generación del mensaje de la lógica de envío. Cada template usa datos verificados del pipeline (DatosVerificados) para producir mensajes consistentes, evitando inconsistencias entre handlers.
+
+**Decisión:** Un solo builder con templates por evento, no archivos separados. Helper functions inline (no dependencia de lib/telegram.ts) para mantener independencia del módulo.
+
+**Templates:** 21 tipos de evento cubiertos + default genérico.
+
+**Archivo:** `src/notification-engine/template.builder.ts`
+
+**Impacto:** Bajo. Mensaje generado automáticamente en PipelineResult.message. Handlers existentes no se modifican.
+
+### Fase 6.4 — Business Rules Validator
+
+**Motivo:** El system prompt de Flora contenía reglas de negocio que debían migrarse a TypeScript (Principio 7 del AGENTS.md). Se extrajeron 9 reglas y se implementaron en un validador puro sin IAs.
+
+**Reglas implementadas:**
+| Regla | Validación | Severidad |
+|-------|-----------|-----------|
+| R001 | Horario dentro de L-V 10-19 / S-D 10-17 | error |
+| R002 | Sucursal "Centro" o "Norte" | error |
+| R003 | Precio ≥ $60 MXN | warning |
+| R004 | Precio ≤ $50,000 MXN | warning |
+| R005 | Nombre sin comas ni conectores | error |
+| R006 | Fecha+hora obligatorias si estado es apartado/pagado | error |
+| R007 | Envío a domicilio solo transferencia | error |
+| R008 | Requiere revisión y falta producto/precio | warning |
+| R009 | Recoge en sucursal pero sin método de pago | warning |
+
+**Archivo:** `src/notification-engine/business-rules.validator.ts`
+
+**Impacto:** Bajo. Función pura, sin dependencias externas.
+
+### Fase 6.3 — Integración de IAs Auxiliares
+
+**Archivos creados:**
+- `order.reconstructor.ts` (IA #1): GPT-4o-mini con token separado (`IA1_TOKEN`). Reconstruye pedido verificando cada campo. Fallback a datos crudos si falla.
+- `order.auditor.ts` (IA #2): GPT-4o con token separado (`IA2_TOKEN`). Audita la reconstrucción con 6 reglas de detección. Fail open si falla.
+
+**Pipeline final:**
+```
+Timeline (DB) → extractDecision → detectConflicts
+  ↓ (si no BLOQUEAR)
+IA #1 (Order Reconstructor) → verifica campos contra DB + evento
+  ↓
+IA #2 (Order Auditor) → audita reconstrucción, rechaza si alucina
+  ↓
+NOTIFICAR / ALERTA / BLOQUEAR
+```
+
+**Fail-safes:**
+- IA #1 sin token → fallback a datos crudos del evento/timeline
+- IA #2 falla → fail open, notificación pasa sin auditoría
+- IA #2 rechaza → notificación cambia a ALERTA con advertencias
+

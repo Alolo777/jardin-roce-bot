@@ -76,9 +76,10 @@ async function enviar(texto: string, intentos = 3): Promise<void> {
 }
 
 // ════════════════════════════════════════════════════════════════
-// 1. VENTA CERRADA
+// 1. VENTA CERRADA — @deprecated Usar pipeline de notificaciones
 // ════════════════════════════════════════════════════════════════
 
+/** @deprecated Usar pipeline de notificaciones (notification-engine) */
 export interface DatosVentaCerrada {
   cliente: string; producto: string; total: string
   direccion: string; numeroCliente: string
@@ -86,6 +87,7 @@ export interface DatosVentaCerrada {
   detalles?: string; tieneFotoReferencia?: boolean; fechaHora?: string
 }
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaVentaCerrada(datos: DatosVentaCerrada): Promise<void> {
   const msg = [
     '🌸 *¡VENTA CERRADA!* 🌸',
@@ -110,9 +112,10 @@ export async function enviarAlertaVentaCerrada(datos: DatosVentaCerrada): Promis
 }
 
 // ════════════════════════════════════════════════════════════════
-// 2. ARREGLO APARTADO (desde inventario del día)
+// 2. ARREGLO APARTADO — @deprecated Usar pipeline de notificaciones
 // ════════════════════════════════════════════════════════════════
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaArregloApartado(
   nombreArreglo: string,
   precio: number,
@@ -132,9 +135,10 @@ export async function enviarAlertaArregloApartado(
 }
 
 // ════════════════════════════════════════════════════════════════
-// 3. PEDIDO DEL COTIZADOR WEB
+// 3. PEDIDO DEL COTIZADOR WEB — @deprecated Usar pipeline
 // ════════════════════════════════════════════════════════════════
 
+/** @deprecated Usar pipeline de notificaciones */
 export interface DatosPedidoWeb {
   numeroCliente: string; total: string; entrega: string; flores: string
   tamano: string; envoltura: string; accesorios?: string; nota?: string; imagenUrl?: string
@@ -162,9 +166,10 @@ export async function enviarAlertaPedidoWeb(datos: DatosPedidoWeb): Promise<void
 }
 
 // ════════════════════════════════════════════════════════════════
-// 4. CLIENTE QUIERE COTIZACIÓN
+// 4. CLIENTE QUIERE COTIZACIÓN — @deprecated Usar pipeline
 // ════════════════════════════════════════════════════════════════
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaCotizacion(
   numeroCliente: string,
   descripcion: string
@@ -183,9 +188,10 @@ export async function enviarAlertaCotizacion(
 }
 
 // ════════════════════════════════════════════════════════════════
-// 5. CLIENTE FRUSTRADO
+// 5. CLIENTE FRUSTRADO — @deprecated Usar pipeline
 // ════════════════════════════════════════════════════════════════
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaClienteFrustrado(
   numeroCliente: string,
   ultimoMensaje: string
@@ -202,6 +208,7 @@ export async function enviarAlertaClienteFrustrado(
   await enviar(msg)
 }
 
+/** @deprecated Usar pipeline de notificaciones */
 export interface DatosApartadoPedido {
   cliente: string
   producto: string
@@ -217,6 +224,7 @@ export interface DatosApartadoPedido {
   fechaHora?: string
 }
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaPedidoApartado(datos: DatosApartadoPedido): Promise<void> {
   const msg = [
     '📦 *PEDIDO APARTADO*',
@@ -240,6 +248,7 @@ export async function enviarAlertaPedidoApartado(datos: DatosApartadoPedido): Pr
   await enviar(msg)
 }
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaZonaAmbigua(numeroCliente: string, texto: string, candidatos?: string): Promise<void> {
   const msg = [
     '🧭 *ZONA DE ENVÍO AMBIGUA*',
@@ -254,6 +263,7 @@ export async function enviarAlertaZonaAmbigua(numeroCliente: string, texto: stri
   await enviar(msg)
 }
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaAtencionHumana(
   numeroCliente: string,
   nombreCliente?: string,
@@ -365,9 +375,10 @@ export async function enviarAlertaDiariaDesconexion(): Promise<void> {
 }
 
 // ════════════════════════════════════════════════════════════════
-// 7. SOLICITUD DE CANCELACIÓN
+// 7. SOLICITUD DE CANCELACIÓN — @deprecated Usar pipeline
 // ════════════════════════════════════════════════════════════════
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaCancelacion(
   numeroCliente: string,
   descripcion: string
@@ -385,9 +396,10 @@ export async function enviarAlertaCancelacion(
 }
 
 // ════════════════════════════════════════════════════════════════
-// 8. QUEJA O PRODUCTO DAÑADO
+// 8. QUEJA O PRODUCTO DAÑADO — @deprecated Usar pipeline
 // ════════════════════════════════════════════════════════════════
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaQueja(
   numeroCliente: string,
   descripcion: string
@@ -405,9 +417,10 @@ export async function enviarAlertaQueja(
 }
 
 // ════════════════════════════════════════════════════════════════
-// 9. VENTA DEL DÍA (para reportes)
+// 9. VENTA DEL DÍA (para reportes) — @deprecated Usar pipeline
 // ════════════════════════════════════════════════════════════════
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaVentaDelDia(
   totalVentas: number,
   cantidadVentas: number
@@ -423,9 +436,10 @@ export async function enviarAlertaVentaDelDia(
 }
 
 // ════════════════════════════════════════════════════════════════
-// 10. CLIENTE QUIERE COMPRAR/INTERESADO EN FLORES
+// 10. CLIENTE QUIERE COMPRAR/INTERESADO EN FLORES — @deprecated
 // ════════════════════════════════════════════════════════════════
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaClienteInteresado(
   numeroCliente: string,
   descripcion: string
@@ -443,9 +457,10 @@ export async function enviarAlertaClienteInteresado(
 }
 
 // ════════════════════════════════════════════════════════════════
-// 11. AVISO A EMPLEADOS POR WHATSAPP (FOTOS / ENVÍO)
+// 11. AVISO A EMPLEADOS — @deprecated Usar pipeline
 // ════════════════════════════════════════════════════════════════
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaEmpleadoFotos(
   numeroCliente: string,
   nombreCliente: string,
@@ -464,6 +479,7 @@ export async function enviarAlertaEmpleadoFotos(
   await enviar(msg)
 }
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaEmpleadoEnvio(
   numeroCliente: string,
   ubicacion: string
@@ -481,9 +497,10 @@ export async function enviarAlertaEmpleadoEnvio(
 }
 
 // ════════════════════════════════════════════════════════════════
-// 14A. ALERTAS DE PEDIDO (LISTO / ENTREGADO)
+// 14A. ALERTAS DE PEDIDO — @deprecated Usar pipeline
 // ════════════════════════════════════════════════════════════════
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaPedidoListo(
   numeroCliente: string
 ): Promise<void> {
@@ -498,6 +515,7 @@ export async function enviarAlertaPedidoListo(
   await enviar(msg)
 }
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaPedidoEntregado(
   numeroCliente: string
 ): Promise<void> {
@@ -513,9 +531,10 @@ export async function enviarAlertaPedidoEntregado(
 }
 
 // ════════════════════════════════════════════════════════════════
-// 14AA. EVENTOS RESTANTES
+// 14AA. EVENTOS RESTANTES — @deprecated Usar pipeline
 // ════════════════════════════════════════════════════════════════
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaPagoConfirmado(
   numeroCliente: string,
   cliente: string,
@@ -534,6 +553,7 @@ export async function enviarAlertaPagoConfirmado(
   await enviar(msg)
 }
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaPrecioConfirmado(
   numeroCliente: string
 ): Promise<void> {
@@ -548,6 +568,7 @@ export async function enviarAlertaPrecioConfirmado(
   await enviar(msg)
 }
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaEntregaCompletada(
   numeroCliente: string
 ): Promise<void> {
@@ -576,6 +597,7 @@ export async function enviarAlertaBotDesconectado(
   await enviar(msg)
 }
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaClienteEsperando(
   numeroCliente: string
 ): Promise<void> {
@@ -590,6 +612,7 @@ export async function enviarAlertaClienteEsperando(
   await enviar(msg)
 }
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaFotoEnviada(
   numeroCliente: string,
   caption: string
@@ -622,6 +645,7 @@ export async function enviarAlertaProveedorCaido(error: string): Promise<void> {
   await enviar(msj)
 }
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaCasoNuevo(
   numeroCliente: string,
   tipoCaso: string,
@@ -639,6 +663,7 @@ export async function enviarAlertaCasoNuevo(
   await enviar(msg)
 }
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaCasoArchivado(
   numeroCliente: string,
   motivo: string
@@ -654,9 +679,10 @@ export async function enviarAlertaCasoArchivado(
 }
 
 // ════════════════════════════════════════════════════════════════
-// 14C. ALERTAS DE PAGO
+// 14C. ALERTAS DE PAGO — @deprecated Usar pipeline
 // ════════════════════════════════════════════════════════════════
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaPagoRecibido(
   numeroCliente: string,
   cliente: string,
@@ -677,6 +703,7 @@ export async function enviarAlertaPagoRecibido(
   await enviar(msg)
 }
 
+/** @deprecated Usar pipeline de notificaciones */
 export async function enviarAlertaPagoPendiente(
   numeroCliente: string,
   cliente: string,
@@ -747,49 +774,9 @@ export async function enviarFotoTelegram(
   }
 }
 
-export async function enviarArchivoTelegram(
-  base64: string,
-  caption: string,
-  mimetype = 'application/octet-stream'
-): Promise<void> {
-  if (!process.env.TELEGRAM_BOT_TOKEN || CHAT_IDS.length === 0) {
-    console.warn('[Telegram] Variables no configuradas para archivo.')
-    return
-  }
-
-  try {
-    const buf = Buffer.from(base64, 'base64')
-    const blob = new Blob([buf], { type: mimetype })
-    const filename = mimetype.includes('pdf') ? 'comprobante.pdf' : 'archivo-cliente'
-
-    for (const chatId of CHAT_IDS) {
-      const form = new FormData()
-      form.append('chat_id', chatId)
-      form.append('document', blob, filename)
-      form.append('caption', caption)
-      form.append('parse_mode', 'Markdown')
-
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 15_000)
-
-      const res = await fetch(`${API_BASE}/sendDocument`, {
-        method: 'POST',
-        body: form as any,
-        signal: controller.signal,
-      })
-      clearTimeout(timeout)
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        console.warn(`[Telegram] Error sendDocument a ${chatId}:`, JSON.stringify(err))
-      }
-    }
-  } catch (err) {
-    console.warn('[Telegram] Error enviando archivo:', (err as Error).message)
-  }
+// ── Export público para pipeline ──────────────────────────────────────────────
+export async function enviarMensajeTelegram(texto: string): Promise<void> {
+  await enviar(texto)
 }
 
-// ── Export legacy ─────────────────────────────────────────────────────────────
-export async function enviarAlertaTelegram(datos: DatosVentaCerrada): Promise<void> {
-  return enviarAlertaVentaCerrada(datos)
-}
+

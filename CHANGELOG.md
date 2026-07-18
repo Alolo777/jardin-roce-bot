@@ -1,5 +1,251 @@
 # CHANGELOG
 
+## 2026-07-18
+
+### Módulo 20 — Fase 6.1: Notification Engine (Estructura Base)
+
+**Problema:** El sistema actual notifica a Telegram con datos vacíos (`Total: 0`, `Cliente: `), incorrectos (nombre con texto extra), o duplicados. No hay verificación entre lo que dice el evento y lo que realmente existe en la base de datos.
+
+**Solución:** Se creó la estructura base del Notification Engine — un pipeline de verificación de 3 submódulos que se interpone entre el EventBus y la notificación a Telegram.
+
+**Archivos creados:**
+- `src/notification-engine/types.ts` — 10 interfaces (TimelineData, DatosExtraidos, Conflicto, ResultadoDeteccion, etc.)
+- `src/notification-engine/timeline.builder.ts` — Reconstruye estado real desde Supabase (`casos`, `pedidos_bot`, `historial_chat`, `clientes`)
+- `src/notification-engine/decision.extractor.ts` — Extrae campos relevantes del evento con nivel de confianza, detecta nombres inválidos (vacíos, con separadores, genéricos), prioriza según tipo de evento
+- `src/notification-engine/conflict.detector.ts` — Detecta contradicciones (estado cancelado vs evento activo, transiciones inválidas, nombre/sucursal/precio/producto discrepantes), decide acción: NOTIFICAR/ALERTA/BLOQUEAR
+- `src/notification-engine/index.ts` — Barrel export
+
+**Principales detecciones implementadas:**
+- Nombres con comas/puntos: truncados con advertencia
+- Nombres vacíos o genéricos: confianza 0
+- Pedidos cancelados/archivados: BLOQUEAR
+- Transiciones inválidas: BLOQUEAR (error)
+- Precio 0 o "Por definir": confianza mínima
+- Campos vacíos en eventos informativos (ORDER_UPDATED, CASE_CREATED): BLOQUEAR
+- Eventos críticos (HUMAN_REQUIRED, PAYMENT_RECEIVED): SIEMPRE notificar con ALERTA si hay conflicto
+
+**Impacto:** Cero. Archivos nuevos, no modifican el flujo existente. Compilación exitosa.
+
+---
+
+### Módulo 20 — Fase 6.2: Notification Engine integrado con EventBus
+
+**Cambio:** Todos los 26 handlers de `telegram.subscriber.ts` ahora pasan por el pipeline de verificación antes de notificar a Telegram.
+
+**Archivos creados:**
+- `src/notification-engine/notification.engine.ts` — Orquestador del pipeline (buildTimeline → extractDecision → detectConflicts → decide acción)
+
+**Archivos modificados:**
+- `src/events/telegram.subscriber.ts` — Cada handler envuelto con `withPipeline(event, async () => { ... })`
+- `src/notification-engine/index.ts` — Exporta `processNotificationPipeline` y `withPipeline`
+
+**Comportamiento:**
+- Si el pipeline devuelve `BLOQUEAR` → el handler NO se ejecuta, se loggea el bloqueo
+- Si devuelve `NOTIFICAR` o `ALERTA` → el handler se ejecuta normalmente
+- Si la timeline (Supabase) falla → fail open: se notifica sin verificación
+- Si el evento no tiene teléfono → fail open: se notifica igual
+
+**Impacto:** Bajo. Todos los handlers existentes funcionan igual cuando el pipeline permite la notificación. Los handlers bloqueados no llegan a Telegram (se loggean internamente).
+
+**Siguiente paso:** Fase 6.3 — Implementar IAs auxiliares (Order Reconstructor y Order Auditor).
+
+---
+
+### Módulo 20 — Fase 6.3: IAs Auxiliares (Order Reconstructor + Order Auditor)
+
+**Cambio:** Se integraron dos IAs en el pipeline de notificaciones. IA #1 (GPT-4o-mini) reconstruye el pedido verificando cada campo contra DB + evento. IA #2 (GPT-4o) audita la reconstrucción y rechaza si detecta alucinaciones.
+
+**Archivos creados:**
+- `src/notification-engine/order.reconstructor.ts` — IA #1: Prompt estructurado para reconstruir pedido. Fallback a datos crudos si falla la llamada. 15s timeout.
+- `src/notification-engine/order.auditor.ts` — IA #2: Prompt con 6 reglas de detección (nombre, sucursal, fecha, precio, producto, estado). Fallback a aprobación si falla.
+
+**Archivos modificados:**
+- `src/notification-engine/notification.engine.ts` — Pipeline completo: tras detectConflicts, si no es BLOQUEAR, pasa por IA #1 → IA #2. Si IA #2 rechaza, accion cambia a ALERTA.
+- `src/notification-engine/index.ts` — Exporta ReconstructorResult, AuditorResult
+
+**Env vars requeridas:**
+- `IA1_TOKEN`, `IA1_MODEL` (default: gpt-4o-mini), `IA1_BASE_URL`
+- `IA2_TOKEN`, `IA2_MODEL` (default: gpt-4o), `IA2_BASE_URL`
+
+**Comportamiento del pipeline completo:**
+1. Timeline (DB) → extractDecision → detectConflicts
+2. Si BLOQUEAR → no notifica
+3. Si NOTIFICAR/ALERTA → IA #1 reconstructor → IA #2 auditor
+4. Si IA #1 falla → fallback a datos crudos
+5. Si IA #2 falla → fail open (se notifica igual)
+6. Si IA #2 rechaza → notifica con ALERTA y advertencias
+
+**Impacto:** Bajo. Pipeline completo pero con fail-safes. Si las IAs fallan, el sistema sigue funcionando.
+
+**Siguiente paso:** Fase 6.4 — Business Rules Validator (reglas de horario, sucursal, precio, nombre).
+
+---
+
+### Módulo 21 — Fase 6.4: Business Rules Validator
+
+**Cambio:** Se implementó un validador de reglas de negocio basado en el system prompt oficial de Flora. Extrajo 9 reglas del prompt y las implementó como funciones individuales en un validador puro (sin IAs).
+
+**Archivo creado:**
+- `src/notification-engine/business-rules.validator.ts` — 9 reglas de negocio:
+  - **R001**: Horario laboral L-V 10-19, S-D 10-17. Si la notificación contiene hora, verifica que esté dentro del horario.
+  - **R002**: Sucursal solo "Centro" o "Norte". Detecta inventos como "Apizaco (sucursal)".
+  - **R003**: Precio mínimo $60 MXN. Si es menor, warning.
+  - **R004**: Precio máximo $50,000 MXN. Si excede, warning (posible error de invento).
+  - **R005**: Nombre sin comas ni conectores ("cree", "quisiera", "podría", etc.). Si detecta, error.
+  - **R006**: Fecha y hora obligatorias si estado es apartado/pagado/entregado/en_produccion/listo.
+  - **R007**: Envío a domicilio solo acepta transferencia (no efectivo contra entrega).
+  - **R008**: Si requiere revisión y falta producto/precio, posible invento del LLM.
+  - **R009**: Si recoge en sucursal, debe tener método de pago definido.
+
+**Archivos modificados:**
+- `src/notification-engine/types.ts` — Se removió la interfaz BusinessRuleWarning (ahora vive en su propio módulo)
+- `src/notification-engine/notification.engine.ts` — Se agregó validateBusinessRules después de IA #2. Si violaciones error → ALERTA. Todas las violaciones se agregan como advertencias. PipelineResult.ruleViolations agregado.
+- `src/notification-engine/index.ts` — Exporta validateBusinessRules y BusinessRuleWarning
+
+**Reglas extraídas de:** System prompt de Flora (system prompt completo del chatbot, analizado manualmente).
+
+**Impacto:** Bajo. El validador es puramente funcional, sin IAs, sin llamadas externas. Solo agrega advertencias y puede escalar a ALERTA.
+
+**Siguiente paso:** Fase 6.5 — Template Builder (plantillas de notificación).
+
+---
+
+### Módulo 22 — Fase 6.5: Template Builder
+
+**Cambio:** Se creó un sistema de plantillas para generar mensajes de Telegram a partir de datos verificados por el pipeline. Cada evento tiene su propia plantilla, todas usan el mismo formato (emojis, negritas, estructura). El mensaje se incluye en PipelineResult.message.
+
+**Archivo creado:**
+- `src/notification-engine/template.builder.ts` — builder completo con:
+  - `buildTelegramMessage(eventType, payload, verified, pipelineResult)` → string
+  - Helper functions: `esc`, `horaActual`, `formatearNumero`, `ultimos4` (mismas que lib/telegram.ts)
+  - `buildWarningBanner(pipelineResult)` → agrega advertencias y conflictos si ALERTA
+  - `getTemplate(eventType, payload, verified)` → 21 templates específicos por evento
+  - `getFooter(eventType)` → footer personalizado por evento
+
+**Plantillas implementadas (21):**
+| Evento | Header | Footer |
+|--------|--------|--------|
+| ORDER_CREATED | 🌸 ¡VENTA CERRADA! | Pago recibido — preparar pedido |
+| ORDER_UPDATED | 📦 PEDIDO APARTADO | Pendiente de pago |
+| HUMAN_REQUIRED | ⚠️ ATENCIÓN HUMANA | Revisar WhatsApp |
+| CUSTOMER_ANGRY | ⚠️ QUEJA DEL CLIENTE | Atención prioritaria |
+| PAYMENT_PENDING | ⏳ PAGO PENDIENTE | Esperando confirmación |
+| PHOTO_REQUESTED | 📸 CLIENTE PIDE FOTOS | Enviar fotos disponibles |
+| ENVIO_REQUESTED | 🚚 COTIZACIÓN ENVÍO | Cotizar envío exacto |
+| CANCELACION_REQUESTED | 🚫 SOLICITUD CANCELACIÓN | Revisar pedido |
+| CASE_CREATED | 📋 NUEVO CASO | Dar seguimiento |
+| COTIZACION_REQUESTED | 🌷 INTERÉS / COTIZACIÓN | Seguimiento al cliente |
+| ORDER_READY | ✅ PEDIDO LISTO | Listo para entrega |
+| ORDER_DELIVERED | 🚚 PEDIDO ENTREGADO | Entregado al cliente |
+| Y más: PRICE_CONFIRMED, CUSTOMER_WAITING, ZONA_AMBIGUA, PHOTO_RECEIVED, PHOTO_SENT, PAYMENT_CONFIRMED, DELIVERY_COMPLETED, CASE_ARCHIVED + default genérico |
+
+**Archivos modificados:**
+- `src/notification-engine/notification.engine.ts` — PipelineResult ahora incluye `message: string | null`. Se construye al final del pipeline usando buildTelegramMessage y datos verificados.
+- `src/notification-engine/index.ts` — Exporta buildTelegramMessage
+
+**Impacto:** Bajo. El pipeline ahora produce el mensaje formateado, pero los handlers actuales siguen usando su propia lógica. La migración se hará en fases posteriores.
+
+**Siguiente paso:** Fase 6.6 — Event Logger (log estructurado del pipeline en Supabase).
+
+---
+
+### Módulo 23 — Fase 6.6: Pipeline Event Logger
+
+**Cambio:** Se integró un logger estructurado que registra cada ejecución del pipeline de notificaciones en Supabase, usando la infraestructura existente (`logger.service.ts` + tabla `logs`).
+
+**Archivo creado:**
+- `src/notification-engine/pipeline-logger.ts` — 4 funciones:
+  - `logPipelineStart(event, timeline)` — log al inicio del pipeline
+  - `logPipelineComplete(event, result)` — log al finalizar (info si NOTIFICAR, warn si ALERTA/BLOQUEAR)
+  - `logPipelineError(event, error)` — log si el pipeline lanza excepción
+  - `logPipelineStep(event, step, data?)` — log de paso intermedio (para debugging)
+
+**Archivos modificados:**
+- `src/notification-engine/notification.engine.ts` — 3 puntos de log insertados: inicio (tras timeline), bloqueo (antes de return), final (antes de return). Wrapped en try-catch con logPipelineError.
+- `src/notification-engine/index.ts` — Exporta las 4 funciones del pipeline-logger
+
+**Estructura del log en Supabase:**
+```sql
+-- module = 'pipeline'
+-- metadata contiene: eventType, telefono, accion, conflictos, advertencias, ruleViolations
+SELECT * FROM logs WHERE module = 'pipeline' ORDER BY created_at DESC;
+```
+
+**Impacto:** Bajo. Logger asíncrono (buffer 1.5s), no bloquea el pipeline. Metadata limitada a 500 chars por campo. No hay cambios en comportamiento de notificaciones.
+
+**Siguiente paso:** Fase 6.7 — Migración de handlers a pipeline (reemplazar cada enviarAlerta* por la nueva ruta).
+
+---
+
+### Módulo 24 — Fase 6.7: Migración Automática de Handlers
+
+**Cambio:** `withPipeline` ahora envía el mensaje del pipeline directamente a Telegram si existe, saltando el callback del handler. 25 de 26 handlers migrados automáticamente sin modificar su código.
+
+**Archivos modificados:**
+- `lib/telegram.ts` — Nueva exportación `enviarMensajeTelegram(texto)` (wrapper público de la función privada `enviar()`)
+- `src/notification-engine/notification.engine.ts` — `withPipeline` modificado:
+  1. Ejecuta pipeline normalmente
+  2. Si BLOQUEAR → no envía nada
+  3. Si `result.message` existe Y no es evento multimedia → envía mensaje del pipeline, salta callback
+  4. Si `result.message` es null O es evento multimedia → llama callback (comportamiento anterior)
+
+**Eventos con auto-send (25/26):**
+- ORDER_CREATED, ORDER_UPDATED, ORDER_READY, ORDER_DELIVERED
+- HUMAN_REQUIRED, CUSTOMER_ANGRY, CUSTOMER_WAITING
+- PAYMENT_RECEIVED, PAYMENT_PENDING, PAYMENT_CONFIRMED, PRICE_CONFIRMED
+- PHOTO_REQUESTED, PHOTO_SENT
+- ENVIO_REQUESTED, CANCELACION_REQUESTED
+- CASE_CREATED, CASE_ARCHIVED
+- COTIZACION_REQUESTED, ZONA_AMBIGUA, DELIVERY_COMPLETED
+- + default genérico para cualquier otro evento con datos
+
+**Excepción (usa callback):**
+- PHOTO_RECEIVED — necesita enviar la foto a Telegram (no solo texto)
+
+**Impacto:** Medio-alto. Cambia el flujo de notificaciones: ahora los mensajes se construyen con datos verificados del pipeline en lugar de datos crudos del payload. Los handlers antiguos (`enviarAlerta*` en `lib/telegram.ts`) ya no se llaman para eventos comerciales.
+
+**Siguiente paso:** Notification Engine completado al 100%. Próximo módulo a definir.
+
+---
+
+### Módulo 25 — Fase 6.8: Auditoría Post-Migración
+
+**Cambio:** Auditoría completa de `lib/telegram.ts`. 24 funciones marcadas como `@deprecated`, 2 eliminadas, 6 activas.
+
+**Funciones eliminadas (0 referencias externas):**
+| Función | Razón |
+|---------|-------|
+| `enviarArchivoTelegram` | Nunca fue llamada desde ningún archivo |
+| `enviarAlertaTelegram` | Legacy export, sin importadores externos |
+
+**Funciones deprecadas (24):**
+- `enviarAlertaVentaCerrada`, `enviarAlertaArregloApartado`, `enviarAlertaPedidoWeb`
+- `enviarAlertaCotizacion`, `enviarAlertaClienteFrustrado`, `enviarAlertaPedidoApartado`
+- `enviarAlertaZonaAmbigua`, `enviarAlertaAtencionHumana`, `enviarAlertaCancelacion`
+- `enviarAlertaQueja`, `enviarAlertaVentaDelDia`, `enviarAlertaClienteInteresado`
+- `enviarAlertaEmpleadoFotos`, `enviarAlertaEmpleadoEnvio`, `enviarAlertaPedidoListo`
+- `enviarAlertaPedidoEntregado`, `enviarAlertaPagoConfirmado`, `enviarAlertaPrecioConfirmado`
+- `enviarAlertaEntregaCompletada`, `enviarAlertaClienteEsperando`, `enviarAlertaFotoEnviada`
+- `enviarAlertaCasoNuevo`, `enviarAlertaCasoArchivado`, `enviarAlertaPagoRecibido`
+- `enviarAlertaPagoPendiente`
+
+**Funciones activas (6):**
+| Función | Uso |
+|---------|-----|
+| `enviarAlertaQr` | Eventos QR_GENERATED (sistema) |
+| `enviarAlertaReconectado` | Eventos BOT_CONNECTED (sistema) |
+| `enviarAlertaDiariaDesconexion` | Eventos BOT_DAILY_ALERT (sistema) |
+| `enviarAlertaBotDesconectado` | Eventos BOT_DISCONNECTED (sistema) |
+| `enviarAlertaProveedorCaido` | Eventos PROVIDER_FAILURE (sistema) |
+| `enviarFotoTelegram` | Eventos PHOTO_RECEIVED (medios) |
+| `enviarMensajeTelegram` | Export público para pipeline (nueva) |
+
+**Impacto:** Bajo. Solo se eliminaron funciones sin referencias. Las deprecadas mantienen firmas intactas.
+
+**Notification Engine completado al 100%.**
+
+---
+
 ## 2026-07-17
 
 ### Resumen de sesión — Módulo 19 (Bugs de producción)
