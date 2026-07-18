@@ -847,7 +847,11 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           notificarEmpleadosWhatsApp(sock,
             `📸 *Cliente pide fotos de arreglos:* ${telefonoReal}\n\nContáctalo directamente por WhatsApp y envíale fotos de lo que tenemos disponible.`
           ).catch(err => console.error('[bot] WhatsApp empleados fotos:', err))
-          eventBus.emit(EventType.PHOTO_REQUESTED, { telefono: telefonoReal, cliente: '' })
+          eventBus.emit(EventType.PHOTO_REQUESTED, {
+            telefono: telefonoReal,
+            cliente: msg.pushName || '',
+            descripcion: `Cliente ${msg.pushName || 'sin nombre'} (${telefonoReal}) pide ver fotos de arreglos disponibles`,
+          })
           console.log(`[bot] 📸 Alerta de fotos enviada para ${telefonoReal}`)
         }
       }

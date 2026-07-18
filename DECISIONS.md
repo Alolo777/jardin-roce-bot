@@ -825,3 +825,22 @@ Las funciones `notificarEmpleadosWhatsApp` y `enviarFotoEmpleadosWhatsApp` ahora
 
 **Desventajas:** Ninguna.
 
+---
+
+## DEC-043: Alerta PHOTO_REQUESTED con número real y contexto (ambos canales)
+
+**Fecha:** 2026-07-17
+**Estado:** Aceptada
+
+**Motivo:** Bug B. La alerta de Telegram cuando el cliente pide fotos llegaba sin número legible ni contexto (`cliente: ''`). El equipo no sabía a quién escribir.
+
+**Alternativas consideradas:**
+1. Solo WhatsApp empleados (quitar Telegram) — rechazado por el usuario
+2. Ambos canales, enriqueciendo la alerta Telegram con número real + contexto (elegida)
+
+**Resultado:** `PHOTO_REQUESTED` se emite con `telefono` real, `cliente` (pushName) y `descripcion`. `enviarAlertaEmpleadoFotos` muestra número real (`formatearNumero`) y contexto. Se mantiene WhatsApp-a-empleados.
+
+**Ventajas:** Alerta de Telegram accionable. Ambos canales activos según decisión de usuario. Sin asumir ramo (el cliente aún no elige al pedir fotos).
+
+**Desventajas:** Ninguna relevante.
+

@@ -448,13 +448,15 @@ export async function enviarAlertaClienteInteresado(
 
 export async function enviarAlertaEmpleadoFotos(
   numeroCliente: string,
-  nombreCliente: string
+  nombreCliente: string,
+  contexto?: string
 ): Promise<void> {
   const msg = [
     '📸 *CLIENTE PIDE FOTOS*',
     '',
     `📱 *Cliente:* ${formatearNumero(numeroCliente, nombreCliente || undefined)}`,
     `💬 Quiere ver fotos de los arreglos disponibles.`,
+    ...(contexto ? [`📝 *Contexto:* ${esc(contexto.slice(0, 300))}`] : []),
     `⏰ *Hora:* ${esc(horaActual())}`,
     '',
     '_Envíale las fotos actuales de lo que tenemos disponible directamente por WhatsApp_',

@@ -23,10 +23,9 @@
 
 ## BUG-003: Alerta de "cliente pide fotos" sin contexto ni número real
 - **Prioridad:** Alta
-- **Estado:** Abierto
+- **Estado:** ✅ Resuelto (2026-07-17, DEC-043)
 - **Reportado:** 2026-07-17
 - **Síntomas:** El cliente pidió ver fotos de ramos armados. La alerta a Telegram llegó sin decir qué ramo vio ni con número legible (LID enmascarado a `xxx5844`).
-- **Causa raíz:** `PHOTO_REQUESTED` se emite con `cliente: ''` y sin el contexto del ramo visto; la alerta `enviarAlertaEmpleadoFotos` no incluye número real mapeado ni producto.
-- **Nota:** El canal WhatsApp-a-empleados SÍ funciona (`[notif] Notificando a 4 empleado(s)`). Se requiere mejorar la alerta Telegram (ambos canales, decisión de usuario 2026-07-17).
-- **Versión donde apareció:** 3.0.0
-- **Versión donde se corrigió:** —
+- **Causa raíz:** `PHOTO_REQUESTED` se emitía con `cliente: ''` y sin contexto; `enviarAlertaEmpleadoFotos` no mostraba número real ni producto.
+- **Corrección:** `PHOTO_REQUESTED` con `telefono` real, `cliente` y `descripcion`; `enviarAlertaEmpleadoFotos` muestra número real + contexto. Ambos canales (WhatsApp empleados + Telegram).
+- **Versión donde se corrigió:** 3.0.1

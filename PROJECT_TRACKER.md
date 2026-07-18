@@ -585,13 +585,13 @@ Un módulo solo puede marcarse como **Terminado** si:
 |---|---|---|
 | BUG-001 — Alertas Telegram sin datos (producto/total/cliente vacíos) | ✅ Resuelto (DEC-041, 2026-07-17) | buildOrderPayload + crearPedido→ORDER_UPDATED |
 | BUG-002 — "VENTA CERRADA" falsa por interés de compra | ✅ Resuelto (DEC-039, 2026-07-17) | Emitía ORDER_CREATED en bloque esInteresCompra |
-| BUG-003 — Alerta "pide fotos" sin contexto ni número real | 🔴 Abierto | Pendiente Módulo 3 (Bug B fotos) |
+| BUG-003 — Alerta "pide fotos" sin contexto ni número real | ✅ Resuelto (DEC-043, 2026-07-17) | PHOTO_REQUESTED con número real + contexto, ambos canales |
 
 ### Módulo 19: Corrección de Bugs de Alertas (P1)
 
-**Estado:** En progreso 🟡
+**Estado:** ✅ Completado
 
 **Checklist (uno por uno):**
 - [x] **Bug C** — Intereses de compra no emiten ORDER_CREATED falsa (DEC-039). Payload robusto con datos reales.
 - [x] **Bug A** — Payloads de ORDER_CREATED/ORDER_UPDATED traen producto/total/cliente reales (DEC-041). crearPedido ya no emite VENTA CERRADA falsa.
-- [ ] **Bug B (fotos)** — PHOTO_REQUESTED a Telegram con número real mapeado + contexto del ramo visto (ambos canales).
+- [x] **Bug B (fotos)** — PHOTO_REQUESTED a Telegram con número real mapeado + contexto (DEC-043). Ambos canales.

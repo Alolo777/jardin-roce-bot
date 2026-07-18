@@ -2,6 +2,29 @@
 
 ## 2026-07-17
 
+### Fix — Bug B: Alerta "cliente pide fotos" con número real y contexto (ambos canales)
+
+**Problema:** Cuando el cliente pedía ver fotos de arreglos, la alerta a Telegram (`PHOTO_REQUESTED` → `enviarAlertaEmpleadoFotos`) llegaba sin número legible ni contexto útil (se emitía con `cliente: ''`). El equipo no sabía a quién escribir ni qué buscaba el cliente. El canal WhatsApp-a-empleados ya funcionaba.
+
+**Archivos modificados:**
+- `src/whatsapp/message-handler.ts` (emisor PHOTO_REQUESTED)
+- `lib/telegram.ts` (`enviarAlertaEmpleadoFotos`)
+- `src/events/telegram.subscriber.ts` (pasa descripción como contexto)
+
+**Cambios:**
+1. `PHOTO_REQUESTED` ahora se emite con `telefono` real (resuelto), `cliente` (`msg.pushName`) y `descripcion` con nombre + número + "pide ver fotos de arreglos disponibles".
+2. `enviarAlertaEmpleadoFotos` acepta `contexto` opcional y lo muestra en la alerta de Telegram con el número real vía `formatearNumero`.
+3. El subscriber pasa `event.payload.descripcion` como contexto.
+4. Se mantiene el canal WhatsApp-a-empleados (sin cambios).
+
+**Impacto:** El equipo recibe en Telegram una alerta accionable de "pide fotos" con número real y contexto. Cumple decisión de usuario: ambos canales. No se asume el ramo (el cliente aún no elige cuando pide fotos).
+
+**Rollback:** Revertir los 3 archivos a la versión del commit `ad1be9c`.
+
+---
+
+## 2026-07-17
+
 ### Fix — Bug A: Alertas Telegram vacías + crearPedido ya no emite VENTA CERRADA falsa
 
 **Problema:** Las alertas de Telegram (VENTA CERRADA / PEDIDO APARTADO) llegaban con `Producto:`, `Total:`, `Cliente:` vacíos. Además `crearPedido` emitía `ORDER_CREATED` (cableado a "🌸 ¡VENTA CERRADA!") solo con `descripcion: 'Pedido creado'`, generando la alerta engañosa que el usuario reportó.

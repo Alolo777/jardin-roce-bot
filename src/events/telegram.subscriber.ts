@@ -108,6 +108,7 @@ export function subscribeTelegramEvents(): void {
     enviarAlertaEmpleadoFotos(
       event.payload.telefono,
       event.payload.cliente ?? '',
+      event.payload.descripcion,
     )
   })
 
