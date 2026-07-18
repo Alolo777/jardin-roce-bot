@@ -586,6 +586,7 @@ Un módulo solo puede marcarse como **Terminado** si:
 | BUG-001 — Alertas Telegram sin datos (producto/total/cliente vacíos) | ✅ Resuelto (DEC-041, 2026-07-17) | buildOrderPayload + crearPedido→ORDER_UPDATED |
 | BUG-002 — "VENTA CERRADA" falsa por interés de compra | ✅ Resuelto (DEC-039, 2026-07-17) | Emitía ORDER_CREATED en bloque esInteresCompra |
 | BUG-003 — Alerta "pide fotos" sin contexto ni número real | ✅ Resuelto (DEC-043, 2026-07-17) | PHOTO_REQUESTED con número real + contexto, ambos canales |
+| Verificación de cableado de eventos (flujo e2e) | ✅ Test automatizable | `tests/event-wire-flow.test.mts` — emite PHOTO_REQUESTED, COTIZACION_REQUESTED, crearPedido→ORDER_UPDATED, PHOTO_RECEIVED, ORDER_CREATED y verifica payloads + orden. `npm run test:wire` |
 
 ### Módulo 19: Corrección de Bugs de Alertas (P1)
 
