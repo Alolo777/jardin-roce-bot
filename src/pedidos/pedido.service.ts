@@ -83,11 +83,6 @@ export function crearPedido(clienteId: string, telefono: string, datosIniciales?
 
   PEDIDOS.set(clienteId, pedido)
 
-  // BUG-A: crear un pedido NO es una venta cerrada. Emitir ORDER_UPDATED
-  // (cableado a "PEDIDO APARTADO") con datos reales en vez de ORDER_CREATED
-  // (cableado a "VENTA CERRADA") para evitar alertas falsas y vacías.
-  eventBus.emit(EventType.ORDER_UPDATED, buildOrderPayload(pedido))
-
   persistir()
   return pedido
 }
@@ -178,18 +173,23 @@ export function archivarPedido(clienteId: string, motivo?: string): boolean {
   const pedido = PEDIDOS.get(clienteId)
   if (!pedido || !pedido.estado) return false
 
-  if (!transitar(pedido, EstadoPedido.ARCHIVADO)) {
+  const ok = transitar(pedido, EstadoPedido.ARCHIVADO)
+  if (!ok) {
     pedido.estado = EstadoPedido.ARCHIVADO
     pedido.actualizadoEn = new Date().toISOString()
   }
 
   PEDIDOS.delete(clienteId)
+  persistir()
+  return true
+}
 
-  eventBus.emit(EventType.ORDER_UPDATED, {
-    ...buildOrderPayload(pedido),
-    descripcion: motivo ?? 'Pedido archivado',
-  })
-
+export function archivarSilencioso(clienteId: string): boolean {
+  const pedido = PEDIDOS.get(clienteId)
+  if (!pedido) return false
+  pedido.estado = EstadoPedido.ARCHIVADO
+  pedido.actualizadoEn = new Date().toISOString()
+  PEDIDOS.delete(clienteId)
   persistir()
   return true
 }

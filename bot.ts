@@ -48,7 +48,7 @@ import {
 import { parseNombre, pareceNombreCliente, parseFecha, extraerFecha, parseHora, extraerHora, parseSucursal, parsePrecio, parseDireccion, limpiarTelefono } from './src/parser'
 import { getContenidoMensaje, getMessageBody, getMensajeTexto, getMessageType, hasQuotedMsg, getQuotedText, descargarMedia, jidANumero, ahoraCdmx, estaEnHorario, getFechaActual } from './src/whatsapp/message-utils'
 import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema, clasificarTipoCaso, limpiarCachesCasos } from './src/casos/caso.service'
-import { crearPedido, obtenerPedido, transitar, transitarDesdeFlujo, archivarPedido, cancelarPedido, limpiarCachesPedidos, cargarPedidosDesdeBD, persistirPedidosEngine } from './src/pedidos/pedido.service'
+import { crearPedido, obtenerPedido, transitar, transitarDesdeFlujo, archivarPedido, archivarSilencioso, cancelarPedido, limpiarCachesPedidos, cargarPedidosDesdeBD, persistirPedidosEngine } from './src/pedidos/pedido.service'
 import { analizarIntencion, Decision } from './src/decision/decision.engine'
 import { Intencion, PedidoActual, EstadoPedido } from './src/models/types'
 import { createMessageHandler, esTextoReferenciaOCotizacion } from './src/whatsapp/message-handler'
@@ -505,6 +505,12 @@ function resetearPedidoCliente(clienteId: string): void {
   FOTOS_DISPONIBLES_RECIENTES.delete(clienteId)
 }
 
+function silenciarPedido(clienteId: string): void {
+  archivarSilencioso(clienteId)
+  VENTA_ACTUAL.delete(clienteId)
+  FOTOS_DISPONIBLES_RECIENTES.delete(clienteId)
+}
+
 function resetearPedidoActivo(clienteId: string): void {
   archivarPedido(clienteId, 'Reset por cambio de contexto')
   VENTA_ACTUAL.delete(clienteId)
@@ -778,35 +784,16 @@ async function ventaCerradaHandler(clienteId: string, venta: VentaCerrada, telef
   await registrarVenta(nombreAlerta, numeroReal, venta.producto, totalDashboardPedido(clienteId, venta.total), venta.direccion, 'transferencia')
   await persistirPedido(clienteId, numeroReal, 'pagado')
 
-  eventBus.emit(EventType.PAYMENT_RECEIVED, {
-    telefono: numeroReal,
-    cliente: nombreAlerta,
-    producto: venta.producto,
-    total: parseFloat(venta.total.replace(/[^0-9.]/g, '')) || 0,
-    metodoPago: 'Transferencia',
-  })
   eventBus.emit(EventType.PAYMENT_CONFIRMED, {
-    telefono: numeroReal,
-    cliente: nombreAlerta,
-    producto: venta.producto,
-    total: parseFloat(venta.total.replace(/[^0-9.]/g, '')) || 0,
-    metodoPago: 'Transferencia',
-  })
-  eventBus.emit(EventType.ORDER_CREATED, {
     telefono: numeroReal,
     cliente: nombreAlerta,
     producto: venta.producto,
     total: parseFloat(venta.total.replace(/[^0-9.]/g, '')) || 0,
     sucursal: venta.direccion,
     metodoPago: 'Transferencia',
-    descripcion: 'Pago recibido - venta completada',
-    precioArreglo: precioArregloTexto(clienteId),
-    precioExtras: extrasPedidoTexto(clienteId) ?? undefined,
-    precioEnvio: pedido?.envio?.precio,
-    fechaHora: [pedido?.fechaEntrega, pedido?.horaEntrega].filter(Boolean).join(' ') || undefined,
-    tieneFotoReferencia: pedido?.fotoReferenciaBase64 ? true : undefined,
-  } as any)
-  resetearPedidoCliente(clienteId)
+    descripcion: 'Pago recibido — venta completada',
+  })
+  silenciarPedido(clienteId)
 }
 
 async function pedidoApartadoHandler(clienteId: string, venta: VentaCerrada, telefono: string, metodoPago: string): Promise<void> {
