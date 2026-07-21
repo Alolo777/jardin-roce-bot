@@ -215,7 +215,14 @@ export async function responderMensaje(msg: any, texto: string): Promise<any> {
   if (!sock) return
   const jid = msg.key?.remoteJid
   if (!jid) return
-  return sock.sendMessage(jid, { text: texto }, { quoted: msg })
+  const result = await sock.sendMessage(jid, { text: texto }, { quoted: msg })
+  try {
+    await sock.chatModify({
+      markRead: false,
+      lastMessages: [{ key: msg.key, messageTimestamp: msg.messageTimestamp }],
+    }, jid)
+  } catch { /* no fatal */ }
+  return result
 }
 
 // ════════════════════════════════════════════════════════════════

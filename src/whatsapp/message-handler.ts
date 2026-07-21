@@ -1111,6 +1111,13 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           }, await numeroRealPromise)
         }
 
+        const intervencionAntesDeEnviar = obtenerIntervencionHumanaReciente(clienteId)
+        if (intervencionAntesDeEnviar && intervencionAntesDeEnviar.haceMs < 180_000) {
+          console.log(`[bot] 🙋 Empleado respondió hace ${Math.round(intervencionAntesDeEnviar.haceMs / 1000)}s durante LLM; Flora omite respuesta para ${clienteId}`)
+          await agregarAlHistorial(telefono, 'assistant', `[Flora omitió respuesta — empleado respondió: "${intervencionAntesDeEnviar.texto.slice(0, 150)}"]`)
+          return
+        }
+
         await deps.responderMensaje(msg, mensajeParaEnviar)
         await agregarAlHistorial(telefono, 'assistant', mensajeParaEnviar)
         if (respuestaPideComprobante(mensajeParaEnviar) && deps.tieneArregloVerificado(clienteId)) {
