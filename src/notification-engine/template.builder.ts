@@ -1,5 +1,5 @@
 import type { EventType, EventPayload } from '../events/types'
-import type { DatosVerificados, AccionNotificacion } from './types'
+import type { DatosVerificados } from './types'
 import type { PipelineResult } from './notification.engine'
 
 function esc(text: string | number | null | undefined): string {
@@ -11,18 +11,9 @@ function ultimos4(numero: string): string {
   return 'xxx' + limpio.slice(-4)
 }
 
-function esLid(numero: string): boolean {
-  return numero.includes('@lid') || (String(numero ?? '').replace(/[^0-9]/g, '').length > 13)
-}
-
 function formatearNumero(numero: string, nombre?: string): string {
-  const nombreParte = nombre ? ` (${esc(nombre)})` : ''
-  if (esLid(numero)) {
-    const lid = String(numero ?? '').replace(/@.*$/, '')
-    const last4 = lid.replace(/\D/g, '').slice(-4)
-    return `Cuenta vinculada — xxx${last4}${nombreParte}`
-  }
-  return `${ultimos4(numero)}${nombreParte}`
+  const parte = nombre ? ` — ${esc(nombre)}` : ''
+  return `${ultimos4(numero)}${parte}`
 }
 
 function horaActual(): string {
@@ -33,17 +24,17 @@ function horaActual(): string {
   })
 }
 
-function buildWarningBanner(pipelineResult: PipelineResult): string[] {
-  if (pipelineResult.accion !== 'ALERTA') return []
-  const lines: string[] = ['', '⚠️ *VERIFICACIÓN*']
-  for (const w of pipelineResult.advertencias) {
-    lines.push(`⚠️ ${esc(w)}`)
-  }
-  for (const c of pipelineResult.conflictos) {
-    const icono = c.severity === 'error' ? '🚫' : '⚠️'
-    lines.push(`${icono} *${esc(c.campo)}:* ${esc(c.descripcion)}`)
-  }
-  return lines
+function buildWarningResumen(pipelineResult: PipelineResult): string | null {
+  if (pipelineResult.accion !== 'ALERTA') return null
+  const n = pipelineResult.advertencias.length + pipelineResult.conflictos.length
+  if (n === 0) return null
+  const principales = pipelineResult.advertencias
+    .filter(w => w.includes('IA #1') || w.includes('IA #2') || w.includes('R00'))
+    .slice(0, 2)
+    .map(w => esc(w.length > 80 ? w.slice(0, 80) + '...' : w))
+  const lineas = [`⚠️ ${n} advertencia(s)`]
+  for (const p of principales) lineas.push(`└ ${p}`)
+  return lineas.join('\n')
 }
 
 export function buildTelegramMessage(
@@ -52,15 +43,11 @@ export function buildTelegramMessage(
   verified: DatosVerificados,
   pipelineResult: PipelineResult
 ): string {
+  const advertencia = buildWarningResumen(pipelineResult)
   const base = getTemplate(eventType, payload, verified)
-  const warnings = buildWarningBanner(pipelineResult)
-  const footer = [
-    ...warnings,
-    `⏰ *Hora:* ${esc(horaActual())}`,
-    '',
-    getFooter(eventType),
-  ].join('\n')
-  return `${base}\n${footer}`
+  const partes = [base, `🕐 ${esc(horaActual())}`]
+  if (advertencia) partes.push(advertencia)
+  return partes.join('\n')
 }
 
 function getNombre(verified: DatosVerificados, payload: EventPayload): string | null {
@@ -93,6 +80,10 @@ function getDescripcion(payload: EventPayload): string | null {
   return (payload.descripcion as string | undefined) ?? null
 }
 
+function clienteLine(nombre: string | null, telefono: string): string {
+  return nombre ? `${esc(nombre)} — ${formatearNumero(telefono)}` : formatearNumero(telefono)
+}
+
 function getTemplate(
   eventType: EventType,
   payload: EventPayload,
@@ -106,249 +97,153 @@ function getTemplate(
   const metodoPago = getMetodoPago(verified, payload)
   const descripcion = getDescripcion(payload)
 
+  const header = () => `📱 ${clienteLine(nombre, telefono)}`
+
   switch (eventType) {
     case 'ORDER_CREATED':
     case 'PAYMENT_RECEIVED':
     case 'PAYMENT_CONFIRMED':
       return [
-        '🌸 *¡VENTA CERRADA!* 🌸',
-        '',
-        ...(nombre ? [`👤 *Cliente:* ${esc(nombre)}`] : []),
-        `📱 *Teléfono:* ${formatearNumero(telefono)}`,
-        ...(producto ? [`💐 *Producto:* ${esc(producto)}`] : []),
-        ...(descripcion ? [`📝 *Detalles:* ${esc(descripcion)}`] : []),
-        ...(precio ? [`💰 *Total:* ${esc(precio)}`] : []),
-        ...(sucursal ? [`📍 *Entrega:* ${esc(sucursal)}`] : []),
-        ...(metodoPago ? [`💳 *Pago:* ${esc(metodoPago)}`] : []),
+        '🌸 *VENTA CERRADA*',
+        header(),
+        ...(producto ? [esc(producto)] : []),
+        ...(precio ? [`💰 ${esc(precio)}`] : []),
+        ...(sucursal ? [`📍 ${esc(sucursal)}`] : []),
+        ...(metodoPago ? [`💳 ${esc(metodoPago)}`] : []),
+        ...(descripcion ? [esc(descripcion)] : []),
       ].join('\n')
 
     case 'ORDER_UPDATED':
       return [
         '📦 *PEDIDO APARTADO*',
-        '',
-        ...(nombre ? [`👤 *Cliente:* ${esc(nombre)}`] : []),
-        `📱 *Teléfono:* ${formatearNumero(telefono)}`,
-        ...(producto ? [`💐 *Producto:* ${esc(producto)}`] : []),
-        ...(descripcion ? [`📝 *Detalles:* ${esc(descripcion)}`] : []),
-        ...(precio ? [`💰 *Total:* ${esc(precio)}`] : []),
-        ...(sucursal ? [`📍 *Entrega:* ${esc(sucursal)}`] : []),
-        ...(metodoPago ? [`💳 *Pago:* ${esc(metodoPago)}`] : []),
+        header(),
+        ...(producto ? [esc(producto)] : []),
+        ...(precio ? [`💰 ${esc(precio)}`] : []),
+        ...(sucursal ? [`📍 ${esc(sucursal)}`] : []),
+        ...(metodoPago ? [`💳 ${esc(metodoPago)}`] : []),
       ].join('\n')
 
     case 'HUMAN_REQUIRED':
       return [
-        `⚠️ *CLIENTE NECESITA ATENCIÓN HUMANA*`,
-        '',
-        ...(nombre ? [`👤 *Cliente:* ${esc(nombre)}`] : []),
-        `📱 *Teléfono:* ${formatearNumero(telefono)}`,
-        ...(descripcion ? [`💬 *Mensaje:* ${esc(descripcion.slice(0, 200))}`] : []),
+        '⚠️ *ATENCIÓN HUMANA*',
+        header(),
+        ...(descripcion ? [esc(descripcion.slice(0, 200))] : []),
       ].join('\n')
 
     case 'CUSTOMER_ANGRY':
       return [
-        '⚠️ *QUEJA DEL CLIENTE*',
-        '',
-        `📱 *Teléfono:* ${formatearNumero(telefono)}`,
-        ...(descripcion ? [`💬 *Reporta:* ${esc(descripcion.slice(0, 300))}`] : []),
+        '⚠️ *QUEJA*',
+        header(),
+        ...(descripcion ? [esc(descripcion.slice(0, 300))] : []),
       ].join('\n')
 
     case 'PAYMENT_PENDING':
       return [
         '⏳ *PAGO PENDIENTE*',
-        '',
-        ...(nombre ? [`👤 *Cliente:* ${esc(nombre)}`] : []),
-        `📱 *Teléfono:* ${formatearNumero(telefono)}`,
-        ...(producto ? [`🌸 *Producto:* ${esc(producto)}`] : []),
-        ...(precio ? [`💵 *Total:* ${esc(precio)}`] : []),
-        ...(sucursal ? [`📍 *Sucursal:* ${esc(sucursal)}`] : []),
-        ...(metodoPago ? [`💳 *Método:* ${esc(metodoPago)}`] : []),
+        header(),
+        ...(producto ? [esc(producto)] : []),
+        ...(precio ? [`💰 ${esc(precio)}`] : []),
+        ...(sucursal ? [`📍 ${esc(sucursal)}`] : []),
       ].join('\n')
 
     case 'PHOTO_REQUESTED':
       return [
-        '📸 *CLIENTE PIDE FOTOS*',
-        '',
-        ...(nombre ? [`👤 *Cliente:* ${formatearNumero(telefono, nombre)}`] : [`📱 *Cliente:* ${formatearNumero(telefono)}`]),
-        `💬 Quiere ver fotos de los arreglos disponibles.`,
-        ...(descripcion ? [`📝 *Contexto:* ${esc(descripcion.slice(0, 300))}`] : []),
+        '📸 *PIDEN FOTOS*',
+        header(),
+        ...(descripcion ? [esc(descripcion.slice(0, 200))] : []),
       ].join('\n')
 
     case 'PHOTO_RECEIVED':
       return [
         '🖼️ *FOTO RECIBIDA*',
-        '',
-        `📱 *Cliente:* ${formatearNumero(telefono)}`,
-        ...(descripcion ? [`💬 *Descripción:* ${esc(descripcion.slice(0, 200))}`] : []),
+        header(),
+        ...(descripcion ? [esc(descripcion.slice(0, 200))] : []),
       ].join('\n')
 
     case 'PHOTO_SENT':
       return [
-        '🖼️ *FOTO ENVIADA AL CLIENTE*',
-        '',
-        `📱 *Cliente:* ${formatearNumero(telefono)}`,
-        ...(descripcion ? [`💬 *Detalle:* ${esc(descripcion.slice(0, 200))}`] : []),
+        '🖼️ *FOTO ENVIADA*',
+        header(),
+        ...(descripcion ? [esc(descripcion.slice(0, 200))] : []),
       ].join('\n')
 
     case 'ENVIO_REQUESTED':
       return [
-        '🚚 *CLIENTE PIDE COTIZACIÓN DE ENVÍO*',
-        '',
-        ...(nombre ? [`👤 *Cliente:* ${formatearNumero(telefono, nombre)}`] : [`📱 *Cliente:* ${formatearNumero(telefono)}`]),
-        ...(sucursal ? [`📍 *Ubicación:* ${esc(sucursal)}`] : []),
-        ...(descripcion ? [`📍 *Ubicación:* ${esc(descripcion.slice(0, 300))}`] : []),
+        '🚚 *COTIZAR ENVÍO*',
+        header(),
+        ...(descripcion ? [esc(descripcion.slice(0, 300))] : []),
       ].join('\n')
 
     case 'CANCELACION_REQUESTED':
       return [
-        '🚫 *SOLICITUD DE CANCELACIÓN*',
-        '',
-        `📱 *Teléfono:* ${formatearNumero(telefono)}`,
-        ...(descripcion ? [`💬 *Motivo:* ${esc(descripcion.slice(0, 300))}`] : []),
+        '🚫 *CANCELACIÓN*',
+        header(),
+        ...(descripcion ? [esc(descripcion.slice(0, 300))] : []),
       ].join('\n')
 
     case 'CASE_CREATED':
       return [
         '📋 *NUEVO CASO*',
-        '',
-        ...(nombre ? [`👤 *Cliente:* ${formatearNumero(telefono, nombre)}`] : [`📱 *Cliente:* ${formatearNumero(telefono)}`]),
-        ...(descripcion ? [`🏷️ *Tipo:* ${esc(descripcion)}`] : []),
-        ...(sucursal ? [`${sucursal === 'critica' ? '🔴' : sucursal === 'alta' ? '🟠' : '🟢'} *Prioridad:* ${esc(sucursal)}`] : []),
+        header(),
+        ...(descripcion ? [`🏷️ ${esc(descripcion)}`] : []),
       ].join('\n')
 
     case 'CASE_ARCHIVED':
       return [
         '🗂️ *CASO ARCHIVADO*',
-        '',
-        `📱 *Cliente:* ${formatearNumero(telefono)}`,
-        ...(descripcion ? [`📝 *Motivo:* ${esc(descripcion)}`] : []),
+        header(),
+        ...(descripcion ? [esc(descripcion)] : []),
       ].join('\n')
 
     case 'COTIZACION_REQUESTED':
       return [
-        '🌷 *INTERÉS / COTIZACIÓN*',
-        '',
-        `📱 *Teléfono:* ${formatearNumero(telefono)}`,
-        ...(descripcion ? [`💬 *Detalle:* ${esc(descripcion.slice(0, 400))}`] : []),
+        '🌷 *COTIZACIÓN*',
+        header(),
+        ...(descripcion ? [esc(descripcion.slice(0, 400))] : []),
       ].join('\n')
 
     case 'ORDER_READY':
       return [
         '✅ *PEDIDO LISTO*',
-        '',
-        ...(nombre ? [`👤 *Cliente:* ${esc(nombre)}`] : []),
-        `📱 *Cliente:* ${formatearNumero(telefono)}`,
-        ...(producto ? [`💐 *Producto:* ${esc(producto)}`] : []),
+        header(),
+        ...(producto ? [esc(producto)] : []),
       ].join('\n')
 
     case 'ORDER_DELIVERED':
     case 'DELIVERY_COMPLETED':
       return [
-        '🚚 *PEDIDO ENTREGADO*',
-        '',
-        ...(nombre ? [`👤 *Cliente:* ${esc(nombre)}`] : []),
-        `📱 *Cliente:* ${formatearNumero(telefono)}`,
-        ...(producto ? [`💐 *Producto:* ${esc(producto)}`] : []),
+        '🚚 *ENTREGADO*',
+        header(),
+        ...(producto ? [esc(producto)] : []),
       ].join('\n')
 
     case 'CUSTOMER_WAITING':
       return [
-        '⏱️ *CLIENTE ESPERANDO*',
-        '',
-        ...(nombre ? [`👤 *Cliente:* ${esc(nombre)}`] : []),
-        `📱 *Cliente:* ${formatearNumero(telefono)}`,
+        '⏱️ *CLIENTE ESPERA*',
+        header(),
       ].join('\n')
 
     case 'PRICE_CONFIRMED':
       return [
         '💲 *PRECIO CONFIRMADO*',
-        '',
-        ...(nombre ? [`👤 *Cliente:* ${esc(nombre)}`] : []),
-        `📱 *Cliente:* ${formatearNumero(telefono)}`,
-        ...(precio ? [`💰 *Precio:* ${esc(precio)}`] : []),
-        ...(producto ? [`💐 *Producto:* ${esc(producto)}`] : []),
+        header(),
+        ...(precio ? [`💰 ${esc(precio)}`] : []),
+        ...(producto ? [esc(producto)] : []),
       ].join('\n')
 
     case 'ZONA_AMBIGUA':
       return [
-        '🧭 *ZONA DE ENVÍO AMBIGUA*',
-        '',
-        `📱 *Cliente:* ${formatearNumero(telefono)}`,
-        ...(descripcion ? [`💬 *Cliente escribió:* ${esc(descripcion.slice(0, 300))}`] : []),
-        ...(sucursal ? [`📍 *Posibles zonas:* ${esc(sucursal.slice(0, 500))}`] : []),
+        '🧭 *ZONA AMBIGUA*',
+        header(),
+        ...(descripcion ? [esc(descripcion.slice(0, 300))] : []),
       ].join('\n')
 
     default:
       return [
-        `📋 *EVENTO: ${esc(eventType)}*`,
-        '',
-        ...(nombre ? [`👤 *Cliente:* ${esc(nombre)}`] : []),
-        `📱 *Teléfono:* ${formatearNumero(telefono)}`,
-        ...(producto ? [`💐 *Producto:* ${esc(producto)}`] : []),
-        ...(precio ? [`💰 *Total:* ${esc(precio)}`] : []),
+        `📋 ${esc(eventType)}`,
+        header(),
+        ...(producto ? [esc(producto)] : []),
+        ...(precio ? [`💰 ${esc(precio)}`] : []),
       ].join('\n')
-  }
-}
-
-function getFooter(eventType: EventType): string {
-  switch (eventType) {
-    case 'ORDER_CREATED':
-    case 'PAYMENT_RECEIVED':
-    case 'PAYMENT_CONFIRMED':
-      return '✅ _Pago recibido — preparar pedido_'
-
-    case 'ORDER_UPDATED':
-      return '_Pedido apartado, pendiente de pago/confirmación final_'
-
-    case 'HUMAN_REQUIRED':
-      return '🙋 _Revisar WhatsApp y responder directamente_'
-
-    case 'CUSTOMER_ANGRY':
-      return '🙋 _Atención prioritaria requerida_'
-
-    case 'PAYMENT_PENDING':
-      return '⚠️ _Esperando confirmación de pago_'
-
-    case 'PHOTO_REQUESTED':
-      return '_Envíale las fotos actuales de lo que tenemos disponible_'
-
-    case 'PHOTO_RECEIVED':
-      return '_Revisar la foto para cotizar el arreglo_'
-
-    case 'PHOTO_SENT':
-      return '_Se envió una foto al cliente_'
-
-    case 'ENVIO_REQUESTED':
-      return '_Cotiza el precio exacto de envío y confírmalo al cliente_'
-
-    case 'CANCELACION_REQUESTED':
-      return '⚠️ _Revisar pedido y contactar al cliente_'
-
-    case 'CASE_CREATED':
-      return '_Dar seguimiento al nuevo caso_'
-
-    case 'CASE_ARCHIVED':
-      return '_Caso archivado_'
-
-    case 'COTIZACION_REQUESTED':
-      return '_Dar seguimiento al cliente y confirmar si desea apartar_'
-
-    case 'ORDER_READY':
-      return '_El pedido está listo para entrega o recogida_'
-
-    case 'ORDER_DELIVERED':
-    case 'DELIVERY_COMPLETED':
-      return '_El pedido fue entregado al cliente_'
-
-    case 'CUSTOMER_WAITING':
-      return '_El cliente está esperando respuesta del equipo_'
-
-    case 'PRICE_CONFIRMED':
-      return '_El cliente aceptó el precio, esperando datos para continuar_'
-
-    case 'ZONA_AMBIGUA':
-      return '_Revisar municipio/colonia antes de dar precio_'
-
-    default:
-      return '_Revisar evento_'
   }
 }

@@ -100,6 +100,12 @@ function construirPromptUsuario(
   payload: EventPayload,
   timeline: TimelineData
 ): string {
+  const historialTexto = timeline.historial && timeline.historial.length > 0
+    ? timeline.historial.slice(-30).map(m =>
+        `${m.rol === 'user' ? '👤 Cliente' : '🤖 Flora'}: ${m.contenido.slice(0, 300)}`
+      ).join('\n')
+    : '(sin historial)'
+
   return `Evento del sistema:
 Tipo: ${eventType}
 Teléfono: ${payload.telefono}
@@ -114,7 +120,12 @@ Timeline desde DB:
 Caso activo: ${timeline.caso ? `${timeline.caso.tipo} (${timeline.caso.estado})` : 'ninguno'}
 Pedido en DB: ${timeline.pedido ? `estado=${timeline.pedido.estado}, nombre=${timeline.pedido.nombre ?? '(vacio)'}, producto=${(timeline.pedido as any).arreglo?.nombre ?? '(vacio)'}, precio=${(timeline.pedido as any).precioPersonalizado ?? '(vacio)'}, sucursal=${timeline.pedido.sucursal ?? '(vacio)'}, fecha=${timeline.pedido.fechaEntrega ?? '(vacio)'}, hora=${timeline.pedido.horaEntrega ?? '(vacio)'}` : 'ninguno'}
 Última actividad: ${timeline.ultimaActividad ?? 'desconocida'}
-Pedido cancelado/archivado: ${timeline.pedidoCanceladoOArchivado ? 'SÍ' : 'no'}`
+Pedido cancelado/archivado: ${timeline.pedidoCanceladoOArchivado ? 'SÍ' : 'no'}
+
+Historial reciente de la conversación (los últimos mensajes del chat):
+${historialTexto}
+
+Extrae de este historial el nombre real del cliente, el producto que pidió, el precio acordado, la sucursal, la fecha y hora de entrega. Usa el historial como fuente principal. Si el evento tiene datos distintos, indica la diferencia en warnings.`
 }
 
 function fallbackSinToken(

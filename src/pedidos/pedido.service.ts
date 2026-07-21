@@ -147,27 +147,26 @@ export function transitar(pedido: PedidoActual, nuevoEstado: EstadoPedido): bool
 
   if (nuevoEstado === EstadoPedido.PRECIO_CONFIRMADO) {
     eventBus.emit(EventType.PRICE_CONFIRMED, {
-      orderId: pedido.id,
-      telefono: pedido.telefono ?? '',
+      ...buildOrderPayload(pedido),
+      descripcion: 'Precio confirmado por el cliente',
     })
   }
 
   if (nuevoEstado === EstadoPedido.LISTO) {
     eventBus.emit(EventType.ORDER_READY, {
-      orderId: pedido.id,
-      telefono: pedido.telefono ?? '',
+      ...buildOrderPayload(pedido),
       descripcion: 'Pedido listo para entrega',
     })
   }
 
   if (nuevoEstado === EstadoPedido.ENTREGADO) {
     eventBus.emit(EventType.ORDER_DELIVERED, {
-      orderId: pedido.id,
-      telefono: pedido.telefono ?? '',
+      ...buildOrderPayload(pedido),
+      descripcion: 'Pedido entregado al cliente',
     })
     eventBus.emit(EventType.DELIVERY_COMPLETED, {
-      orderId: pedido.id,
-      telefono: pedido.telefono ?? '',
+      ...buildOrderPayload(pedido),
+      descripcion: 'Entrega completada',
     })
   }
 
