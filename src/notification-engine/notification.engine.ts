@@ -26,6 +26,16 @@ const SYSTEM_EVENTS_SKIP_AI: ReadonlySet<string> = new Set([
   EventType.BOT_DAILY_ALERT,
 ])
 
+// ─── Eventos informativos que tampoco necesitan reconstrucción IA ────────────
+// Son notificaciones simples al equipo; no hay datos suficientes para reconstruir
+// un pedido en estos momentos del flujo.
+const LIGHTWEIGHT_EVENTS_SKIP_AI: ReadonlySet<string> = new Set([
+  EventType.COTIZACION_REQUESTED,
+  EventType.ENVIO_REQUESTED,
+  EventType.PHOTO_RECEIVED,
+  EventType.PHOTO_SENT,
+])
+
 export interface PipelineResult {
   accion: AccionNotificacion
   razonBloqueo: string | null
@@ -106,14 +116,16 @@ export async function processNotificationPipeline(
     advertencias.push(datos.razonRevision ?? 'Datos incompletos')
   }
 
-  // ── Eventos de sistema: saltar reconstrucción/auditoría IA ──────────────
+  // ── Eventos de sistema/informativos: saltar reconstrucción/auditoría IA ────
   const esEventoSistema = SYSTEM_EVENTS_SKIP_AI.has(eventType)
+  const esEventoLightweight = LIGHTWEIGHT_EVENTS_SKIP_AI.has(eventType)
+  const saltarIA = esEventoSistema || esEventoLightweight
 
   let reconstruction: Awaited<ReturnType<typeof reconstructOrder>> | null = null
   let auditoria: Awaited<ReturnType<typeof auditReconstruction>> | null = null
   let ruleResults: BusinessRuleWarning[] = []
 
-  if (!esEventoSistema) {
+  if (!saltarIA) {
     reconstruction = await reconstructOrder(eventType, payload, timeline)
 
     if (reconstruction.warnings.length > 0) {
@@ -157,7 +169,9 @@ export async function processNotificationPipeline(
       advertencias.push(`[R${r.ruleId}] ${r.message}`)
     }
   } else {
-    advertencias.push('[Pipeline] Evento de sistema — reconstrucción IA omitida')
+    advertencias.push(esEventoSistema
+      ? '[Pipeline] Evento de sistema — reconstrucción IA omitida'
+      : '[Pipeline] Evento informativo — reconstrucción IA omitida')
   }
 
   const tieneReglaError = ruleResults.some(r => r.severity === 'error')

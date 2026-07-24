@@ -17,9 +17,9 @@ const client = new OpenAI({
 const MODEL = process.env.GITHUB_MODEL ?? 'gpt-4o-mini'
 const REVIEW_MODEL = process.env.GITHUB_REVIEW_MODEL ?? MODEL
 
-// ─── Semáforo global: máximo 2 llamadas concurrentes a la API ───────────────
-// GitHub Models/Azure limita a 2 UserConcurrentRequests
-const MAX_CONCURRENT = 2
+// ─── Semáforo global: máximo 3 llamadas concurrentes a la API ───────────────
+// GitHub Models/Azure permite ~3 por cuenta; 3 evita colas cuando NotifEngine + bot actúan juntos
+const MAX_CONCURRENT = 3
 const SLOT_TIMEOUT_MS = 30_000
 let activeRequests = 0
 const requestQueue: Array<() => void> = []
