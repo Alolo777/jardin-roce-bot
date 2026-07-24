@@ -1,4 +1,4 @@
-import type { SystemEvent } from '../events/types'
+import { EventType, type SystemEvent } from '../events/types'
 import type { AccionNotificacion, DatosVerificados } from './types'
 import type { BusinessRuleWarning } from './business-rules.validator'
 import { buildTimeline } from './timeline.builder'
@@ -14,6 +14,17 @@ import {
   logPipelineError,
 } from './pipeline-logger'
 import { enviarMensajeTelegram } from '../../lib/telegram'
+
+// ─── Eventos de sistema que NO necesitan reconstrucción IA ──────────────────
+// Estos eventos no tienen un pedido/cliente asociado que reconstruir;
+// solo necesitan notificar a Telegram directamente.
+const SYSTEM_EVENTS_SKIP_AI: ReadonlySet<string> = new Set([
+  EventType.BOT_DISCONNECTED,
+  EventType.BOT_CONNECTED,
+  EventType.QR_GENERATED,
+  EventType.PROVIDER_FAILURE,
+  EventType.BOT_DAILY_ALERT,
+])
 
 export interface PipelineResult {
   accion: AccionNotificacion
@@ -95,63 +106,76 @@ export async function processNotificationPipeline(
     advertencias.push(datos.razonRevision ?? 'Datos incompletos')
   }
 
-  const reconstruction = await reconstructOrder(eventType, payload, timeline)
+  // ── Eventos de sistema: saltar reconstrucción/auditoría IA ──────────────
+  const esEventoSistema = SYSTEM_EVENTS_SKIP_AI.has(eventType)
 
-  if (reconstruction.warnings.length > 0) {
-    for (const w of reconstruction.warnings) {
-      advertencias.push(`[Reconstructor] ${w}`)
-    }
-  }
+  let reconstruction: Awaited<ReturnType<typeof reconstructOrder>> | null = null
+  let auditoria: Awaited<ReturnType<typeof auditReconstruction>> | null = null
+  let ruleResults: BusinessRuleWarning[] = []
 
-  const auditoria = await auditReconstruction(eventType, payload, timeline, reconstruction)
+  if (!esEventoSistema) {
+    reconstruction = await reconstructOrder(eventType, payload, timeline)
 
-  if (auditoria.errors.length > 0) {
-    for (const err of auditoria.errors) {
-      advertencias.push(`[Auditor] ${err}`)
-    }
-  }
-
-  if (!auditoria.approved) {
-    advertencias.push('IA #2 rechazó la reconstrucción — revisar manualmente')
-    if (auditoria.corrections.length > 0) {
-      for (const c of auditoria.corrections) {
-        advertencias.push(`[Corrección] ${c.field}: "${c.original}" → "${c.corrected}"`)
+    if (reconstruction.warnings.length > 0) {
+      for (const w of reconstruction.warnings) {
+        advertencias.push(`[Reconstructor] ${w}`)
       }
     }
-  }
 
-  const ruleResults = validateBusinessRules({
-    nombre: reconstruction.fields.name.value,
-    sucursal: reconstruction.fields.sucursal.value,
-    fecha: reconstruction.fields.fecha.value,
-    hora: reconstruction.fields.hora.value,
-    precio: reconstruction.fields.precio.value,
-    producto: reconstruction.fields.producto.value,
-    estado: reconstruction.fields.estado.value,
-    metodoPago: payload.metodoPago ?? null,
-    telefono: payload.telefono,
-    requiereRevision: datos.requiereRevision,
-    tipoEnvio: (payload.tipoEnvio as 'domicilio' | 'sucursal' | null) ?? null,
-  })
+    auditoria = await auditReconstruction(eventType, payload, timeline, reconstruction)
+
+    if (auditoria.errors.length > 0) {
+      for (const err of auditoria.errors) {
+        advertencias.push(`[Auditor] ${err}`)
+      }
+    }
+
+    if (!auditoria.approved) {
+      advertencias.push('IA #2 rechazó la reconstrucción — revisar manualmente')
+      if (auditoria.corrections.length > 0) {
+        for (const c of auditoria.corrections) {
+          advertencias.push(`[Corrección] ${c.field}: "${c.original}" → "${c.corrected}"`)
+        }
+      }
+    }
+
+    ruleResults = validateBusinessRules({
+      nombre: reconstruction.fields.name.value,
+      sucursal: reconstruction.fields.sucursal.value,
+      fecha: reconstruction.fields.fecha.value,
+      hora: reconstruction.fields.hora.value,
+      precio: reconstruction.fields.precio.value,
+      producto: reconstruction.fields.producto.value,
+      estado: reconstruction.fields.estado.value,
+      metodoPago: payload.metodoPago ?? null,
+      telefono: payload.telefono,
+      requiereRevision: datos.requiereRevision,
+      tipoEnvio: (payload.tipoEnvio as 'domicilio' | 'sucursal' | null) ?? null,
+    })
+
+    for (const r of ruleResults) {
+      advertencias.push(`[R${r.ruleId}] ${r.message}`)
+    }
+  } else {
+    advertencias.push('[Pipeline] Evento de sistema — reconstrucción IA omitida')
+  }
 
   const tieneReglaError = ruleResults.some(r => r.severity === 'error')
-  for (const r of ruleResults) {
-    advertencias.push(`[R${r.ruleId}] ${r.message}`)
-  }
+  const auditoriaAprobada = auditoria?.approved ?? true
 
   const accionFinal: AccionNotificacion =
     tieneReglaError ? 'ALERTA'
-    : !auditoria.approved ? 'ALERTA'
+    : !auditoriaAprobada ? 'ALERTA'
     : resultado.accion
 
   const verified: DatosVerificados = {
-    nombre: reconstruction.fields.name.value,
-    sucursal: reconstruction.fields.sucursal.value,
-    fecha: reconstruction.fields.fecha.value,
-    hora: reconstruction.fields.hora.value,
-    precio: reconstruction.fields.precio.value,
-    producto: reconstruction.fields.producto.value,
-    estado: reconstruction.fields.estado.value,
+    nombre: reconstruction?.fields.name.value ?? payload.cliente ?? null,
+    sucursal: reconstruction?.fields.sucursal.value ?? payload.sucursal ?? null,
+    fecha: reconstruction?.fields.fecha.value ?? null,
+    hora: reconstruction?.fields.hora.value ?? null,
+    precio: reconstruction?.fields.precio.value ?? payload.total ?? null,
+    producto: reconstruction?.fields.producto.value ?? payload.producto ?? null,
+    estado: reconstruction?.fields.estado.value ?? null,
     metodoPago: payload.metodoPago ?? null,
     telefono: payload.telefono,
     pedidoId: null,

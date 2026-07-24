@@ -2,6 +2,7 @@ import OpenAI from 'openai'
 import type { EventType, EventPayload } from '../events/types'
 import type { TimelineData } from './types'
 import type { ReconstructorResult } from './order.reconstructor'
+import { withLimit } from '../../lib/ai'
 
 const TIMEOUT_MS = 15_000
 
@@ -77,20 +78,22 @@ Verifica que IA #1:
 6. El producto no parezca inventado`
 
   try {
-    const response = await Promise.race([
-      client.chat.completions.create({
-        model: ia2Model(),
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0,
-        max_tokens: 1000,
-      }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout IA #2 Auditor')), TIMEOUT_MS)
-      ),
-    ])
+    const response = await withLimit(() =>
+      Promise.race([
+        client.chat.completions.create({
+          model: ia2Model(),
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0,
+          max_tokens: 1000,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout IA #2 Auditor')), TIMEOUT_MS)
+        ),
+      ])
+    )
 
     const content = response.choices?.[0]?.message?.content ?? ''
     const parsed = JSON.parse(content)

@@ -1112,7 +1112,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         }
 
         const intervencionAntesDeEnviar = obtenerIntervencionHumanaReciente(clienteId)
-        if (intervencionAntesDeEnviar && intervencionAntesDeEnviar.haceMs < 180_000) {
+        if (intervencionAntesDeEnviar && intervencionAntesDeEnviar.haceMs < 30_000) {
           console.log(`[bot] 🙋 Empleado respondió hace ${Math.round(intervencionAntesDeEnviar.haceMs / 1000)}s durante LLM; Flora omite respuesta para ${clienteId}`)
           await agregarAlHistorial(telefono, 'assistant', `[Flora omitió respuesta — empleado respondió: "${intervencionAntesDeEnviar.texto.slice(0, 150)}"]`)
           return

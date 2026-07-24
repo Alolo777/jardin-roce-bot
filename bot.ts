@@ -24,6 +24,7 @@ import { clasificarConversacion, clasificarImagenVenta, getAIResponse, revisarRe
 import { eventBus } from './src/events/event-bus'
 import { EventType } from './src/events/types'
 import { subscribeTelegramEvents } from './src/events/telegram.subscriber'
+import { verificarConexionTelegram } from './lib/telegram'
 import { subscribeLogEvents, logger, flushLogsNow } from './lib/logger.service'
 import { metrics } from './lib/metrics.service'
 import { supabaseAdmin } from './lib/supabase'
@@ -1204,6 +1205,10 @@ cargarEstado().catch(() => {})
 subscribeTelegramEvents()
 subscribeLogEvents()
 logger.info('bot', 'Bot iniciado — observabilidad activa')
+verificarConexionTelegram().then(r => {
+  if (r.ok) console.log(`[Telegram] ✅ ${r.detalle}`)
+  else console.warn(`[Telegram] ⚠️ ${r.detalle}`)
+}).catch(() => {})
 setInterval(() => {
   Promise.resolve(
     supabaseAdmin

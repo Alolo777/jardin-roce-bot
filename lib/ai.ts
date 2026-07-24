@@ -18,7 +18,8 @@ const MODEL = process.env.GITHUB_MODEL ?? 'gpt-4o-mini'
 const REVIEW_MODEL = process.env.GITHUB_REVIEW_MODEL ?? MODEL
 
 // ─── Semáforo global: máximo 2 llamadas concurrentes a la API ───────────────
-const MAX_CONCURRENT = 3
+// GitHub Models/Azure limita a 2 UserConcurrentRequests
+const MAX_CONCURRENT = 2
 const SLOT_TIMEOUT_MS = 30_000
 let activeRequests = 0
 const requestQueue: Array<() => void> = []
@@ -52,7 +53,7 @@ function releaseSlot(): void {
 
 const API_CALL_TIMEOUT_MS = 60_000
 
-async function withLimit<T>(fn: () => Promise<T>): Promise<T> {
+export async function withLimit<T>(fn: () => Promise<T>): Promise<T> {
   await concurrencySlot()
   try {
     return await Promise.race([

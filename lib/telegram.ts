@@ -67,8 +67,16 @@ async function enviar(texto: string, intentos = 3): Promise<void> {
         break
 
       } catch (err) {
-        console.warn(`[Telegram] Intento ${intento}/${intentos} fallido:`, (err as Error).message)
-        if (intento === intentos) { console.error('[Telegram] Todos los intentos fallaron.'); return }
+        const error = err as Error & { cause?: { code?: string; syscall?: string }; code?: string }
+        const detalles = error.cause
+          ? ` (cause: ${error.cause.code ?? error.cause.syscall ?? 'unknown'})`
+          : error.code
+            ? ` (code: ${error.code})`
+            : ''
+        console.warn(`[Telegram] Intento ${intento}/${intentos} fallido: ${error.message}${detalles}`)
+        if (intento === intentos) {
+          console.error(`[Telegram] Todos los intentos fallaron para chat ${chatId}.${detalles} Verifica: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, y conectividad de red (api.telegram.org).`)
+        }
         await new Promise(r => setTimeout(r, 2000 * intento))
       }
     }
@@ -770,13 +778,51 @@ export async function enviarFotoTelegram(
       }
     }
   } catch (err) {
-    console.warn('[Telegram] Error enviando foto:', (err as Error).message)
+    const error = err as Error & { cause?: { code?: string; syscall?: string }; code?: string }
+    const detalles = error.cause
+      ? ` (cause: ${error.cause.code ?? error.cause.syscall ?? 'unknown'})`
+      : error.code
+        ? ` (code: ${error.code})`
+        : ''
+    console.warn(`[Telegram] Error enviando foto: ${error.message}${detalles}`)
   }
 }
 
 // ── Export público para pipeline ──────────────────────────────────────────────
 export async function enviarMensajeTelegram(texto: string): Promise<void> {
   await enviar(texto)
+}
+
+// ── Verificación de conectividad (llamar al iniciar el bot) ──────────────────
+export async function verificarConexionTelegram(): Promise<{ ok: boolean; detalle: string }> {
+  if (!process.env.TELEGRAM_BOT_TOKEN) {
+    return { ok: false, detalle: 'TELEGRAM_BOT_TOKEN no configurado' }
+  }
+  if (CHAT_IDS.length === 0) {
+    return { ok: false, detalle: 'TELEGRAM_CHAT_ID no configurado' }
+  }
+
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 8_000)
+    const res = await fetch(`${API_BASE}/getMe`, { signal: controller.signal })
+    clearTimeout(timeout)
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      return { ok: false, detalle: `API respondió ${res.status}: ${JSON.stringify(err)}` }
+    }
+
+    const data = await res.json() as { result?: { username?: string } }
+    const botName = data?.result?.username ?? 'desconocido'
+    return { ok: true, detalle: `Bot @${botName} — ${CHAT_IDS.length} chat(s) configurado(s)` }
+  } catch (err) {
+    const error = err as Error & { cause?: { code?: string; syscall?: string }; code?: string }
+    const detalles = error.cause
+      ? `${error.cause.code ?? error.cause.syscall ?? 'unknown'}`
+      : error.code ?? error.message
+    return { ok: false, detalle: `No se puede alcanzar api.telegram.org — ${detalles}. Verifica DNS y reglas de firewall de la VM.` }
+  }
 }
 
 
