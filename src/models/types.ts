@@ -1,3 +1,7 @@
+// ════════════════════════════════════════════════════════════════
+// ENUMS
+// ════════════════════════════════════════════════════════════════
+
 export enum EstadoPedido {
   NUEVO = 'NUEVO',
   COTIZANDO = 'COTIZANDO',
@@ -59,10 +63,65 @@ export enum Prioridad {
   CRITICA = 'critica',
 }
 
+export enum MetodoPago {
+  TRANSFERENCIA = 'transferencia',
+  EFECTIVO_RECOGER = 'efectivo_recoger',
+  TARJETA_RECOGER = 'tarjeta_recoger',
+  PENDIENTE = 'pendiente',
+}
+
+export enum EstadoFlujo {
+  COTIZANDO = 'cotizando',
+  PRECIO_CONFIRMADO = 'precio_confirmado',
+  ESPERANDO_PRECIO_EQUIPO = 'esperando_precio_equipo',
+  ESPERANDO_FECHA_HORA = 'esperando_fecha_hora',
+  ESPERANDO_DATOS = 'esperando_datos',
+  ESPERANDO_NOMBRE = 'esperando_nombre',
+  ESPERANDO_PAGO = 'esperando_pago',
+  ESPERANDO_ENTREGA = 'esperando_entrega',
+  APARTADO_SUCURSAL = 'apartado_sucursal',
+  PAGADO_TRANSFERENCIA = 'pagado_transferencia',
+  CERRADO = 'cerrado',
+  CANCELADO = 'cancelado',
+}
+
+export enum TipoEnvio {
+  DOMICILIO = 'domicilio',
+  SUCURSAL = 'sucursal',
+}
+
+export enum FuenteConfirmacionPrecio {
+  EQUIPO = 'equipo',
+  IA = 'ia',
+  CLIENTE = 'cliente',
+  MANUAL = 'manual',
+}
+
+export enum EstadoReclamacion {
+  PENDIENTE = 'pendiente',
+  EN_PROCESO = 'en_proceso',
+  RESUELTO = 'resuelto',
+}
+
+export enum TipoReclamacion {
+  CANCELACION = 'cancelacion',
+  QUEJA = 'queja',
+  DEVOLUCION = 'devolucion',
+  OTRO = 'otro',
+}
+
+// ════════════════════════════════════════════════════════════════
+// INTERFACES EXISTENTES
+// ════════════════════════════════════════════════════════════════
+
 export interface ArregloInfo {
   nombre: string
   precio: number
   id?: string
+  categoria?: string
+  descripcion?: string
+  imagenUrl?: string
+  disponible?: boolean
 }
 
 export interface EnvioInfo {
@@ -90,7 +149,7 @@ export interface PedidoActual {
   sucursal?: string
   fechaEntrega?: string
   horaEntrega?: string
-  metodoPago?: 'transferencia' | 'efectivo_recoger' | 'tarjeta_recoger' | string
+  metodoPago?: MetodoPago | string
   nota?: string
   detallesEspeciales?: string
   fotoReferenciaBase64?: string
@@ -98,7 +157,9 @@ export interface PedidoActual {
   fotoReferenciaCaption?: string
   fotoReferenciaRecibidaEn?: string
   esperandoPrecioEnvio?: boolean
-  precioConfirmadoPor?: 'equipo' | 'ia' | 'cliente' | 'manual'
+  precioConfirmadoPor?: FuenteConfirmacionPrecio | string
+  casoId?: string
+  transiciones?: TransicionEstado[]
   cerradoEn?: string
   creadoEn?: string
   actualizadoEn?: string
@@ -128,4 +189,110 @@ export interface Cotizacion {
   respuesta?: string
   creadoEn: string
   archivadaEn?: string
+}
+
+// ════════════════════════════════════════════════════════════════
+// NUEVAS INTERFACES — FASE 2: MODELO DE DATOS
+// ════════════════════════════════════════════════════════════════
+
+export interface Sucursal {
+  id: string
+  nombre: string
+  direccion: string
+  telefono: string
+  horario: string
+  latitud?: number
+  longitud?: number
+  mapsUrl?: string
+  activa: boolean
+}
+
+export interface Direccion {
+  calle: string
+  numero?: string
+  colonia: string
+  municipio: string
+  estado: string
+  codigoPostal: string
+  referencia?: string
+  coordenadas?: { lat: number; lng: number }
+}
+
+export interface Funcionario {
+  id: string
+  nombre: string
+  telefono: string
+  rol: 'admin' | 'vendedor' | 'diseniador' | 'delivery'
+  activo: boolean
+  creadoEn: string
+}
+
+export interface ProductoDetalle {
+  id: string
+  nombre: string
+  precio: number
+  categoria: string
+  descripcion?: string
+  imagenUrl?: string
+  disponible: boolean
+  existencias?: number
+  temporada?: string
+}
+
+export interface Pago {
+  id: string
+  pedidoId: string
+  metodo: MetodoPago
+  monto: number
+  montoPendiente: number
+  comprobanteUrl?: string
+  comprobanteRecibidoEn?: string
+  confirmadoEn?: string
+  confirmadoPor?: string
+  estado: 'pendiente' | 'parcial' | 'completado' | 'reembolsado'
+  creadoEn: string
+}
+
+export interface Notificacion {
+  id: string
+  tipo: string
+  telefono: string
+  titulo: string
+  mensaje: string
+  canal: 'telegram' | 'whatsapp' | 'email'
+  estado: 'pendiente' | 'enviada' | 'fallo'
+  leida: boolean
+  creadoEn: string
+  enviadaEn?: string
+}
+
+export interface TransicionEstado {
+  desde: EstadoPedido
+  hasta: EstadoPedido
+  timestamp: string
+  usuario?: string
+  motivo?: string
+  automatica: boolean
+}
+
+export interface MetricaBot {
+  mensajesProcesados: number
+  llamadasIA: number
+  erroresIA: number
+  pedidosCreados: number
+  pedidosCompletados: number
+  tiempoRespuestaPromedio: number
+  clientesAtendidos: number
+  ultimaActualizacion: string
+}
+
+export interface ConversationState {
+  telefono: string
+  clienteId: string | null
+  existeHistorial: boolean
+  ultimoMensaje: { rol: 'user' | 'assistant'; contenido: string; timestamp: string } | null
+  horasInactivo: number
+  esNuevoCliente: boolean
+  totalMensajes: number
+  ultimaActividad: string | null
 }

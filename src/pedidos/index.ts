@@ -1,1 +1,15 @@
-export { crearPedido, obtenerPedido, transitar, transitarDesdeFlujo, archivarPedido, archivarSilencioso, cancelarPedido, limpiarCachesPedidos } from './pedido.service'
+export {
+  crearPedido,
+  obtenerPedido,
+  transitar,
+  cambiarEstado,
+  transitarDesdeFlujo,
+  archivarPedido,
+  archivarSilencioso,
+  cancelarPedido,
+  pedidoTieneDatosCompletos,
+  resetearPedido,
+  sincronizarConCaso,
+  obtenerHistorialTransiciones,
+  limpiarCachesPedidos,
+} from './pedido.service'

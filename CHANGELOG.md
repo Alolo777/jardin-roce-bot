@@ -1,5 +1,63 @@
 # CHANGELOG
 
+## 2026-07-28
+
+### FASE 10: Optimización — auditoría de duplicación (message-handler.ts + bot.ts)
+
+**Problema:** Se auditaron bot.ts, message-handler.ts, message-entry.ts y conversation.service.ts para encontrar código duplicado. Se detectaron 3 bloques de código muerto y 2 bloques de desglose de precio triplicados.
+
+**Archivos modificados:**
+- `src/whatsapp/message-handler.ts` — removidas 2 funciones muertas (`faltoFechaHoraParaCerrar`, `apartadoSucursalListo`); extraído `formatearTotalConDesglose()` para eliminar duplicación del cálculo de precio total
+- `bot.ts` — eliminada constante `MAX_LONGITUD_MENSAJE` (no usada, solo message-handler.ts la usaba)
+
+**Auditoría completa:** Ver `tasks/ses_055b7ce6effeqjZh5D3pn0ITp3` para lista completa de hallazgos.
+
+**Impacto:** Compatible. Compilación 0 errores.
+
+**Rollback:** Revertir cambios en message-handler.ts y bot.ts.
+
+---
+
+### FASE 10: Optimización — eliminación de código muerto en lib/telegram.ts
+
+**Problema:** lib/telegram.ts (828 líneas) contenía 30 funciones `enviarAlerta*` legacy que ya no tenían ningún caller después de FASE 9. Mantenerlas generaba deuda técnica, confusión y falsas expectativas.
+
+**Solución:** Eliminadas todas las funciones y tipos deprecated. El archivo ahora solo contiene 4 exportaciones activas:
+- `enviarMensajeTelegram` — usado por el pipeline de notificaciones
+- `enviarFotoTelegram` — usado para eventos PHOTO_RECEIVED
+- `verificarConexionTelegram` — usado en el arranque de bot.ts
+- Helpers internos: `esc`, `ultimos4`, `esLid`, `formatearNumero`, `horaActual`, `enviar`
+
+**Archivo modificado:**
+- `lib/telegram.ts` — 828 → 159 líneas (-669)
+
+**Impacto:** Compatible. Compilación 0 errores.
+
+**Rollback:** Revertir lib/telegram.ts.
+
+---
+
+### FASE 9: Telegram 100% event-driven — eliminada dependencia de fallbacks legacy
+
+**Problema:** Aunque el pipeline ya generaba mensajes para todos los eventos, `withPipeline` seguía aceptando un callback `sendNotification` que nunca se ejecutaba (porque el template builder siempre produce mensaje). 24 handlers legacy en `telegram.subscriber.ts` pasaban funciones `enviarAlerta*` muertas.
+
+**Solución:**
+- `withPipeline(event)` simplificado — ya no recibe callback. Siempre envía el mensaje del pipeline.
+- Nueva `withPipelinePhoto(event, sendPhoto)` para el único evento multimedia (PHOTO_RECEIVED).
+- 24 handlers legacy eliminados del subscriber (eran dead code).
+- Subscriber reducido de 290 → 42 líneas.
+
+**Archivos modificados:**
+- `src/notification-engine/notification.engine.ts` — `withPipeline` simplificado, agregado `withPipelinePhoto`
+- `src/notification-engine/index.ts` — exporta `withPipelinePhoto`
+- `src/events/telegram.subscriber.ts` — 26 handlers simplificados a `return withPipeline(event)`
+
+**Impacto:** Telegram depende exclusivamente del pipeline de eventos. Cero dependencia de OpenAI. 24 funciones legacy en `lib/telegram.ts` ahora son dead code confirmado (solo `enviarFotoTelegram` y `enviarMensajeTelegram` permanecen activas).
+
+**Rollback:** Revertir los 3 archivos.
+
+---
+
 ## 2026-07-18
 
 ### Módulo 20 — Fase 6.1: Notification Engine (Estructura Base)
@@ -1526,4 +1584,172 @@ Rollback: Sí — restaurar el bloque eliminado.
 | CASE_ARCHIVED | Emitido, no suscrito | ✅ Suscrito |
 
 **Impacto:** Compatible.
+**Rollback:** Sí.
+
+## 2026-07-28
+
+### Fase 5 — Order Engine
+
+**Objetivo:** Fortalecer la máquina de estados de pedidos, agregar historial de transiciones, validación de datos completos, y vinculación caso↔pedido.
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/models/types.ts` | `PedidoActual`: agrega `casoId`, `transiciones`, refina tipos `metodoPago` y `precioConfirmadoPor` |
+| `src/pedidos/pedido.service.ts` | Agrega `cambiarEstado()`, `obtenerHistorialTransiciones()`, `pedidoTieneDatosCompletos()`, `resetearPedido()`, `sincronizarConCaso()`. Refactoriza `transitar()` para usar `registrarTransicion()` y `emitirEventoTransicion()` |
+| `src/pedidos/pedido.repository.ts` | Agrega `caso_id` a sincronización con `pedidos_bot` |
+| `src/pedidos/index.ts` | Exporta nuevas funciones |
+| `src/whatsapp/message-handler.ts` | `sincronizarPedidoConCaso` ahora vincula pedido ↔ caso. Pasa `casoId` al crear pedido |
+| `src/orchestrator.ts` | Vincula pedido con caso activo al crearlo |
+
+**Nuevas funciones:**
+
+- `cambiarEstado(pedido, nuevoEstado, motivo?, usuario?)` — Transición con trazabilidad
+- `obtenerHistorialTransiciones(pedido)` — Consultar historial
+- `pedidoTieneDatosCompletos(pedido)` — Validar datos obligatorios
+- `resetearPedido(clienteId)` — Limpiar sesión de pedido
+- `sincronizarConCaso(pedido, casoId)` — Vincular pedido a caso
+
+**Transiciones validadas:**
+
+```
+NUEVO → COTIZANDO → PRECIO_CONFIRMADO → ESPERANDO_DATOS → ESPERANDO_PAGO → APARTADO → EN_PRODUCCION → LISTO → ENTREGADO → ARCHIVADO
+                                                                                                                    ↘ POSTVENTA → ARCHIVADO
+Cualquier estado → CANCELADO, ARCHIVADO
+```
+
+**Regla:** Cada transición queda registrada en `pedido.transiciones[]` y emite evento `ORDER_UPDATED` + eventos específicos (PRICE_CONFIRMED, ORDER_READY, ORDER_DELIVERED, DELIVERY_COMPLETED, CANCELACION_REQUESTED).
+
+**Impacto:** Compatible con pedidos existentes en caché (campos opcionales).
+**Rollback:** Sí.
+
+## 2026-07-28
+
+### Fase 6 — Decision Engine
+
+**Objetivo:** Centralizar en el Decision Engine toda la lógica de detección que antes estaba duplicada en `message-handler.ts` y `intent-detector.ts`.
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/decision/decision.engine.ts` | Expande `Decision` con 10 nuevos campos. Agrega 12 detectores: `detectarFrustracion`, `detectarAtencionHumana`, `esSolicitudFotosDisponibles`, `clienteEligeFotoDisponible`, `detectarConfirmacionCorta`, `detectarEmpezarCero`, `esTextoComprobante`, `respuestaPideComprobante`, `detectarWebPedido`, `detectarEvento`, `detectarInteresCompra`, `detectarIntencionCatalogo` |
+| `src/decision/intent-detector.ts` | Simplificado: re-exporta `detectarEvento` y `detectarInteresCompra` desde `decision.engine.ts`. Mantiene `detectarCancelacion` y `detectarQueja` para retrocompatibilidad |
+| `src/decision/index.ts` | Exporta todas las nuevas funciones detectoras |
+| `src/whatsapp/message-handler.ts` | Elimina 8 funciones locales duplicadas (170+ líneas). Ahora importa detectores desde el Decision Engine. `detectarIntencion` simplificado usa `decision.intencionCatalogo` |
+
+**Decision Interface expandida:**
+
+| Campo nuevo | Propósito |
+|---|---|
+| `esFrustracion` | Cliente frustrado |
+| `razonHumano` | Razón específica de atención humana |
+| `esConfirmacionCorta` | "ok", "va", "dale", "sí" |
+| `esEmpezarCero` | "empecemos desde cero", "nuevo pedido" |
+| `solicitaFotos` | Pide fotos disponibles |
+| `seleccionoFoto` | Eligió una foto disponible |
+| `requiereComprobante` | Sistema espera comprobante |
+| `pideComprobante` | Respuesta del LLM pide comprobante |
+| `esWebPedido` | Pedido desde cotizador web |
+| `eventoDetectado` | "boda", "funeral", "aniversario", etc. |
+| `tieneInteresCompra` | "necesito", "busco", "quiero un" |
+| `intencionCatalogo` | 'catalogo' \| 'cotizador' \| 'normal' |
+
+**Líneas eliminadas de message-handler.ts:** ~170 (8 funciones completas + reducción de `detectarIntencion`).
+
+**Impacto:** Compatible. Todas las funciones antiguas siguen exportadas desde `intent-detector.ts` sin cambiar su firma.
+**Rollback:** Sí.
+
+## 2026-07-28
+
+### Fase 7 — Prompt Builder
+
+**Objetivo:** Modularizar el Prompt Builder en secciones separadas, inyectar reglas de negocio validadas desde TypeScript (no desde el prompt), y preparar el camino para reducir el system prompt almacenado en Supabase.
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/openai/prompt.builder.ts` | Rediseño completo: 4 secciones modulares (`buildPersonalitySection`, `buildValidatedRulesSection`, `construirContextoPrompt`, `construirPromptCompleto`). Agrega `buildMinimalSystemPrompt` como reemplazo opcional del FALLBACK_SYSTEM_PROMPT |
+| `src/openai/index.ts` | Exporta las 3 nuevas funciones |
+| `src/whatsapp/message-handler.ts` | Inyecta `buildValidatedRulesSection()` justo antes de llamar al LLM |
+| `src/orchestrator.ts` | Inyecta `buildValidatedRulesSection()` en `contextoPrompt` |
+
+**Nuevas funciones:**
+
+| Función | Propósito |
+|---|---|
+| `buildPersonalitySection()` | Solo tono y estilo de Flora. Sin reglas de negocio |
+| `buildValidatedRulesSection()` | Horarios, pagos, sucursales, precios de flores — todos desde validadores TypeScript |
+| `buildMinimalSystemPrompt()` | Prompt completo mínimo (personalidad + referencia a reglas validadas) |
+
+**Comparativa: Antes vs Ahora**
+
+| Aspecto | ❌ Antes | ✅ Ahora |
+|---|---|---|
+| **Estructura del prompt** | Monolítico ~280 líneas en `lib/ai.ts` + `contextoExtra` pegado como string | 4 secciones modulares separadas por responsabilidad |
+| **Reglas de negocio** | Hardcodeadas en FALLBACK_SYSTEM_PROMPT (horarios, pagos, sucursales, precios de flores, URLs) | Inyectadas dinámicamente desde `horario.validator.ts`, `pago.validator.ts`, etc. |
+| **Horarios** | Texto fijo: "Lun-Vie 10:00-19:00, Sáb-Dom 10:00-17:00" | Calculado por backend: `[REGLAS VALIDADAS POR EL BACKEND]` con día actual y mañana |
+| **Cuenta bancaria** | Texto fijo en el prompt | `obtenerTextoCuenta()` desde `pago.validator.ts` |
+| **Extensibilidad** | Agregar una regla = editar el prompt en Supabase + fallback | Agregar una regla = editar `buildValidatedRulesSection()` o el validador correspondiente |
+| **System prompt en Supabase** | Puede editarse manualmente, difícil de mantener sincronizado | Puede reducirse progresivamente. `buildMinimalSystemPrompt()` como reemplazo opcional |
+
+**Impacto:** Compatible. El system prompt existente en Supabase sigue funcionando. `construirPromptCompleto` mantiene firma idéntica. Las nuevas funciones son aditivas.
+**Rollback:** Sí.
+
+## 2026-07-28
+
+### Fase 8 — Event Engine
+
+**Objetivo:** Cerrar la brecha entre eventos emitidos y suscritos. Garantizar que toda acción importante del sistema genere un evento y que ningún evento suscrito quede sin emisión.
+
+**Problema detectado:** De 27 `EventType` definidos, `PAYMENT_RECEIVED` estaba suscrito en `telegram.subscriber.ts` pero NUNCA era emitido desde ningún lugar del código.
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/pedidos/pedido.service.ts` | `crearPedido()` ahora emite `ORDER_CREATED`. `emitirEventoTransicion()` ahora emite `PAYMENT_PENDING` al entrar a `ESPERANDO_PAGO` y `PAYMENT_RECEIVED` al entrar a `APARTADO` |
+| `src/whatsapp/message-handler.ts` | Agrega `CUSTOMER_WAITING` donde faltaba: al pedir fotos, al solicitar cotización, al mostrar interés de compra |
+
+**Eventos antes/después:**
+
+| EventType | Antes | Ahora |
+|---|---|---|
+| `ORDER_CREATED` | Solo desde bot.ts (web) y message-handler.ts (comprobante incompleto) | ✅ También desde `pedido.service.ts` cada vez que `crearPedido()` es llamado |
+| `PAYMENT_PENDING` | Solo desde bot.ts (código legacy) | ✅ Desde `emitirEventoTransicion()` al entrar a `ESPERANDO_PAGO` |
+| `PAYMENT_RECEIVED` | ❌ **NUNCA emitido** (suscrito en Telegram pero sin efecto) | ✅ Desde `emitirEventoTransicion()` al entrar a `APARTADO` |
+| `CUSTOMER_WAITING` | Solo al frustrarse | ✅ También al pedir fotos, al solicitar cotización, al mostrar interés de compra |
+
+**EventType audit completo:**
+
+```
+EventType                     │ Emitido │ Suscrito │ Estado
+──────────────────────────────┼─────────┼──────────┼───────
+CASE_CREATED                  │ ✅      │ ✅       │ ok
+CASE_ARCHIVED                 │ ✅      │ ✅       │ ok
+ORDER_CREATED                 │ ✅+NUEVO│ ✅       │ ok (nuevo desde engine)
+ORDER_UPDATED                 │ ✅      │ ✅       │ ok
+ORDER_READY                   │ ✅      │ ✅       │ ok
+ORDER_DELIVERED               │ ✅      │ ✅       │ ok
+PAYMENT_PENDING               │ ✅+NUEVO│ ✅       │ ok (nuevo desde engine)
+PAYMENT_RECEIVED              │ ✅NUEVO │ ✅       │ ✅ CORREGIDO
+PAYMENT_CONFIRMED             │ ✅      │ ✅       │ ok
+HUMAN_REQUIRED                │ ✅      │ ✅       │ ok
+CUSTOMER_ANGRY                │ ✅      │ ✅       │ ok
+CUSTOMER_WAITING              │ ✅+     │ ✅       │ ✅ ampliado
+PHOTO_REQUESTED               │ ✅      │ ✅       │ ok
+PHOTO_RECEIVED                │ ✅      │ ✅       │ ok
+PHOTO_SENT                    │ ✅      │ ✅       │ ok
+PRICE_CONFIRMED               │ ✅      │ ✅       │ ok
+DELIVERY_COMPLETED            │ ✅      │ ✅       │ ok
+COTIZACION_REQUESTED          │ ✅      │ ✅       │ ok
+ENVIO_REQUESTED               │ ✅      │ ✅       │ ok
+ZONA_AMBIGUA                  │ ✅      │ ✅       │ ok
+CANCELACION_REQUESTED         │ ✅      │ ✅       │ ok
+QR_GENERATED / BOT_* / PROVIDER │ ✅    │ ✅       │ ok
+```
+
+**Impacto:** Compatible. No se rompen suscripciones existentes. Las nuevas emisiones usan payloads que ya estaban definidos en los suscriptores.
 **Rollback:** Sí.

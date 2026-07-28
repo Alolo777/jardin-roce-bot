@@ -1,4 +1,4 @@
-import { EstadoPedido, PedidoActual } from '../models/types'
+import { EstadoPedido, PedidoActual, TransicionEstado, MetodoPago } from '../models/types'
 import { eventBus } from '../events/event-bus'
 import { EventType, EventPayload } from '../events/types'
 import { guardarPedidos, cargarPedidos, sincronizarPedidosBot } from './pedido.repository'
@@ -71,6 +71,88 @@ function buildOrderPayload(pedido: PedidoActual): EventPayload {
   }
 }
 
+function registrarTransicion(
+  pedido: PedidoActual,
+  desde: EstadoPedido,
+  hasta: EstadoPedido,
+  motivo?: string,
+  usuario?: string,
+  automatica?: boolean,
+): void {
+  const transicion: TransicionEstado = {
+    desde,
+    hasta,
+    timestamp: new Date().toISOString(),
+    usuario,
+    motivo,
+    automatica: automatica ?? false,
+  }
+  if (!pedido.transiciones) pedido.transiciones = []
+  pedido.transiciones.push(transicion)
+}
+
+function emitirEventoTransicion(pedido: PedidoActual, desde: EstadoPedido, hasta: EstadoPedido): void {
+  const payload: EventPayload = {
+    ...buildOrderPayload(pedido),
+    descripcion: `Estado: ${desde} → ${hasta}`,
+  }
+
+  eventBus.emit(EventType.ORDER_UPDATED, payload)
+
+  if (hasta === EstadoPedido.PRECIO_CONFIRMADO) {
+    eventBus.emit(EventType.PRICE_CONFIRMED, {
+      ...payload,
+      descripcion: 'Precio confirmado por el cliente',
+    })
+  }
+  if (hasta === EstadoPedido.ESPERANDO_PAGO) {
+    eventBus.emit(EventType.PAYMENT_PENDING, {
+      orderId: pedido.id,
+      telefono: pedido.telefono ?? '',
+      cliente: pedido.nombre ?? '',
+      producto: payload.producto,
+      total: payload.total,
+      sucursal: payload.sucursal,
+      metodoPago: pedido.metodoPago ?? '',
+      descripcion: 'Esperando pago del cliente',
+    })
+  }
+  if (hasta === EstadoPedido.APARTADO) {
+    eventBus.emit(EventType.PAYMENT_RECEIVED, {
+      orderId: pedido.id,
+      telefono: pedido.telefono ?? '',
+      cliente: pedido.nombre ?? '',
+      producto: payload.producto,
+      total: payload.total,
+      metodoPago: pedido.metodoPago ?? '',
+      descripcion: 'Pago recibido, pedido apartado',
+    })
+  }
+  if (hasta === EstadoPedido.LISTO) {
+    eventBus.emit(EventType.ORDER_READY, {
+      ...payload,
+      descripcion: 'Pedido listo para entrega',
+    })
+  }
+  if (hasta === EstadoPedido.ENTREGADO) {
+    eventBus.emit(EventType.ORDER_DELIVERED, {
+      ...payload,
+      descripcion: 'Pedido entregado al cliente',
+    })
+    eventBus.emit(EventType.DELIVERY_COMPLETED, {
+      ...payload,
+      descripcion: 'Entrega completada',
+    })
+  }
+  if (hasta === EstadoPedido.CANCELADO) {
+    eventBus.emit(EventType.CANCELACION_REQUESTED, {
+      orderId: pedido.id,
+      telefono: pedido.telefono ?? '',
+      descripcion: 'Pedido cancelado',
+    })
+  }
+}
+
 export function crearPedido(clienteId: string, telefono: string, datosIniciales?: Partial<PedidoActual>): PedidoActual {
   const pedido: PedidoActual = {
     id: generarId(),
@@ -78,12 +160,22 @@ export function crearPedido(clienteId: string, telefono: string, datosIniciales?
     telefono,
     creadoEn: new Date().toISOString(),
     actualizadoEn: new Date().toISOString(),
+    transiciones: [],
     ...datosIniciales,
   }
 
   PEDIDOS.set(clienteId, pedido)
-
   persistir()
+
+  eventBus.emit(EventType.ORDER_CREATED, {
+    orderId: pedido.id,
+    telefono: pedido.telefono ?? '',
+    cliente: pedido.nombre ?? '',
+    producto: pedido.productoPersonalizado ?? pedido.arreglo?.nombre ?? 'Por definir',
+    total: pedido.precioPersonalizado ?? pedido.arreglo?.precio ?? 0,
+    descripcion: 'Pedido creado',
+  })
+
   return pedido
 }
 
@@ -118,6 +210,7 @@ export function syncLegacyToEngine(clienteId: string, telefono: string, legado: 
     datos.arreglo = { nombre: a.nombre, precio: a.precio, id: a.id }
   }
   if (Array.isArray(legado.extras)) datos.extras = legado.extras as PedidoActual['extras']
+  if (typeof legado.casoId === 'string') datos.casoId = legado.casoId
 
   return crearPedido(clienteId, telefono, datos)
 }
@@ -132,41 +225,42 @@ export function transitar(pedido: PedidoActual, nuevoEstado: EstadoPedido): bool
     return false
   }
 
+  const desde = actual
   pedido.estado = nuevoEstado
   pedido.actualizadoEn = new Date().toISOString()
 
-  eventBus.emit(EventType.ORDER_UPDATED, {
-    ...buildOrderPayload(pedido),
-    descripcion: `Estado: ${actual} → ${nuevoEstado}`,
-  })
-
-  if (nuevoEstado === EstadoPedido.PRECIO_CONFIRMADO) {
-    eventBus.emit(EventType.PRICE_CONFIRMED, {
-      ...buildOrderPayload(pedido),
-      descripcion: 'Precio confirmado por el cliente',
-    })
-  }
-
-  if (nuevoEstado === EstadoPedido.LISTO) {
-    eventBus.emit(EventType.ORDER_READY, {
-      ...buildOrderPayload(pedido),
-      descripcion: 'Pedido listo para entrega',
-    })
-  }
-
-  if (nuevoEstado === EstadoPedido.ENTREGADO) {
-    eventBus.emit(EventType.ORDER_DELIVERED, {
-      ...buildOrderPayload(pedido),
-      descripcion: 'Pedido entregado al cliente',
-    })
-    eventBus.emit(EventType.DELIVERY_COMPLETED, {
-      ...buildOrderPayload(pedido),
-      descripcion: 'Entrega completada',
-    })
-  }
-
+  registrarTransicion(pedido, desde, nuevoEstado)
+  emitirEventoTransicion(pedido, desde, nuevoEstado)
   persistir()
   return true
+}
+
+export function cambiarEstado(
+  pedido: PedidoActual,
+  nuevoEstado: EstadoPedido,
+  motivo?: string,
+  usuario?: string,
+): boolean {
+  const actual = pedido.estado
+  if (!actual) return false
+
+  const permitidos = TRANSICIONES_VALIDAS[actual]
+  if (!permitidos || !permitidos.includes(nuevoEstado)) {
+    console.warn(`[pedidos] Transición inválida: ${actual} → ${nuevoEstado} (${motivo ?? 'sin motivo'})`)
+    return false
+  }
+
+  pedido.estado = nuevoEstado
+  pedido.actualizadoEn = new Date().toISOString()
+
+  registrarTransicion(pedido, actual, nuevoEstado, motivo, usuario, false)
+  emitirEventoTransicion(pedido, actual, nuevoEstado)
+  persistir()
+  return true
+}
+
+export function obtenerHistorialTransiciones(pedido: PedidoActual): TransicionEstado[] {
+  return pedido.transiciones ?? []
 }
 
 export function archivarPedido(clienteId: string, motivo?: string): boolean {
@@ -204,13 +298,6 @@ export function cancelarPedido(clienteId: string, motivo?: string): boolean {
   }
 
   PEDIDOS.delete(clienteId)
-
-  eventBus.emit(EventType.CANCELACION_REQUESTED, {
-    orderId: pedido.id,
-    telefono: pedido.telefono ?? '',
-    descripcion: motivo ?? 'Pedido cancelado',
-  })
-
   persistir()
   return true
 }
@@ -237,10 +324,31 @@ export function transitarDesdeFlujo(clienteId: string, flujo: string, motivo?: s
   const nuevo = mapping[flujo]
   if (!nuevo) return false
 
-  // No forzar transiciones inválidas: si transitar() las rechaza, el estado
-  // se queda en el anterior y queda registrado en el log (ver BUG-004).
   transitar(pedido, nuevo)
   return true
+}
+
+export function pedidoTieneDatosCompletos(pedido: PedidoActual): boolean {
+  return !!(
+    pedido.estado &&
+    pedido.nombre &&
+    (pedido.fechaEntrega || pedido.creadoEn) &&
+    (pedido.sucursal || pedido.direccion) &&
+    (pedido.metodoPago && pedido.metodoPago !== MetodoPago.PENDIENTE)
+  )
+}
+
+export function resetearPedido(clienteId: string): void {
+  const pedido = PEDIDOS.get(clienteId)
+  if (!pedido) return
+  PEDIDOS.delete(clienteId)
+  persistir()
+}
+
+export function sincronizarConCaso(pedido: PedidoActual, casoId: string): void {
+  pedido.casoId = casoId
+  pedido.actualizadoEn = new Date().toISOString()
+  persistir()
 }
 
 export function limpiarCachesPedidos(): void {
@@ -252,3 +360,4 @@ export function limpiarCachesPedidos(): void {
     }
   }
 }
+

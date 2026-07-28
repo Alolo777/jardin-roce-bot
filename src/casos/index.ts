@@ -1,1 +1,17 @@
-export { crearCaso, obtenerCasoActivo, archivarCaso, actualizarActividad, detectarCambioTema, clasificarTipoCaso, limpiarCachesCasos } from './caso.service'
+export {
+  crearCaso,
+  obtenerCasoActivo,
+  obtenerCasoPorId,
+  buscarCasosPorTelefono,
+  archivarCaso,
+  reabrirCaso,
+  actualizarActividad,
+  actualizarTipoCaso,
+  actualizarPrioridad,
+  asociarPedido,
+  asociarCotizacion,
+  detectarCambioTema,
+  clasificarTipoCaso,
+  limpiarCachesCasos,
+  cargarCasosDesdeBD,
+} from './caso.service'

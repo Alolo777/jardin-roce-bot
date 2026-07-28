@@ -1,7 +1,7 @@
 import { analizarIntencion, Decision } from './decision/decision.engine'
-import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema, clasificarTipoCaso } from './casos/caso.service'
-import { crearPedido, obtenerPedido } from './pedidos/pedido.service'
-import { construirContextoPrompt } from './openai/prompt.builder'
+import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema } from './casos/caso.service'
+import { crearPedido, obtenerPedido, sincronizarConCaso } from './pedidos/pedido.service'
+import { construirContextoPrompt, buildValidatedRulesSection } from './openai/prompt.builder'
 import { Caso, PedidoActual } from './models/types'
 
 export interface MensajeEntrante {
@@ -26,23 +26,26 @@ export function procesarMensajePre(mensaje: MensajeEntrante): ContextoProcesamie
 
   let casoActivo = obtenerCasoActivo(mensaje.clienteId)
   if (!casoActivo || detectarCambioTema(mensaje.texto, mensaje.horasInactivo)) {
-    casoActivo = crearCaso(mensaje.clienteId, mensaje.telefono, clasificarTipoCaso(mensaje.texto))
+    casoActivo = crearCaso(mensaje.clienteId, mensaje.telefono, undefined, undefined, { decisionIntencion: decision.intencion })
   }
   actualizarActividad(casoActivo)
 
-  if (!obtenerPedido(mensaje.clienteId)) {
-    crearPedido(mensaje.clienteId, mensaje.telefono)
+  let pedidoActivo = obtenerPedido(mensaje.clienteId)
+  if (!pedidoActivo) {
+    pedidoActivo = crearPedido(mensaje.clienteId, mensaje.telefono)
+    if (casoActivo?.id && pedidoActivo.id) sincronizarConCaso(pedidoActivo, casoActivo.id)
   }
-
-  const pedidoActivo = obtenerPedido(mensaje.clienteId)
-  const contextoPrompt = construirContextoPrompt({
-    decision,
-    caso: casoActivo,
-    pedido: pedidoActivo,
-    textoCliente: mensaje.texto,
-    horaActual: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
-    fechaActual: new Date().toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' }),
-  })
+  const contextoPrompt = [
+    buildValidatedRulesSection(),
+    construirContextoPrompt({
+      decision,
+      caso: casoActivo,
+      pedido: pedidoActivo,
+      textoCliente: mensaje.texto,
+      horaActual: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+      fechaActual: new Date().toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' }),
+    }),
+  ].join('\n\n')
 
   return { decision, casoActivo, pedidoActivo, contextoPrompt }
 }

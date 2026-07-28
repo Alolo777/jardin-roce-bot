@@ -2,16 +2,27 @@ import { eventBus } from '../events/event-bus'
 import { EventType } from '../events/types'
 import { supabaseAdmin } from '../../lib/supabase'
 import type { VentaCerrada } from '../../lib/types'
-import { obtenerHistorial, agregarAlHistorial, extraerTelefono } from '../conversation/conversation.service'
+import { obtenerHistorial, agregarAlHistorial, extraerTelefono, calcularHorasInactivo } from '../conversation/conversation.service'
 import { parseNombre, pareceNombreCliente, parseSucursal, parseDireccion, extraerFecha, extraerHora } from '../parser'
 import { getMensajeTexto, getMessageBody, getFechaActual, hasQuotedMsg, getQuotedText, ahoraCdmx } from './message-utils'
 import { notificarEmpleadosWhatsApp, enviarFotoEmpleadosWhatsApp } from './notification.service'
 import { obtenerNumeroReal } from './contact.service'
 import { FRUSTRACION_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, FOTOS_DISPONIBLES_TTL_MS, debeEnviarAlertaDedup, debeNotificarAtencionHumana, debeNotificarReclamacion, obtenerIntervencionHumanaReciente, RATE_AVISADOS, RATE_LIMIT_WINDOW_MS, extraerPrecioRespuesta } from './bot-state'
 import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema, clasificarTipoCaso } from '../casos/caso.service'
-import { crearPedido, obtenerPedido, transitarDesdeFlujo, archivarPedido } from '../pedidos/pedido.service'
-import { analizarIntencion } from '../decision/decision.engine'
-import { Intencion } from '../models/types'
+import { crearPedido, obtenerPedido, transitarDesdeFlujo, archivarPedido, sincronizarConCaso } from '../pedidos/pedido.service'
+import {
+  analizarIntencion,
+  detectarFrustracion,
+  detectarAtencionHumana,
+  esSolicitudFotosDisponibles,
+  clienteEligeFotoDisponible,
+  esTextoComprobante,
+  respuestaPideComprobante,
+  detectarConfirmacionCorta,
+  detectarEmpezarCero,
+} from '../decision/decision.engine'
+import { buildValidatedRulesSection } from '../openai/prompt.builder'
+
 import { construirContextoPrompt } from '../openai/prompt.builder'
 import { detectarCancelacion, detectarQueja, detectarEvento, detectarInteresCompra } from '../decision/intent-detector'
 import { validarHorario, esHorarioAnticipado, HORARIO_APERTURA } from '../validators/horario.validator'
@@ -20,7 +31,7 @@ import { validarSucursal, obtenerTextoConfirmacionSucursal } from '../validators
 import { buscarEnvio, pareceConsultaEnvio } from '../validators/envio.validator'
 import { evaluarCancelacion } from '../validators/cancelacion.validator'
 import { evaluarQueja } from '../validators/queja.validator'
-import { clasificarConversacion, getAIResponse, revisarRespuestaFlora, clasificarImagenVenta } from '../../lib/ai'
+import { getAIResponse, clasificarImagenVenta } from '../../lib/ai'
 import { logger } from '../../lib/logger.service'
 import type { PedidoActual, EstadoPedido } from '../models/types'
 
@@ -51,42 +62,8 @@ export interface MsgHandlerDeps {
 const MAX_LONGITUD_MENSAJE = 1000
 const GOOGLE_MAPS_REGEX = /https?:\/\/(?:www\.)?(?:google\.[a-z]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl)[^\s]*/i
 
-const KW_FRUSTRACION = [
-  'que show', 'qué show', 'no me ayudas', 'no sirves', 'pesimo', 'pésimo',
-  'mal servicio', 'molesta', 'molesto', 'enojada', 'enojado', 'horrible',
-  'no entiendes', 'quiero hablar con una persona', 'quiero hablar con alguien',
-  'con un humano', 'inutil', 'inútil', 'no funciona', 'tardas mucho',
-  'cuando me van a contestar', 'tardaste mucho', 'porque tardaste',
-]
-
-function detectarFrustracion(texto: string): boolean {
-  const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  return KW_FRUSTRACION.some(k => n.includes(k))
-}
-
-function detectarAtencionHumana(texto: string): string | null {
-  const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  if (detectarLinkMaps(texto) && /\b(direccion|ubicacion|colonia|calle)\b/i.test(n)) return null
-  const reglas: Array<[RegExp, string]> = [
-    [/\b(recoger|recojo|pasar por|paso por|recogi|recog[ií]|voy por|vengo por)\b.*\b(ramo|pedido|arreglo|flores?)\b|\b(ramo|pedido|arreglo|flores?)\b.*\b(recoger|recojo|pasar por|paso por|recogi|recog[ií]|voy por|vengo por)\b/i, 'Cliente quiere recoger un pedido'],
-    [/\b(sucursal|local|ubicacion|ubicación|direccion|dirección|atah)\b/i, 'Cliente pide información de sucursal/local'],
-    [/\b(foto|imagen)\b.*\b(local|sucursal|fachada|entrada|tienda)\b|\b(local|sucursal|fachada|entrada|tienda)\b.*\b(foto|imagen)\b/i, 'Cliente pide foto del local'],
-    [/\b(instagram|facebook|dm|inbox|mensaje por insta)\b/i, 'Cliente menciona conversación en redes sociales'],
-    [/\b(hable|hablar|comunicarme)\b.*\b(persona|humano|encargad[ao]|asesor)\b/i, 'Cliente solicita atención humana'],
-  ]
-  return reglas.find(([regex]) => regex.test(n))?.[1] ?? null
-}
-
 function extraerFechaHoraPedido(texto: string): { fecha?: string; hora?: string } {
   return { fecha: extraerFecha(texto) ?? undefined, hora: extraerHora(texto) ?? undefined }
-}
-
-function esSolicitudFotosDisponibles(texto: string): boolean {
-  return /\b(fotos?|ver.*arregl|muestra|enseña|manda.*foto|averlos|verlos|qu[eé].*(?:ramos?|ramitos?|arreglos?|flores?).*tiene(?:n)?|qu[eé]\s+tiene(?:n)?\s+disponible|hay.*foto|puedo.*ver|quisiera.*ver|ramitos?.*disponibles?|ramos?.*disponibles?|arreglos?.*disponibles?|disponibles?\s+hoy)\b/i.test(texto)
-}
-
-function clienteEligeFotoDisponible(texto: string): boolean {
-  return /\b(me\s+gust[oó]|me\s+interesa|quiero|quisiera|ap[aá]rtame|apartame|apartarlo|este|esta|ese|esa|el\s+de\s+la\s+foto|la\s+de\s+la\s+foto|qu[eé]\s+precio|cu[aá]nto|cuanto)\b/i.test(texto)
 }
 
 function contextoEsperaComprobante(clienteId: string, textoTurno: string, historialRecienteTexto: string, deps: Pick<MsgHandlerDeps, 'pedidoActual'>): boolean {
@@ -97,14 +74,14 @@ function contextoEsperaComprobante(clienteId: string, textoTurno: string, histor
   return Boolean(contextoPago && (imagenSinTexto || confirmaTurno || esTextoComprobante(textoTurno)))
 }
 
-function respuestaPideComprobante(texto: string): boolean {
-  return /(?:bbva|4152|devi\s+am[eé]rica|m[aá]ndame\s+(?:tu\s+)?comprobante|comprobante\s+cuando\s+est[eé]\s+listo|pon\s+tu\s+nombre\s+en\s+concepto)/i.test(texto)
-}
-
-function sincronizarPedidoConCaso(clienteId: string, telefono: string, cambioTema: boolean, deps: Pick<MsgHandlerDeps, 'pedidoActual' | 'resetearPedidoActivo'>): void {
+function sincronizarPedidoConCaso(clienteId: string, telefono: string, cambioTema: boolean, deps: Pick<MsgHandlerDeps, 'pedidoActual' | 'resetearPedidoActivo'>, casoId?: string): void {
   if (cambioTema || !obtenerPedido(clienteId)) {
     deps.resetearPedidoActivo(clienteId)
-    crearPedido(clienteId, telefono)
+    const nuevo = crearPedido(clienteId, telefono)
+    if (casoId && nuevo.id) sincronizarConCaso(nuevo, casoId)
+  } else if (casoId) {
+    const existente = obtenerPedido(clienteId)
+    if (existente && !existente.casoId) sincronizarConCaso(existente, casoId)
   }
 }
 
@@ -125,9 +102,7 @@ function detectarIntencion(texto: string, clienteId: string, deps: Pick<MsgHandl
   if (deps.pedidoEstaCerrado(clienteId)) return 'normal'
 
   const decision = analizarIntencion({ texto, horasInactivo: 0 })
-  if (decision.intencion === Intencion.CATALOGO || decision.intencion === Intencion.FOTOS) return 'catalogo'
-  if (decision.intencion === Intencion.COTIZACION || decision.intencion === Intencion.PERSONALIZADO) return 'cotizador'
-  return 'normal'
+  return decision.intencionCatalogo
 }
 
 function detectarLinkMaps(texto: string): boolean {
@@ -200,9 +175,7 @@ async function obtenerMunicipiosEnvio(): Promise<MunicipioEnvioData[]> {
   } catch (err) { console.error('[bot] Error obteniendo municipios:', err); return [] }
 }
 
-function esTextoComprobante(texto: string): boolean {
-  return /\b(comprobante|ya\s*pag[uú]e|pagado|pago\s*hecho|ya\s*qued[oó]|ya\s*transfer[ií]|transfer[ií]|transferencia|dep[oó]sito|recibo|ticket|bbva|devi\s+america|devi\s+américa|4152)\b/i.test(texto)
-}
+
 
 export function esTextoReferenciaOCotizacion(texto: string): boolean {
   return /\b(cotiz|cotizar|cotizaci[oó]n|cu[aá]nto|cuanto|precio|saldr[ií]a|costar[ií]a|ramo\s+as[ií]|como\s+(este|esta|la\s+foto|imagen)|referencia|foto\s+de\s+referencia|imagen\s+de\s+referencia|hacer\s+un\s+ramo|podr[ií]an\s+hacer|hortensias?|lilis?|rosas?|flores?\s+de\s+la\s+imagen)\b/i.test(texto)
@@ -303,11 +276,6 @@ function aplicarDatosPedidoDesdeTexto(clienteId: string, texto: string, deps: Pi
   }
 }
 
-function faltoFechaHoraParaCerrar(clienteId: string, deps: Pick<MsgHandlerDeps, 'pedidoActual'>): boolean {
-  const pedido = deps.pedidoActual(clienteId)
-  return !pedido.fechaEntrega || !pedido.horaEntrega
-}
-
 export function createMessageHandler(deps: MsgHandlerDeps) {
 
   function faltaFechaHoraParaCerrar(clienteId: string): boolean {
@@ -315,9 +283,16 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
     return !pedido.fechaEntrega || !pedido.horaEntrega
   }
 
-  function apartadoSucursalListo(clienteId: string): boolean {
+  function formatearTotalConDesglose(clienteId: string): string {
     const pedido = deps.pedidoActual(clienteId)
-    return Boolean(pedido.sucursal && deps.ventaListaParaCerrar(clienteId))
+    const subtotal = pedido.arreglo?.precio ?? pedido.precioPersonalizado ?? 0
+    const extras = deps.totalExtrasPedido(clienteId)
+    const envio = pedido.envio?.precio ?? 0
+    const total = subtotal + extras + envio
+    const desglose = [`ramo $${subtotal.toFixed(2)}`]
+    if (extras > 0) desglose.push(`extras $${extras.toFixed(2)}`)
+    if (envio > 0) desglose.push(`envío $${envio.toFixed(2)}`)
+    return desglose.length > 1 ? `$${total.toFixed(2)} MXN (${desglose.join(' + ')})` : `$${total.toFixed(2)} MXN`
   }
 
   async function registrarReclamacion(telefono: string, tipo: 'cancelacion' | 'queja', descripcion: string, arregloReferencia?: string | null): Promise<void> {
@@ -476,6 +451,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       await deps.persistirPedido(clienteId, telefono, 'cotizacion', descripcion)
       if (debeEnviarAlertaDedup(clienteId, 'cotizacion-foto', descripcion, 30 * 60_000)) {
         eventBus.emit(EventType.COTIZACION_REQUESTED, { telefono, descripcion })
+        eventBus.emit(EventType.CUSTOMER_WAITING, { telefono, descripcion: 'Cliente esperando cotización del equipo' })
         notificarEmpleadosWhatsApp(sock,
           `🌷 *Cliente necesita cotización:* ${telefono}\n\n${descripcion}\n\nRevisa la foto de referencia y cotízale por WhatsApp.`
         ).catch(err => console.error('[bot] WhatsApp empleados cotización:', err))
@@ -511,23 +487,22 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       if (pideEmpezarDesdeCero) deps.resetearPedidoActivo(clienteId)
 
       let casoActivo = obtenerCasoActivo(clienteId)
-      const horasInactivo = casoActivo
-        ? (Date.now() - new Date(casoActivo.ultimaActividad).getTime()) / (1000 * 60 * 60)
-        : 99
+      const horasInactivo = calcularHorasInactivo(casoActivo?.ultimaActividad)
       const cambioTema = casoActivo ? detectarCambioTema(textoCliente, horasInactivo) : false
-      if (cambioTema) {
-        casoActivo = crearCaso(clienteId, telefono, clasificarTipoCaso(textoCliente))
-      } else if (!casoActivo) {
-        casoActivo = crearCaso(clienteId, telefono, clasificarTipoCaso(textoCliente))
-      }
-      actualizarActividad(casoActivo)
-
-      sincronizarPedidoConCaso(clienteId, telefono, cambioTema, { pedidoActual: deps.pedidoActual, resetearPedidoActivo: deps.resetearPedidoActivo })
 
       const decision = analizarIntencion({
         texto: textoCliente,
         horasInactivo,
       })
+
+      if (cambioTema) {
+        casoActivo = crearCaso(clienteId, telefono, undefined, undefined, { decisionIntencion: decision.intencion })
+      } else if (!casoActivo) {
+        casoActivo = crearCaso(clienteId, telefono, undefined, undefined, { decisionIntencion: decision.intencion })
+      }
+      actualizarActividad(casoActivo)
+
+      sincronizarPedidoConCaso(clienteId, telefono, cambioTema, { pedidoActual: deps.pedidoActual, resetearPedidoActivo: deps.resetearPedidoActivo }, casoActivo?.id)
 
       const fechaHoraDetectada = extraerFechaHoraPedido(textoCliente)
       let esHorarioAnticipadoFlag = false
@@ -612,34 +587,28 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           `Flora NO debe ignorar esa respuesta. Si contiene precio, úsalo como precio confirmado por el equipo. No digas que falta confirmar ese mismo precio.`
       }
 
-      const clasificacionIA = await clasificarConversacion(
-        historialCompleto,
-        textoCliente,
-        [
-          `estado_pedido: ${deps.pedidoActual(clienteId).estadoFlujo ?? 'sin_pedido'}`,
-          `tiene_arreglo: ${deps.tieneArregloVerificado(clienteId) ? 'si' : 'no'}`,
-          `precio_confirmado: ${deps.tienePrecioConfirmado(clienteId) ? 'si' : 'no'}`,
-          intervencionHumana ? `intervencion_humana_reciente: ${intervencionHumana.texto}` : 'intervencion_humana_reciente: no',
-        ].join('\n')
-      )
       contextoExtra +=
-        `\n\n[CLASIFICACION_JSON] ${JSON.stringify(clasificacionIA)} ` +
-        `Usa esta clasificacion como apoyo operativo, pero respeta reglas duras de inventario, precios y pagos.`
-
-      if (!clasificacionIA.debeResponder && clasificacionIA.confianza >= 0.7) {
-        console.log(`[bot] Clasificador indicó no responder a ${clienteId}: ${clasificacionIA.razon}`)
-        return
+        `\n\n[DECISION] Intención: ${decision.intencion} | Prioridad: ${decision.prioridad} | ` +
+        `Requiere humano: ${decision.requiereHumano} | Cambio de tema: ${decision.esCambioTema}`
+      if (decision.contextoAdicional) {
+        contextoExtra += ` | ${decision.contextoAdicional}`
       }
 
-      if (clasificacionIA.debeAlertarWhatsApp && debeEnviarAlertaDedup(clienteId, `ia-whatsapp-${clasificacionIA.intencion}`, clasificacionIA.razon || textoCliente, 20 * 60_000)) {
+      if (decision.requiereHumano && debeEnviarAlertaDedup(clienteId, `humano-${decision.intencion}`, textoCliente, 20 * 60_000)) {
+        const telefonoReal = await numeroRealPromise
+        eventBus.emit(EventType.HUMAN_REQUIRED, {
+          telefono: telefonoReal,
+          cliente: msg.pushName || '',
+          descripcion: textoCliente.substring(0, 300),
+          contexto: `Intención: ${decision.intencion} | Prioridad: ${decision.prioridad}`,
+        })
+      }
+
+      if ((decision.prioridad === 'alta' || decision.prioridad === 'critica') && debeEnviarAlertaDedup(clienteId, `ia-whatsapp-${decision.intencion}`, textoCliente, 20 * 60_000)) {
         const telefonoReal = await numeroRealPromise
         notificarEmpleadosWhatsApp(sock,
-          `⚠️ *Alerta ${clasificacionIA.severidad.toUpperCase()} (${clasificacionIA.intencion}):* ${telefonoReal}\n\n${(clasificacionIA.razon || textoCliente).slice(0, 500)}`
+          `⚠️ *Alerta ${decision.prioridad.toUpperCase()} (${decision.intencion}):* ${telefonoReal}\n\n${textoCliente.slice(0, 500)}`
         ).catch(err => console.error('[bot] WhatsApp alerta IA:', err))
-      }
-      if (clasificacionIA.debeAlertarTelegram && clasificacionIA.intencion === 'atencion_humana' && debeEnviarAlertaDedup(clienteId, `ia-telegram-${clasificacionIA.intencion}`, clasificacionIA.razon || textoCliente, 20 * 60_000)) {
-        const telefonoReal = await numeroRealPromise
-        eventBus.emit(EventType.HUMAN_REQUIRED, { telefono: telefonoReal, cliente: msg.pushName || '', descripcion: (clasificacionIA.razon || textoCliente).substring(0, 300), contexto: `Severidad: ${clasificacionIA.severidad} | Intención: ${clasificacionIA.intencion}` })
       }
       const pideFotosDisponibles = esSolicitudFotosDisponibles(textoCliente) &&
         !(/\b(pague|pag[uú]e|comprobante|transfer|ya\s*envi[eé])\b/i.test(textoCliente))
@@ -674,7 +643,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           `El sistema ya recibio la foto de referencia/comprobante y la enviara al equipo. ` +
           `NO le pidas al cliente que la reenvie. Si pide cotizacion de un ramo como la foto, responde que ya recibiste la referencia y que el equipo la revisara para cotizarle.`
       }
-      const motivoAtencionHumana = detectarAtencionHumana(textoCliente) || (clasificacionIA.intencion === 'atencion_humana' && clasificacionIA.confianza >= 0.65 ? clasificacionIA.razon || 'Cliente requiere atención humana' : null)
+      const motivoAtencionHumana = detectarAtencionHumana(textoCliente) || (decision.requiereHumano ? 'Cliente requiere atención humana' : null)
       if (motivoAtencionHumana) {
         contextoExtra +=
           `\n\n[ATENCION HUMANA REQUERIDA: ${motivoAtencionHumana}] ` +
@@ -785,10 +754,10 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           `\nINSTRUCCION: El usuario respondió específicamente a ese mensaje. Úsalo para entender a qué se refiere.`
       }
 
-      const evalCancel = evaluarCancelacion(textoCliente, clasificacionIA)
-      if (evalCancel.detectada && !evalCancel.descartadaPorIA) {
+      const evalCancel = evaluarCancelacion(textoCliente)
+      if (evalCancel.detectada) {
         contextoExtra += `\n\n[CLIENTE QUIERE CANCELAR UN PEDIDO]\n${evalCancel.instruccion}`
-        if ((clasificacionIA.severidad === 'alta' || clasificacionIA.severidad === 'critica' || clasificacionIA.intencion === 'cancelacion') && debeNotificarReclamacion(clienteId, 'cancelacion')) {
+        if (debeNotificarReclamacion(clienteId, 'cancelacion')) {
           const telefonoReal = await numeroRealPromise
           const referencia = deps.pedidoActual(clienteId).arreglo?.nombre ?? null
           eventBus.emit(EventType.CANCELACION_REQUESTED, { telefono: telefonoReal, descripcion: textoCliente.substring(0, 300) })
@@ -797,10 +766,10 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         }
       }
 
-      const evalQueja = evaluarQueja(textoCliente, clasificacionIA)
-      if (evalQueja.detectada && !evalQueja.descartadaPorIA) {
+      const evalQueja = evaluarQueja(textoCliente)
+      if (evalQueja.detectada) {
         contextoExtra += `\n\n[CLIENTE TIENE UNA QUEJA O RECLAMO]\n${evalQueja.instruccion}`
-        if ((clasificacionIA.severidad === 'alta' || clasificacionIA.severidad === 'critica' || clasificacionIA.intencion === 'queja') && debeNotificarReclamacion(clienteId, 'queja')) {
+        if (debeNotificarReclamacion(clienteId, 'queja')) {
           const telefonoReal = await numeroRealPromise
           const referencia = deps.pedidoActual(clienteId).arreglo?.nombre ?? null
           eventBus.emit(EventType.CUSTOMER_ANGRY, { telefono: telefonoReal, descripcion: textoCliente.substring(0, 300) })
@@ -849,6 +818,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
             cliente: msg.pushName || '',
             descripcion: descripcionInteres,
           })
+          eventBus.emit(EventType.CUSTOMER_WAITING, { telefono: telefonoReal, descripcion: 'Cliente esperando cotización' })
         }
       }
 
@@ -866,6 +836,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
             cliente: msg.pushName || '',
             descripcion: `Cliente ${msg.pushName || 'sin nombre'} (${telefonoReal}) pide ver fotos de arreglos disponibles`,
           })
+          eventBus.emit(EventType.CUSTOMER_WAITING, { telefono: telefonoReal, descripcion: 'Cliente esperando fotos de arreglos' })
           console.log(`[bot] 📸 Alerta de fotos enviada para ${telefonoReal}`)
         }
       }
@@ -1004,15 +975,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       if (!ventaCerrada && !deps.pedidoEstaCerrado(clienteId) && confirmaCorto && deps.ventaListaParaCerrar(clienteId) && (deps.tieneArregloVerificado(clienteId) || (textoCliente.length < 150 && !textoCliente.includes('?')))) {
         const venta = deps.ventaDesdeEstado(clienteId)
         if (venta) {
-          const pedido = deps.pedidoActual(clienteId)
-          const subtotal = pedido.arreglo?.precio ?? pedido.precioPersonalizado ?? 0
-          const extras = deps.totalExtrasPedido(clienteId)
-          const envio = pedido.envio?.precio ?? 0
-          const total = subtotal + extras + envio
-          const desglose = [`ramo $${subtotal.toFixed(2)}`]
-          if (extras > 0) desglose.push(`extras $${extras.toFixed(2)}`)
-          if (envio > 0) desglose.push(`envío $${envio.toFixed(2)}`)
-          const totalTexto = desglose.length > 1 ? `$${total.toFixed(2)} MXN (${desglose.join(' + ')})` : `$${total.toFixed(2)} MXN`
+          const totalTexto = formatearTotalConDesglose(clienteId)
           if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
           await deps.ventaCerradaHandler(clienteId, {
             cliente: venta.cliente,
@@ -1048,6 +1011,8 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         contextoExtra += `\n\nForma de pago:\n${obtenerTextoCuenta()}\n` +
           `(Pregunta el nombre para apartarlo)`
 
+        contextoExtra = `${buildValidatedRulesSection()}\n\n${contextoExtra}`
+
         const respuestaIA = await getAIResponse(
           historialCompleto.length > 0 ? historialCompleto : [],
           contextoExtra,
@@ -1058,50 +1023,13 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           return
         }
 
-        const mensajeFinal = limpiarRespuestaIA(respuestaIA.mensaje)
-
-        let mensajeParaEnviar = mensajeFinal
-
-        const revision = await revisarRespuestaFlora(
-          historialCompleto,
-          textoCliente,
-          mensajeParaEnviar,
-          [
-            `clasificacion: ${JSON.stringify(clasificacionIA)}`,
-            `estado_pedido: ${deps.pedidoActual(clienteId).estadoFlujo ?? 'sin_pedido'}`,
-            `precio_confirmado: ${deps.tienePrecioConfirmado(clienteId) ? 'si' : 'no'}`,
-            intervencionHumana ? `intervencion_humana_reciente: ${intervencionHumana.texto}` : 'intervencion_humana_reciente: no',
-          ].join('\n')
-        )
-        if (!revision.approved && revision.mensaje) {
-          console.log(`[bot] 🧪 Revisor corrigió respuesta para ${clienteId}: ${revision.razon}`)
-          mensajeParaEnviar = limpiarRespuestaIA(revision.mensaje)
-        }
-        if ((revision.debeAlertarTelegram || revision.debeAlertarWhatsApp) && debeEnviarAlertaDedup(clienteId, `review-${revision.riesgo}`, revision.razon || textoCliente, 20 * 60_000)) {
-          const telefonoReal = await numeroRealPromise
-          if (revision.debeAlertarTelegram) {
-            eventBus.emit(EventType.HUMAN_REQUIRED, { telefono: telefonoReal, cliente: msg.pushName || '', descripcion: revision.razon || 'Revisor detectó riesgo en respuesta', contexto: `Cliente: ${textoCliente.slice(0, 300)}\nFlora: ${mensajeParaEnviar.slice(0, 300)}` })
-          }
-          if (revision.debeAlertarWhatsApp) {
-            notificarEmpleadosWhatsApp(sock,
-              `⚠️ *Revisar conversación con ${telefonoReal}:*\n\n${(revision.razon || textoCliente).slice(0, 500)}`
-            ).catch(err => console.error('[bot] WhatsApp alerta revisor:', err))
-          }
-        }
+        const mensajeParaEnviar = limpiarRespuestaIA(respuestaIA.mensaje)
 
         const ventaEstado = deps.ventaDesdeEstado(clienteId)
         if (!deps.pedidoEstaCerrado(clienteId) && ventaEstado && deps.ventaListaParaCerrar(clienteId) && (
           confirmaCorto || /lo[sv]? quiero|me gusta|adelante|procedo|hagamoslo|hag[aá]moslo|d[aá]le|adelante|apartalo|aparta lo|si? (por favor|gracias)/i.test(textoCliente)
         )) {
-          const pedido = deps.pedidoActual(clienteId)
-          const subtotal = pedido.arreglo?.precio ?? pedido.precioPersonalizado ?? 0
-          const extras = deps.totalExtrasPedido(clienteId)
-          const envio = pedido.envio?.precio ?? 0
-          const total = subtotal + extras + envio
-          const desglose = [`ramo $${subtotal.toFixed(2)}`]
-          if (extras > 0) desglose.push(`extras $${extras.toFixed(2)}`)
-          if (envio > 0) desglose.push(`envío $${envio.toFixed(2)}`)
-          const totalTexto = desglose.length > 1 ? `$${total.toFixed(2)} MXN (${desglose.join(' + ')})` : `$${total.toFixed(2)} MXN`
+          const totalTexto = formatearTotalConDesglose(clienteId)
           if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
           deps.ventaCerradaHandler(clienteId, {
             cliente: ventaEstado.cliente,

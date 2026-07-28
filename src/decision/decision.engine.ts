@@ -8,6 +8,18 @@ export interface Decision {
   requierePedido: boolean
   esCambioTema: boolean
   contextoAdicional: string
+  esFrustracion: boolean
+  razonHumano: string | null
+  esConfirmacionCorta: boolean
+  esEmpezarCero: boolean
+  solicitaFotos: boolean
+  seleccionoFoto: boolean
+  requiereComprobante: boolean
+  pideComprobante: boolean
+  esWebPedido: boolean
+  eventoDetectado: string | null
+  tieneInteresCompra: boolean
+  intencionCatalogo: 'catalogo' | 'cotizador' | 'normal'
 }
 
 interface DatosAnalisis {
@@ -17,6 +29,10 @@ interface DatosAnalisis {
 
 function tienePalabra(texto: string, patron: RegExp): boolean {
   return patron.test(texto)
+}
+
+function normalizar(texto: string): string {
+  return texto.toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 }
 
 function detectarIntencion(texto: string): Intencion {
@@ -117,31 +133,6 @@ function detectarCambioTema(texto: string, horasInactivo: number): boolean {
   return false
 }
 
-export function analizarIntencion(datos: DatosAnalisis): Decision {
-  const intencion = detectarIntencion(datos.texto)
-  const tipoCaso = mapearTipoCaso(intencion)
-  const prioridad = clasificarPrioridad(intencion, datos.texto)
-  const requiereHumano = detectarHumano(intencion, datos.texto)
-  const esCambioTema = detectarCambioTema(datos.texto, datos.horasInactivo)
-  const requierePedido = intencion === Intencion.PEDIDO || intencion === Intencion.PAGO
-
-  const partes: string[] = []
-  if (esCambioTema) partes.push('Posible cambio de tema')
-  if (requiereHumano) partes.push('Requiere intervención humana')
-  if (requierePedido) partes.push('Requiere creación/modificación de pedido')
-  if (prioridad === Prioridad.CRITICA || prioridad === Prioridad.ALTA) partes.push(`Prioridad ${prioridad}`)
-
-  return {
-    intencion,
-    tipoCaso,
-    prioridad,
-    requiereHumano,
-    requierePedido,
-    esCambioTema,
-    contextoAdicional: partes.length > 0 ? partes.join(' | ') : '',
-  }
-}
-
 function mapearTipoCaso(intencion: Intencion): TipoCaso {
   switch (intencion) {
     case Intencion.COTIZACION:
@@ -171,4 +162,150 @@ function mapearTipoCaso(intencion: Intencion): TipoCaso {
     default:
       return TipoCaso.DUDA
   }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// DETECTORES EXPANDIDOS — FASE 6
+// ══════════════════════════════════════════════════════════════════
+
+const KW_FRUSTRACION = [
+  'que show', 'qué show', 'no me ayudas', 'no sirves', 'pesimo', 'pésimo',
+  'mal servicio', 'molesta', 'molesto', 'enojada', 'enojado', 'horrible',
+  'no entiendes', 'quiero hablar con una persona', 'quiero hablar con alguien',
+  'con un humano', 'inutil', 'inútil', 'no funciona', 'tardas mucho',
+  'cuando me van a contestar', 'tardaste mucho', 'porque tardaste',
+]
+
+export function detectarFrustracion(texto: string): boolean {
+  const n = normalizar(texto)
+  return KW_FRUSTRACION.some(k => n.includes(k))
+}
+
+const GOOGLE_MAPS_REGEX = /https?:\/\/(?:www\.)?(?:google\.[a-z]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl)[^\s]*/i
+
+export function detectarAtencionHumana(texto: string): string | null {
+  const n = normalizar(texto)
+  if (GOOGLE_MAPS_REGEX.test(texto) && /\b(direccion|ubicacion|colonia|calle)\b/i.test(n)) return null
+  const reglas: Array<[RegExp, string]> = [
+    [/\b(recoger|recojo|pasar por|paso por|recogi|recog[ií]|voy por|vengo por)\b.*\b(ramo|pedido|arreglo|flores?)\b|\b(ramo|pedido|arreglo|flores?)\b.*\b(recoger|recojo|pasar por|paso por|recogi|recog[ií]|voy por|vengo por)\b/i, 'Cliente quiere recoger un pedido'],
+    [/\b(sucursal|local|ubicacion|ubicación|direccion|dirección|atah)\b/i, 'Cliente pide información de sucursal/local'],
+    [/\b(foto|imagen)\b.*\b(local|sucursal|fachada|entrada|tienda)\b|\b(local|sucursal|fachada|entrada|tienda)\b.*\b(foto|imagen)\b/i, 'Cliente pide foto del local'],
+    [/\b(instagram|facebook|dm|inbox|mensaje por insta)\b/i, 'Cliente menciona conversación en redes sociales'],
+    [/\b(hable|hablar|comunicarme)\b.*\b(persona|humano|encargad[ao]|asesor)\b/i, 'Cliente solicita atención humana'],
+  ]
+  return reglas.find(([regex]) => regex.test(n))?.[1] ?? null
+}
+
+export function esSolicitudFotosDisponibles(texto: string): boolean {
+  return /\b(fotos?|ver.*arregl|muestra|enseña|manda.*foto|averlos|verlos|qu[eé].*(?:ramos?|ramitos?|arreglos?|flores?).*tiene(?:n)?|qu[eé]\s+tiene(?:n)?\s+disponible|hay.*foto|puedo.*ver|quisiera.*ver|ramitos?.*disponibles?|ramos?.*disponibles?|arreglos?.*disponibles?|disponibles?\s+hoy)\b/i.test(texto)
+}
+
+export function clienteEligeFotoDisponible(texto: string): boolean {
+  return /\b(me\s+gust[oó]|me\s+interesa|quiero|quisiera|ap[aá]rtame|apartame|apartarlo|este|esta|ese|esa|el\s+de\s+la\s+foto|la\s+de\s+la\s+foto|qu[eé]\s+precio|cu[aá]nto|cuanto)\b/i.test(texto)
+}
+
+export function detectarConfirmacionCorta(texto: string): boolean {
+  return /^(ok|okay|okey|oki|okis|vale|va|dale|s[ií]|si|perfecto|de acuerdo|esta bien|está bien)$/i.test(texto.trim())
+}
+
+export function detectarEmpezarCero(texto: string): boolean {
+  return /empecemos\s+desde\s+cero|desde\s+cero|borr[oó]n\s+y\s+cuenta\s+nueva|nuevo\s+pedido|otro\s+pedido|otro\s+ramo|es\s+aparte|aparte\s+ese|ya\s+hab[ií]a\s+finalizado|ya\s+se\s+finaliz[oó]|ese\s+ya\s+qued[oó]/i.test(texto)
+}
+
+export function esTextoComprobante(texto: string): boolean {
+  return /\b(comprobante|ya\s*pag[uú]e|pagado|pago\s*hecho|ya\s*qued[oó]|ya\s*transfer[ií]|transfer[ií]|transferencia|dep[oó]sito|recibo|ticket|bbva|devi\s+america|devi\s+am[eé]rica|4152)\b/i.test(texto)
+}
+
+export function respuestaPideComprobante(texto: string): boolean {
+  return /(?:bbva|4152|devi\s+am[eé]rica|m[aá]ndame\s+(?:tu\s+)?comprobante|comprobante\s+cuando\s+est[eé]\s+listo|pon\s+tu\s+nombre\s+en\s+concepto)/i.test(texto)
+}
+
+export function detectarWebPedido(texto: string): boolean {
+  return /^NUEVO PEDIDO[\s\S]*Florería RoCé[\s\S]*TOTAL A COBRAR[\s\S]*MXN[\s\S]*Flores del arreglo/i.test(texto)
+}
+
+export function detectarEvento(texto: string): string | null {
+  const KW_EVENTOS = [
+    'boda', 'casamiento', 'me caso', 'me voy a casar',
+    'xv años', 'quinceañera', 'quince años', 'xv',
+    'funeral', 'velorio', 'falleció', 'fallecio', 'muerte', 'luto',
+    'aniversario', 'graduación', 'graduacion', 'baby shower',
+    'san valentín', 'san valentin', '14 de febrero', '10 de mayo',
+    'día de las madres', 'dia de las madres',
+  ]
+  const matched = KW_EVENTOS.find(k => normalizar(texto).includes(k))
+  return matched || null
+}
+
+export function detectarInteresCompra(texto: string): boolean {
+  const KW_INTERES_COMPRA = [
+    'necesito', 'necesito un', 'busco', 'busco un', 'quiero un', 'quisiera',
+    'me gustaría', 'me gustaria', 'anda tener', 'se ocupa',
+    'qué flores', 'que flores', 'flores tiene', 'tienes disponibles',
+    'flores disponibles', 'qué ramos', 'que ramos', 'qué arreglos',
+    'me puede', 'pueden hacer', 'hacen arreglos', 'armar un',
+    'ramo para', 'arreglo para', 'flor para',
+    'cotización de', 'cotizacion de',
+  ]
+  return KW_INTERES_COMPRA.some(k => normalizar(texto).includes(k))
+}
+
+function detectarIntencionCatalogo(texto: string, decision: Decision): 'catalogo' | 'cotizador' | 'normal' {
+  if (decision.intencion === Intencion.CATALOGO || decision.intencion === Intencion.FOTOS) return 'catalogo'
+  if (decision.intencion === Intencion.COTIZACION || decision.intencion === Intencion.PERSONALIZADO) return 'cotizador'
+  return 'normal'
+}
+
+export function analizarIntencion(datos: DatosAnalisis): Decision {
+  const intencion = detectarIntencion(datos.texto)
+  const tipoCaso = mapearTipoCaso(intencion)
+  const prioridad = clasificarPrioridad(intencion, datos.texto)
+  const requiereHumano = detectarHumano(intencion, datos.texto)
+  const esCambioTema = detectarCambioTema(datos.texto, datos.horasInactivo)
+  const requierePedido = intencion === Intencion.PEDIDO || intencion === Intencion.PAGO
+  const razonHumano = detectarAtencionHumana(datos.texto) || (requiereHumano ? 'Cliente requiere atención humana' : null)
+
+  const esFrustracion = detectarFrustracion(datos.texto)
+  const esConfirmacionCorta = detectarConfirmacionCorta(datos.texto)
+  const esEmpezarCero = detectarEmpezarCero(datos.texto)
+  const esWebPedido = detectarWebPedido(datos.texto)
+  const solicitaFotos = esSolicitudFotosDisponibles(datos.texto)
+  const eventoDetectado = detectarEvento(datos.texto)
+  const tieneInteresCompra = detectarInteresCompra(datos.texto)
+
+  const partes: string[] = []
+  if (esCambioTema) partes.push('Posible cambio de tema')
+  if (razonHumano) partes.push(razonHumano)
+  if (requierePedido) partes.push('Requiere creación/modificación de pedido')
+  if (esFrustracion) partes.push('Cliente frustrado')
+  if (eventoDetectado) partes.push(`Evento: ${eventoDetectado}`)
+  if (tieneInteresCompra) partes.push('Muestra interés de compra')
+  if (prioridad === Prioridad.CRITICA || prioridad === Prioridad.ALTA) partes.push(`Prioridad ${prioridad}`)
+
+  const decision: Decision = {
+    intencion,
+    tipoCaso,
+    prioridad,
+    requiereHumano,
+    requierePedido,
+    esCambioTema,
+    contextoAdicional: partes.length > 0 ? partes.join(' | ') : '',
+    esFrustracion,
+    razonHumano,
+    esConfirmacionCorta,
+    esEmpezarCero,
+    solicitaFotos,
+    seleccionoFoto: false,
+    requiereComprobante: false,
+    pideComprobante: respuestaPideComprobante(datos.texto),
+    esWebPedido,
+    eventoDetectado,
+    tieneInteresCompra,
+    intencionCatalogo: 'normal',
+  }
+
+  decision.intencionCatalogo = detectarIntencionCatalogo(datos.texto, decision)
+  decision.seleccionoFoto = clienteEligeFotoDisponible(datos.texto)
+
+  return decision
 }

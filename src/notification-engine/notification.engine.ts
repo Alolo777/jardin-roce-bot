@@ -4,8 +4,6 @@ import type { BusinessRuleWarning } from './business-rules.validator'
 import { buildTimeline } from './timeline.builder'
 import { extractDecision } from './decision.extractor'
 import { detectConflicts } from './conflict.detector'
-import { reconstructOrder } from './order.reconstructor'
-import { auditReconstruction } from './order.auditor'
 import { validateBusinessRules } from './business-rules.validator'
 import { buildTelegramMessage } from './template.builder'
 import {
@@ -15,9 +13,7 @@ import {
 } from './pipeline-logger'
 import { enviarMensajeTelegram } from '../../lib/telegram'
 
-// ─── Eventos de sistema que NO necesitan reconstrucción IA ──────────────────
-// Estos eventos no tienen un pedido/cliente asociado que reconstruir;
-// solo necesitan notificar a Telegram directamente.
+// ─── Eventos de sistema que no necesitan verificación de datos ──────────────
 const SYSTEM_EVENTS_SKIP_AI: ReadonlySet<string> = new Set([
   EventType.BOT_DISCONNECTED,
   EventType.BOT_CONNECTED,
@@ -26,9 +22,6 @@ const SYSTEM_EVENTS_SKIP_AI: ReadonlySet<string> = new Set([
   EventType.BOT_DAILY_ALERT,
 ])
 
-// ─── Eventos informativos que tampoco necesitan reconstrucción IA ────────────
-// Son notificaciones simples al equipo; no hay datos suficientes para reconstruir
-// un pedido en estos momentos del flujo.
 const LIGHTWEIGHT_EVENTS_SKIP_AI: ReadonlySet<string> = new Set([
   EventType.COTIZACION_REQUESTED,
   EventType.ENVIO_REQUESTED,
@@ -116,49 +109,21 @@ export async function processNotificationPipeline(
     advertencias.push(datos.razonRevision ?? 'Datos incompletos')
   }
 
-  // ── Eventos de sistema/informativos: saltar reconstrucción/auditoría IA ────
   const esEventoSistema = SYSTEM_EVENTS_SKIP_AI.has(eventType)
   const esEventoLightweight = LIGHTWEIGHT_EVENTS_SKIP_AI.has(eventType)
-  const saltarIA = esEventoSistema || esEventoLightweight
+  const saltarVerificacion = esEventoSistema || esEventoLightweight
 
-  let reconstruction: Awaited<ReturnType<typeof reconstructOrder>> | null = null
-  let auditoria: Awaited<ReturnType<typeof auditReconstruction>> | null = null
   let ruleResults: BusinessRuleWarning[] = []
 
-  if (!saltarIA) {
-    reconstruction = await reconstructOrder(eventType, payload, timeline)
-
-    if (reconstruction.warnings.length > 0) {
-      for (const w of reconstruction.warnings) {
-        advertencias.push(`[Reconstructor] ${w}`)
-      }
-    }
-
-    auditoria = await auditReconstruction(eventType, payload, timeline, reconstruction)
-
-    if (auditoria.errors.length > 0) {
-      for (const err of auditoria.errors) {
-        advertencias.push(`[Auditor] ${err}`)
-      }
-    }
-
-    if (!auditoria.approved) {
-      advertencias.push('IA #2 rechazó la reconstrucción — revisar manualmente')
-      if (auditoria.corrections.length > 0) {
-        for (const c of auditoria.corrections) {
-          advertencias.push(`[Corrección] ${c.field}: "${c.original}" → "${c.corrected}"`)
-        }
-      }
-    }
-
+  if (!saltarVerificacion) {
     ruleResults = validateBusinessRules({
-      nombre: reconstruction.fields.name.value,
-      sucursal: reconstruction.fields.sucursal.value,
-      fecha: reconstruction.fields.fecha.value,
-      hora: reconstruction.fields.hora.value,
-      precio: reconstruction.fields.precio.value,
-      producto: reconstruction.fields.producto.value,
-      estado: reconstruction.fields.estado.value,
+      nombre: payload.cliente ?? timeline.pedido?.nombre ?? null,
+      sucursal: payload.sucursal ?? timeline.pedido?.sucursal ?? null,
+      fecha: timeline.pedido?.fechaEntrega ?? null,
+      hora: timeline.pedido?.horaEntrega ?? null,
+      precio: payload.total ?? (timeline.pedido as any)?.precioPersonalizado ?? null,
+      producto: payload.producto ?? (timeline.pedido as any)?.arreglo?.nombre ?? null,
+      estado: (timeline.pedido?.estado as string) ?? null,
       metodoPago: payload.metodoPago ?? null,
       telefono: payload.telefono,
       requiereRevision: datos.requiereRevision,
@@ -170,26 +135,24 @@ export async function processNotificationPipeline(
     }
   } else {
     advertencias.push(esEventoSistema
-      ? '[Pipeline] Evento de sistema — reconstrucción IA omitida'
-      : '[Pipeline] Evento informativo — reconstrucción IA omitida')
+      ? '[Pipeline] Evento de sistema — verificación omitida'
+      : '[Pipeline] Evento informativo — verificación omitida')
   }
 
   const tieneReglaError = ruleResults.some(r => r.severity === 'error')
-  const auditoriaAprobada = auditoria?.approved ?? true
 
   const accionFinal: AccionNotificacion =
     tieneReglaError ? 'ALERTA'
-    : !auditoriaAprobada ? 'ALERTA'
     : resultado.accion
 
   const verified: DatosVerificados = {
-    nombre: reconstruction?.fields.name.value ?? payload.cliente ?? null,
-    sucursal: reconstruction?.fields.sucursal.value ?? payload.sucursal ?? null,
-    fecha: reconstruction?.fields.fecha.value ?? null,
-    hora: reconstruction?.fields.hora.value ?? null,
-    precio: reconstruction?.fields.precio.value ?? payload.total ?? null,
-    producto: reconstruction?.fields.producto.value ?? payload.producto ?? null,
-    estado: reconstruction?.fields.estado.value ?? null,
+    nombre: payload.cliente ?? timeline.pedido?.nombre ?? null,
+    sucursal: payload.sucursal ?? timeline.pedido?.sucursal ?? null,
+    fecha: timeline.pedido?.fechaEntrega ?? null,
+    hora: timeline.pedido?.horaEntrega ?? null,
+    precio: payload.total ?? (timeline.pedido as any)?.precioPersonalizado ?? null,
+    producto: payload.producto ?? (timeline.pedido as any)?.arreglo?.nombre ?? null,
+    estado: (timeline.pedido?.estado as string) ?? null,
     metodoPago: payload.metodoPago ?? null,
     telefono: payload.telefono,
     pedidoId: null,
@@ -243,13 +206,8 @@ export async function processNotificationPipeline(
   }
 }
 
-const EVENTOS_MEDIA: ReadonlySet<string> = new Set([
-  'PHOTO_RECEIVED',
-])
-
 export async function withPipeline(
-  event: SystemEvent,
-  sendNotification: () => Promise<void>
+  event: SystemEvent
 ): Promise<void> {
   const result = await processNotificationPipeline(event)
 
@@ -257,10 +215,53 @@ export async function withPipeline(
     return
   }
 
-  if (result.message && !EVENTOS_MEDIA.has(event.type)) {
-    await enviarMensajeTelegram(result.message)
+  const mensaje = result.message ?? buildTelegramMessage(event.type, event.payload, {
+    nombre: null,
+    sucursal: null,
+    fecha: null,
+    hora: null,
+    precio: null,
+    producto: null,
+    estado: null,
+    metodoPago: null,
+    telefono: event.payload.telefono,
+    pedidoId: null,
+    casoId: null,
+    prioridad: 'media',
+    requiereRevision: false,
+    razonRevision: null,
+    advertencias: [],
+  }, {
+    accion: 'NOTIFICAR',
+    razonBloqueo: null,
+    conflictos: [],
+    advertencias: [],
+    ruleViolations: [],
+    message: null,
+  })
+
+  await enviarMensajeTelegram(mensaje)
+}
+
+export async function withPipelinePhoto(
+  event: SystemEvent,
+  sendPhoto: (base64: string, caption: string, mimetype: string) => Promise<void>
+): Promise<void> {
+  const result = await processNotificationPipeline(event)
+
+  if (result.accion === 'BLOQUEAR') {
     return
   }
 
-  await sendNotification()
+  const { telefono, base64, caption, mimetype } = event.payload as any
+
+  if (base64 && sendPhoto) {
+    const prefix = event.payload.tipo === 'comprobante'
+      ? '📸 *Comprobante de pago*'
+      : event.payload.tipo === 'referencia'
+        ? '📷 *Foto de referencia*'
+        : '📸 *Imagen del cliente*'
+    const texto = `${prefix} — ${telefono}${caption ? `\n\n${caption}` : ''}`
+    await sendPhoto(base64, texto, mimetype ?? 'image/jpeg')
+  }
 }

@@ -48,7 +48,7 @@ import {
 } from './src/conversation/conversation.service'
 import { parseNombre, pareceNombreCliente, parseFecha, extraerFecha, parseHora, extraerHora, parseSucursal, parsePrecio, parseDireccion, limpiarTelefono } from './src/parser'
 import { getContenidoMensaje, getMessageBody, getMensajeTexto, getMessageType, hasQuotedMsg, getQuotedText, descargarMedia, jidANumero, ahoraCdmx, estaEnHorario, getFechaActual } from './src/whatsapp/message-utils'
-import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema, clasificarTipoCaso, limpiarCachesCasos } from './src/casos/caso.service'
+import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema, clasificarTipoCaso, limpiarCachesCasos, cargarCasosDesdeBD } from './src/casos/caso.service'
 import { crearPedido, obtenerPedido, transitar, transitarDesdeFlujo, archivarPedido, archivarSilencioso, cancelarPedido, limpiarCachesPedidos, cargarPedidosDesdeBD, persistirPedidosEngine } from './src/pedidos/pedido.service'
 import { analizarIntencion, Decision } from './src/decision/decision.engine'
 import { Intencion, PedidoActual, EstadoPedido } from './src/models/types'
@@ -210,7 +210,6 @@ setInterval(() => {
 // LÍMITES Y RATE LIMITING
 // ════════════════════════════════════════════════════════════════
 
-const MAX_LONGITUD_MENSAJE      = 1000
 export const TIPOS_MEDIA_NO_SOPORTADOS = new Set(['image', 'video', 'audio', 'ptt', 'document', 'sticker'])
 export async function responderMensaje(msg: any, texto: string): Promise<any> {
   if (!sock) return
@@ -1218,6 +1217,7 @@ setInterval(() => {
 }, 30_000).unref?.()
 iniciarPersistenciaPeriodica()
 cargarPedidosDesdeBD().catch(() => {})
+cargarCasosDesdeBD().catch(() => {})
 iniciarBaileys().catch((err) => { console.error('❌ Error:', err); registrarCrash(); process.exit(1) })
 
 async function gracefulShutdown(signal: string): Promise<void> {

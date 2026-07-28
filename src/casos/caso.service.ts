@@ -1,6 +1,9 @@
-import { Caso, EstadoCaso, TipoCaso, Prioridad } from '../models/types'
+import { Caso, EstadoCaso, TipoCaso, Prioridad, Intencion } from '../models/types'
 import { eventBus } from '../events/event-bus'
 import { EventType } from '../events/types'
+import { insertarCaso, actualizarCaso, cargarCasosActivos } from './caso.repository'
+import { detectarCambioTema, calcularHorasInactivo, INACTIVIDAD_CAMBIO_TEMA_HR, INACTIVIDAD_ARCHIVAR_CASO_HR } from '../conversation/conversation.service'
+import { analizarIntencion } from '../decision/decision.engine'
 
 const CASOS_ACTIVOS = new Map<string, Caso>()
 let casoCounter = 0
@@ -9,35 +12,50 @@ function generateCasoId(): string {
   return `caso_${Date.now()}_${++casoCounter}`
 }
 
+export async function cargarCasosDesdeBD(): Promise<void> {
+  const restaurados = await cargarCasosActivos()
+  for (const [clienteId, caso] of restaurados) {
+    CASOS_ACTIVOS.set(clienteId, caso)
+  }
+  if (restaurados.size > 0) {
+    console.log(`[casos] Restaurados ${restaurados.size} casos activos`)
+  }
+}
+
 export function crearCaso(
   clienteId: string,
   telefono: string,
-  tipo: TipoCaso,
-  prioridad: Prioridad = Prioridad.MEDIA
+  tipo?: TipoCaso,
+  prioridad?: Prioridad,
+  opciones?: { decisionIntencion?: Intencion }
 ): Caso {
+  const tipoFinal = tipo ?? (opciones?.decisionIntencion ? mapearIntencionATipo(opciones.decisionIntencion) : TipoCaso.DUDA)
+  const prioridadFinal = prioridad ?? Prioridad.MEDIA
   const existing = CASOS_ACTIVOS.get(clienteId)
 
   if (existing && existing.estado === EstadoCaso.ACTIVO) {
-    const horasInactivo = (Date.now() - new Date(existing.ultimaActividad).getTime()) / (1000 * 60 * 60)
-    if (existing.tipo === tipo && horasInactivo < 24) {
+    const horasInactivo = calcularHorasInactivo(existing.ultimaActividad)
+    if (existing.tipo === tipoFinal && horasInactivo < INACTIVIDAD_CAMBIO_TEMA_HR) {
       existing.ultimaActividad = new Date().toISOString()
+      actualizarCaso(existing)
       return existing
     }
-    archivarCaso(existing.id, `Nuevo caso tipo ${tipo} iniciado`)
+    archivarCaso(existing.id, `Nuevo caso tipo ${tipoFinal} iniciado`)
   }
 
   const caso: Caso = {
     id: generateCasoId(),
     clienteId,
     telefono,
-    tipo,
+    tipo: tipoFinal,
     estado: EstadoCaso.ACTIVO,
-    prioridad,
+    prioridad: prioridadFinal,
     creadoEn: new Date().toISOString(),
     ultimaActividad: new Date().toISOString(),
   }
 
   CASOS_ACTIVOS.set(clienteId, caso)
+  insertarCaso(caso)
 
   eventBus.emit(EventType.CASE_CREATED, {
     caseId: caso.id,
@@ -59,12 +77,28 @@ export function obtenerCasoActivo(clienteId: string): Caso | null {
   return caso
 }
 
+export function obtenerCasoPorId(casoId: string): Caso | null {
+  for (const caso of CASOS_ACTIVOS.values()) {
+    if (caso.id === casoId) return caso
+  }
+  return null
+}
+
+export function buscarCasosPorTelefono(telefono: string): Caso[] {
+  const resultados: Caso[] = []
+  for (const caso of CASOS_ACTIVOS.values()) {
+    if (caso.telefono === telefono) resultados.push(caso)
+  }
+  return resultados
+}
+
 export function archivarCaso(casoId: string, motivo?: string): void {
   for (const [clienteId, caso] of CASOS_ACTIVOS) {
     if (caso.id === casoId) {
       caso.estado = EstadoCaso.ARCHIVADO
       caso.archivadoEn = new Date().toISOString()
       CASOS_ACTIVOS.delete(clienteId)
+      actualizarCaso(caso)
 
       eventBus.emit(EventType.CASE_ARCHIVED, {
         caseId: casoId,
@@ -76,23 +110,90 @@ export function archivarCaso(casoId: string, motivo?: string): void {
   }
 }
 
-export function actualizarActividad(caso: Caso): void {
-  caso.ultimaActividad = new Date().toISOString()
+export function reabrirCaso(casoId: string): Caso | null {
+  for (const [clienteId, caso] of CASOS_ACTIVOS) {
+    if (caso.id === casoId && caso.estado === EstadoCaso.ARCHIVADO) {
+      caso.estado = EstadoCaso.ACTIVO
+      caso.archivadoEn = undefined
+      caso.ultimaActividad = new Date().toISOString()
+      CASOS_ACTIVOS.set(clienteId, caso)
+      actualizarCaso(caso)
+      return caso
+    }
+  }
+  return null
 }
 
-export function detectarCambioTema(
-  textoActual: string,
-  horasInactivo: number
-): boolean {
-  if (horasInactivo >= 24) return true
+export function actualizarActividad(caso: Caso): void {
+  caso.ultimaActividad = new Date().toISOString()
+  actualizarCaso(caso)
+}
 
-  const soloAgradecimiento = /^(gracias|ok|okay|si|sí|vale|dale|está bien|esta bien|de acuerdo|claro|perfecto|genial|bueno)$/i
-  if (soloAgradecimiento.test(textoActual.trim())) return false
+export function actualizarTipoCaso(caso: Caso, nuevoTipo: TipoCaso): void {
+  if (caso.tipo === nuevoTipo) return
+  const anterior = caso.tipo
+  caso.tipo = nuevoTipo
+  caso.ultimaActividad = new Date().toISOString()
+  actualizarCaso(caso)
 
-  const indicadoresNuevo = /\b(ahora\s+(quiero|necesito|ocupo)|otro\s+(pedido|ramo|arreglo|cosa|tema)|nuevo\s+(pedido|caso)|empezamos\s+de\s+nuevo|desde\s+cero|cambio\s+de\s+tema|es\s+otra\s+(cosa|flor)|ahora\s+(para|es))\b/i
-  if (indicadoresNuevo.test(textoActual)) return true
+  eventBus.emit(EventType.CASE_CREATED, {
+    caseId: caso.id,
+    telefono: caso.telefono,
+    prioridad: caso.prioridad,
+    descripcion: `Caso actualizado: ${anterior} → ${nuevoTipo}`,
+  })
+}
 
-  return false
+export function actualizarPrioridad(caso: Caso, nuevaPrioridad: Prioridad): void {
+  if (caso.prioridad === nuevaPrioridad) return
+  caso.prioridad = nuevaPrioridad
+  caso.ultimaActividad = new Date().toISOString()
+  actualizarCaso(caso)
+}
+
+export function asociarPedido(caso: Caso, pedidoId: string): void {
+  caso.pedidoId = pedidoId
+  caso.ultimaActividad = new Date().toISOString()
+  actualizarCaso(caso)
+}
+
+export function asociarCotizacion(caso: Caso, cotizacionId: string): void {
+  caso.cotizacionId = cotizacionId
+  caso.ultimaActividad = new Date().toISOString()
+  actualizarCaso(caso)
+}
+
+export { detectarCambioTema } from '../conversation/conversation.service'
+
+function mapearIntencionATipo(intencion: Intencion): TipoCaso {
+  switch (intencion) {
+    case Intencion.COTIZACION:
+    case Intencion.PRECIO:
+    case Intencion.CATALOGO:
+    case Intencion.FOTOS:
+    case Intencion.PERSONALIZADO:
+      return TipoCaso.COTIZACION
+    case Intencion.PEDIDO:
+    case Intencion.PAGO:
+    case Intencion.COMPROBANTE:
+    case Intencion.TRANSFERENCIA:
+    case Intencion.ENVIO:
+    case Intencion.RECOGER:
+    case Intencion.CAMBIO:
+      return TipoCaso.PEDIDO
+    case Intencion.QUEJA:
+    case Intencion.CANCELACION:
+      return TipoCaso.QUEJA
+    case Intencion.POSTVENTA:
+      return TipoCaso.POSTVENTA
+    case Intencion.UBICACION:
+    case Intencion.HORARIOS:
+      return TipoCaso.INFORMACION
+    case Intencion.HUMANO:
+      return TipoCaso.DUDA
+    default:
+      return TipoCaso.DUDA
+  }
 }
 
 export function clasificarTipoCaso(texto: string): TipoCaso {
@@ -111,16 +212,19 @@ export function clasificarTipoCaso(texto: string): TipoCaso {
   if (/\b(horarios|ubicaci[oó]n|domicilio|env[ií]o|tel[eé]fono|direcci[oó]n|calle|avenida|estacionamiento)\b/i.test(texto)) {
     return TipoCaso.INFORMACION
   }
-  return TipoCaso.DUDA
+
+  const decision = analizarIntencion({ texto, horasInactivo: 0 })
+  return mapearIntencionATipo(decision.intencion)
 }
 
 export function limpiarCachesCasos(): void {
   const ahora = Date.now()
   for (const [clienteId, caso] of CASOS_ACTIVOS) {
-    const horasInactivo = (ahora - new Date(caso.ultimaActividad).getTime()) / (1000 * 60 * 60)
-    if (horasInactivo > 72) {
+    const horasInactivo = calcularHorasInactivo(caso.ultimaActividad)
+    if (horasInactivo > INACTIVIDAD_ARCHIVAR_CASO_HR) {
       caso.estado = EstadoCaso.ARCHIVADO
       CASOS_ACTIVOS.delete(clienteId)
+      actualizarCaso(caso)
     }
   }
 }

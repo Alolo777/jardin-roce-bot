@@ -109,11 +109,12 @@ export async function sincronizarPedidosBot(mapa: Map<string, PedidoActual>): Pr
       foto_referencia_recibida_en: pedido.fotoReferenciaRecibidaEn ?? null,
       detalles_especiales: pedido.detallesEspeciales ?? null,
       precio_confirmado_por: pedido.precioConfirmadoPor ?? null,
+      caso_id: pedido.casoId ?? null,
       cerrado_en: pedido.cerradoEn ?? null,
     }
     try {
       const { error } = await supabaseAdmin.from('pedidos_bot').upsert(base, { onConflict: 'cliente_id' })
-      if (error && /estado_flujo|fecha_entrega|foto_referencia|detalles_especiales|precio_confirmado_por|cerrado_en|schema cache|column/i.test(error.message || '')) {
+      if (error && /estado_flujo|fecha_entrega|foto_referencia|detalles_especiales|precio_confirmado_por|caso_id|cerrado_en|schema cache|column/i.test(error.message || '')) {
         await supabaseAdmin.from('pedidos_bot').upsert({
           cliente_id: base.cliente_id,
           telefono: base.telefono,

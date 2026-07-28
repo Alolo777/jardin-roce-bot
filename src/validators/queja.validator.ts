@@ -1,9 +1,7 @@
 import { detectarQueja } from '../decision/intent-detector'
-import type { ClasificacionConversacion } from '../../lib/ai'
 
 export interface EvaluacionQueja {
   detectada: boolean
-  descartadaPorIA: boolean
   instruccion: string
 }
 
@@ -12,21 +10,12 @@ const INSTRUCCION =
   'NO ofrezcas compensaciones ni descuentos. El sistema notificará automáticamente.'
 
 export function evaluarQueja(
-  texto: string,
-  clasificacionIA: ClasificacionConversacion
+  texto: string
 ): EvaluacionQueja {
-  const detectada =
-    detectarQueja(texto) ||
-    (clasificacionIA.intencion === 'queja' && clasificacionIA.confianza >= 0.65)
-
-  const descartadaPorIA =
-    detectarQueja(texto) &&
-    clasificacionIA.confianza >= 0.75 &&
-    clasificacionIA.intencion !== 'queja'
+  const detectada = detectarQueja(texto)
 
   return {
     detectada,
-    descartadaPorIA,
-    instruccion: detectada && !descartadaPorIA ? INSTRUCCION : '',
+    instruccion: detectada ? INSTRUCCION : '',
   }
 }
