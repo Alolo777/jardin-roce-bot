@@ -92,10 +92,6 @@ export function subscribeTelegramEvents(): void {
     return withPipeline(event)
   })
 
-  eventBus.subscribe(EventType.QR_GENERATED, (event) => {
-    return withPipeline(event)
-  })
-
   eventBus.subscribe(EventType.BOT_CONNECTED, (event) => {
     return withPipeline(event)
   })

@@ -843,7 +843,6 @@ let PRESENCE_INTERVAL: NodeJS.Timeout | null = null
 let RECONNECT_TIMER: NodeJS.Timeout | null = null
 let RECONNECT_ATTEMPT = 0
 let ULTIMO_BOT_DISCONNECTED_EMIT = 0
-let ULTIMO_QR_GENERATED_EMIT = 0
 
 function actualizarEstadoBot(estado: typeof BOT_ESTADO, detalle: string): void {
   BOT_ESTADO = estado
@@ -1016,11 +1015,7 @@ async function iniciarBaileys(): Promise<void> {
       publicarEstadoBot().catch(() => {})
       console.log('\n⚡ ¡NUEVO QR! Escanéalo ahora:')
       qrcode.generate(qr, { small: true })
-      const ahora = Date.now()
-      if (ahora - ULTIMO_QR_GENERATED_EMIT >= 30_000) {
-        ULTIMO_QR_GENERATED_EMIT = ahora
-        eventBus.emit(EventType.QR_GENERATED, { telefono: 'system' })
-      }
+      eventBus.emit(EventType.QR_GENERATED, { telefono: 'system' })
     }
 
     if (connection === 'open') {
