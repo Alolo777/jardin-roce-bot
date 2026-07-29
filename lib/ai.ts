@@ -630,7 +630,7 @@ export async function revisarRespuestaFlora(
 export async function getAIResponse(
   historial: MensajeChat[],
   contextoExtra?: string
-): Promise<AIResponse> {
+): Promise<AIResponse | null> {
   try {
     const systemPromptBase = await obtenerSystemPrompt()
 
@@ -689,7 +689,7 @@ export async function getAIResponse(
         descripcion: error instanceof Error ? error.message.slice(0, 200) : 'Error desconocido en proveedor IA',
       })
     } catch {}
-    return { mensaje: '🌷 Perdón, un pequeño mareo digital. Dame un momento y vuelve a escribirme, por favor.', ventaCerrada: null }
+    return null
   }
 }
 

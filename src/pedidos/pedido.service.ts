@@ -3,6 +3,14 @@ import { eventBus } from '../events/event-bus'
 import { EventType, EventPayload } from '../events/types'
 import { guardarPedidos, cargarPedidos, sincronizarPedidosBot } from './pedido.repository'
 
+function jidANumero(jid: string): string {
+  const limpio = (jid || '')
+    .replace(/@[^\s]*/g, '')
+    .replace(/:\d+$/, '')
+    .trim()
+  return limpio.startsWith('52') ? `+${limpio}` : limpio
+}
+
 const TRANSICIONES_VALIDAS: Record<string, EstadoPedido[]> = {
   [EstadoPedido.NUEVO]: [EstadoPedido.COTIZANDO, EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
   [EstadoPedido.COTIZANDO]: [EstadoPedido.PRECIO_CONFIRMADO, EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
@@ -305,6 +313,10 @@ export function cancelarPedido(clienteId: string, motivo?: string): boolean {
 export function transitarDesdeFlujo(clienteId: string, flujo: string, motivo?: string): boolean {
   const pedido = PEDIDOS.get(clienteId)
   if (!pedido || !pedido.estado) return false
+
+  if (!pedido.telefono) {
+    pedido.telefono = jidANumero(clienteId)
+  }
 
   const mapping: Record<string, EstadoPedido> = {
     cotizando: EstadoPedido.COTIZANDO,

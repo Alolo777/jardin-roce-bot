@@ -841,6 +841,8 @@ let sock: ReturnType<typeof makeWASocket> | null = null
 let BOT_CONNECTION: 'connecting' | 'open' | 'close' = 'connecting'
 let PRESENCE_INTERVAL: NodeJS.Timeout | null = null
 let RECONNECT_TIMER: NodeJS.Timeout | null = null
+let RECONNECT_ATTEMPT = 0
+let ULTIMO_BOT_DISCONNECTED_EMIT = 0
 
 function actualizarEstadoBot(estado: typeof BOT_ESTADO, detalle: string): void {
   BOT_ESTADO = estado
@@ -927,8 +929,12 @@ function limpiarSocketActual(): void {
   try { actual.end(undefined) } catch {}
 }
 
-function programarReinicioBaileys(motivo: string, delayMs = 5_000): void {
+function programarReinicioBaileys(motivo: string, delayMs?: number): void {
   if (RECONNECT_TIMER) return
+
+  if (delayMs === undefined) {
+    delayMs = Math.min(5_000 * Math.pow(2, RECONNECT_ATTEMPT++), 60_000)
+  }
 
   BOT_RECONNECTING = true
   RECONNECT_START = Date.now()
@@ -1017,6 +1023,7 @@ async function iniciarBaileys(): Promise<void> {
       BOT_RECONNECTING = false
       RECONNECT_START = 0
       BOT_READY = true
+      RECONNECT_ATTEMPT = 0
       actualizarEstadoBot('conectado', 'WhatsApp conectado')
       publicarEstadoBot().catch(() => {})
       console.log('\n✅ Bot de Jardín RoCe conectado!')
@@ -1049,12 +1056,16 @@ async function iniciarBaileys(): Promise<void> {
 
       actualizarEstadoBot('desconectado', `Conexión cerrada (${reason})`)
       publicarEstadoBot().catch(() => {})
-      eventBus.emit(EventType.BOT_DISCONNECTED, { telefono: 'system', descripcion: `Conexión cerrada (${reason || 'desconocido'})` })
+      const ahora = Date.now()
+      if (ahora - ULTIMO_BOT_DISCONNECTED_EMIT >= 30 * 60_000) {
+        ULTIMO_BOT_DISCONNECTED_EMIT = ahora
+        eventBus.emit(EventType.BOT_DISCONNECTED, { telefono: 'system', descripcion: `Conexión cerrada (${reason || 'desconocido'})` })
+      }
 
       if (isLoggedOut || isBadSession || isForbidden) {
         reiniciarProceso(`Sesión inválida (${reason})`)
       } else {
-        programarReinicioBaileys(`Reconectando tras cierre (${reason || 'desconocido'})`, 5_000)
+        programarReinicioBaileys(`Reconectando tras cierre (${reason || 'desconocido'})`)
       }
     }
   })

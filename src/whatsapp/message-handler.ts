@@ -33,7 +33,7 @@ import { evaluarCancelacion } from '../validators/cancelacion.validator'
 import { evaluarQueja } from '../validators/queja.validator'
 import { getAIResponse, clasificarImagenVenta } from '../../lib/ai'
 import { logger } from '../../lib/logger.service'
-import type { PedidoActual, EstadoPedido } from '../models/types'
+import { PedidoActual, EstadoPedido } from '../models/types'
 
 export interface MsgHandlerDeps {
   pedidoActual: (clienteId: string) => PedidoActual
@@ -267,7 +267,7 @@ function aplicarDatosPedidoDesdeTexto(clienteId: string, texto: string, deps: Pi
   if (/\b(transferencia|transfer|comprobante|recibo|ticket|listo\s+ese\s+es\s+el\s+recibo|pago\s+con\s+transferencia)\b/i.test(texto)) {
     pedido.metodoPago = 'transferencia'
     pedido.estadoFlujo = 'esperando_pago'
-    transitarDesdeFlujo(clienteId, 'esperando_pago')
+    if (pedido.estado !== EstadoPedido.APARTADO) transitarDesdeFlujo(clienteId, 'esperando_pago')
   }
 
   if (pedido.nombre) {
@@ -326,7 +326,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
     if (!faltaFechaHoraParaCerrar(clienteId)) return false
     const pedido = deps.pedidoActual(clienteId)
     pedido.estadoFlujo = 'esperando_fecha_hora'
-    transitarDesdeFlujo(clienteId, 'esperando_fecha_hora')
+    if (pedido.estado !== EstadoPedido.APARTADO) transitarDesdeFlujo(clienteId, 'esperando_fecha_hora')
     await deps.persistirPedido(clienteId, telefono, 'apartado', 'Falta fecha/hora antes de cerrar')
     const pregunta = '¿Para qué fecha y hora lo necesitas? 🌷'
     await deps.responderMensaje(msg, pregunta)
@@ -515,7 +515,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         esHorarioAnticipadoFlag = true
         const pedido = deps.pedidoActual(clienteId)
         pedido.estadoFlujo = 'esperando_fecha_hora'
-        transitarDesdeFlujo(clienteId, 'esperando_fecha_hora')
+        if (pedido.estado !== EstadoPedido.APARTADO) transitarDesdeFlujo(clienteId, 'esperando_fecha_hora')
         if (debeEnviarAlertaDedup(clienteId, 'horario-anticipado', fechaHoraDetectada.hora, 30 * 60_000)) {
           eventBus.emit(EventType.HUMAN_REQUIRED, {
             telefono: await numeroRealPromise,
@@ -931,7 +931,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       if (consultaPagoEnviado && deps.tieneArregloVerificado(clienteId)) {
         deps.pedidoActual(clienteId).metodoPago = 'transferencia'
         deps.pedidoActual(clienteId).estadoFlujo = 'esperando_pago'
-        transitarDesdeFlujo(clienteId, 'esperando_pago')
+        if (deps.pedidoActual(clienteId).estado !== EstadoPedido.APARTADO) transitarDesdeFlujo(clienteId, 'esperando_pago')
         deps.persistirPedido(clienteId, await numeroRealPromise, 'apartado', textoCliente).catch(() => {})
       }
 
@@ -941,7 +941,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         if (!consultaPagoEnviado) {
           deps.pedidoActual(clienteId).metodoPago = /tarjeta/i.test(textoCliente) ? 'tarjeta_recoger' : 'efectivo_recoger'
           deps.pedidoActual(clienteId).estadoFlujo = 'esperando_fecha_hora'
-          transitarDesdeFlujo(clienteId, 'esperando_fecha_hora')
+          if (deps.pedidoActual(clienteId).estado !== EstadoPedido.APARTADO) transitarDesdeFlujo(clienteId, 'esperando_fecha_hora')
         }
         contextoExtra +=
           `\n\n[CLIENTE RECOGE EN SUCURSAL] ` +
@@ -1019,7 +1019,21 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         )
 
         if (!respuestaIA) {
-          await deps.responderMensaje(msg, '🌷 Dame un momento, estoy revisando...')
+          const telefonoReal = await numeroRealPromise.catch(() => telefono)
+          const jid = msg.key?.remoteJid
+          if (jid) {
+            sock.chatModify({
+              markRead: false,
+              lastMessages: [{ key: msg.key, messageTimestamp: msg.messageTimestamp }],
+            }, jid).catch(() => {})
+          }
+          eventBus.emit(EventType.HUMAN_REQUIRED, {
+            telefono: telefonoReal,
+            cliente: msg.pushName || '',
+            prioridad: 'critica',
+            descripcion: `[TIMEOUT IA] No se pudo responder automáticamente. Se requiere atención humana urgente para ${telefonoReal}.`,
+            contexto: 'Timeout del proveedor de IA',
+          })
           return
         }
 
@@ -1052,17 +1066,27 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           const pedido = deps.pedidoActual(clienteId)
           pedido.metodoPago = 'transferencia'
           pedido.estadoFlujo = 'esperando_pago'
-          transitarDesdeFlujo(clienteId, 'esperando_pago')
+          if (pedido.estado !== EstadoPedido.APARTADO) transitarDesdeFlujo(clienteId, 'esperando_pago')
           deps.persistirPedido(clienteId, await numeroRealPromise, 'apartado', 'Esperando comprobante de transferencia').catch(() => {})
         }
       }
     } catch (err) {
       logger.error('message-handler', 'Error en procesarMensaje', { error: String(err), stack: (err as Error)?.stack })
-      try {
-        if (msg?.key?.remoteJid) {
-          await deps.responderMensaje(msg, '🌷 Perdón, un pequeño mareo digital. ¿Me repites?')
-        }
-      } catch {}
+      const telefonoReal = await numeroRealPromise.catch(() => telefono)
+      const jid = msg?.key?.remoteJid
+      if (jid) {
+        sock.chatModify({
+          markRead: false,
+          lastMessages: [{ key: msg.key, messageTimestamp: msg.messageTimestamp }],
+        }, jid).catch(() => {})
+      }
+      eventBus.emit(EventType.HUMAN_REQUIRED, {
+        telefono: telefonoReal,
+        cliente: msg?.pushName || '',
+        prioridad: 'critica',
+        descripcion: `[ERROR SISTEMA] Error inesperado al procesar mensaje de ${telefonoReal}. Se requiere atención humana.`,
+        contexto: 'Error en procesarMensaje',
+      })
     } finally {
       const mediaPendiente = deps.MEDIA_POR_CLIENTE.get(clienteId)
       if (mediaPendiente && mediaPendiente.length > 0) {
