@@ -1062,3 +1062,128 @@ NOTIFICAR / ALERTA / BLOQUEAR
 - IA #2 falla → fail open, notificación pasa sin auditoría
 - IA #2 rechaza → notificación cambia a ALERTA con advertencias
 
+---
+
+## DEC-049: Fotos de referencia restauradas desde pedidos_bot en cargarPedidos
+
+**Fecha:** 2026-07-29
+**Estado:** Aceptada
+
+**Motivo:** P0-1. `sanitizarParaCache` eliminaba `fotoReferenciaBase64`, `fotoReferenciaMimetype`, `fotoReferenciaCaption` y `fotoReferenciaRecibidaEn` al persistir en `bot_cache`. Tras reinicio del bot, todas las fotos de referencia desaparecían porque `cargarPedidos()` solo leía de `bot_cache`.
+
+**Alternativas consideradas:**
+1. Dejar de sanitizar fotos en bot_cache (aumenta tamaño de JSONB)
+2. Almacenar fotos en Supabase Storage (cambio mayor de schema)
+3. Restaurar fotos desde `pedidos_bot` tras cargar desde `bot_cache` (elegida)
+
+**Resultado:** `cargarPedidos()` ahora hace una segunda consulta a `pedidos_bot` después de cargar desde `bot_cache`, restaurando `foto_referencia_base64`, `foto_referencia_mimetype`, `foto_referencia_caption` y `foto_referencia_recibida_en` para cada pedido activo que tenga foto.
+
+**Ventajas:** Sin cambios de schema. Sin aumentar tamaño de bot_cache. Aprovecha que `sincronizarPedidosBot()` ya persistía fotos en `pedidos_bot`.
+
+**Desventajas:** Consulta adicional a Supabase en el arranque. Aceptable (solo ocurre una vez al iniciar).
+
+---
+
+## DEC-050: Response Validator como barrera contra alucinaciones del LLM
+
+**Fecha:** 2026-07-29
+**Estado:** Aceptada
+
+**Motivo:** P0-3. AGENTS.md Parte 3 especifica un Response Validator que verifica que el LLM no invente horarios, precios, sucursales, pagos, inventario ni entregas. No existía en el código — el sistema confiaba únicamente en el prompt para que el LLM no alucinara.
+
+**Alternativas consideradas:**
+1. Confiar solo en el prompt (status quo — ya falló en producción con horarios)
+2. Usar una segunda llamada LLM para validar (costo y latencia duplicados)
+3. Validación determinística por regex + reglas de negocio (elegida)
+
+**Resultado:** `src/validators/response.validator.ts` implementa:
+- `validarRespuestaIA(respuesta, contexto)`: detecta confirmación de horarios fuera de rango, confirmación de inventario, confirmación de entrega/producción, confirmación de pago sin respaldo del backend. Retorna `{ valido, razon }`.
+- `sanitizarRespuestaIA(respuesta)`: limpia markdown links, URLs de Supabase Storage, anotaciones internas entre corchetes.
+- `extraerPreciosRespuesta(texto)`: detecta precios de flores individuales en la respuesta que no coincidan con los precios de referencia.
+
+Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cliente, se ejecuta `validarRespuestaIA`. Si rechaza, se emite `HUMAN_REQUIRED` con prioridad alta para atención del equipo.
+
+**Ventajas:** Última línea de defensa contra alucinaciones del LLM. Cero dependencia de APIs externas. Reglas alineadas con los validadores de negocio existentes.
+
+**Desventajas:** Las reglas son determinísticas — pueden tener falsos positivos si el LLM usa frases no cubiertas por los patterns. Aceptable: el equipo recibe la notificación y puede responder.
+
+---
+
+## DEC-051: Eliminación de código de envío duplicado en message-handler.ts
+
+**Fecha:** 2026-07-29
+**Estado:** Aceptada
+
+**Motivo:** P1-11. `buscarPrecioEnvio`, `obtenerZonasEnvio`, `obtenerMunicipiosEnvio`, `formatearZonasParaPrompt`, `contieneFrase` y `detectarLinkMaps` estaban duplicados en `message-handler.ts` con implementaciones casi idénticas a `envio.validator.ts`. Esto violaba el Principio 1 (Nunca duplicar lógica) de AGENTS.md.
+
+**Alternativas consideradas:**
+1. Dejar ambas versiones (riesgo de divergencia futura)
+2. Eliminar las de envio.validator.ts (no, ese es el módulo oficial)
+3. Eliminar las de message-handler.ts e importar desde envio.validator.ts (elegida)
+
+**Resultado:** Se eliminaron ~95 líneas de código duplicado de `message-handler.ts`. `buscarPrecioEnvio` reemplazado por `buscarEnvio` (importado). Las funciones de ayuda se importan desde `envio.validator.ts`.
+
+**Ventajas:** Una sola fuente de verdad para lógica de envío. Código más mantenible.
+
+**Desventajas:** Ninguna.
+
+---
+
+## DEC-052: Corrección de nombre.parser.ts — palabras que pueden ser nombres reales
+
+**Fecha:** 2026-07-29
+**Estado:** Aceptada
+
+**Motivo:** P0-4. `NO_ES_NOMBRE_REGEX` y `STOP_WORDS` incluían "tiene", "tienen", "listo", "entrega", "recoger", "direccion", "pago", "ramo", "centro", "norte", "sur", "arreglo" — palabras que pueden ser parte de nombres reales (ej: "Tiene Martínez", "Listo Pérez", "Ramo Sánchez").
+
+**Alternativas consideradas:**
+1. Dejar la lista actual (riesgo de rechazar nombres reales en producción)
+2. Eliminar todas las palabras que podrían ser nombres (elegida)
+3. Usar un modelo de NLP para distinguir nombres de frases (sobreingeniería)
+
+**Resultado:** Se removieron de STOP_WORDS: "recoger", "entrega", "entregan", "envio", "envío", "direccion", "dirección", "pago", "mañana", "hoy", días de la semana, "ramo", "sucursal", "centro", "norte", "sur", "listo", "arreglo". De NO_ES_NOMBRE_REGEX: "ramo", "sucursal", "centro", "norte", "sur", "recoger", "entrega", "entregan", "direccion", "dirección", "pago", "tiene", "tienen", "listo".
+
+**Ventajas:** Nombres reales con estas palabras ya no son rechazados. El parser sigue siendo estricto con puntuación y conectores gramaticales.
+
+**Desventajas:** Mayor riesgo de que frases conversacionales que incluyan estas palabras ("listo", "tiene precio") sean interpretadas como nombres. Mitigado por el contexto: `cortarEnStop()` se detiene en STOP_WORDS, y los nombres se extraen solo cuando hay indicación explícita ("a nombre de", "nombre:").
+
+---
+
+## DEC-053: Confianza gradual en el parser de sucursal (confianza 'media')
+
+**Fecha:** 2026-07-31
+**Estado:** Aceptada
+
+**Motivo:** Módulo 1.4. El parser de sucursal solo aceptaba confianza 'alta' (línea 160 y 836 de message-handler.ts). Frases reales como "La que está por la Av. Morelos" o "La del centro" dejaban la sucursal vacía y el pedido perdía la sucursal.
+
+**Alternativas consideradas:**
+1. Dejar confianza binaria (alta/ninguna) y ampliar keywords (riesgo de falsos positivos: "centro" podría pegar en "concentrado")
+2. Aceptar 'media' y almacenar la sucursal con un flag `sucursal_por_confirmar` para que el bot pida confirmación antes de cerrar (elegida)
+3. Pasar toda referencia ambigua a un humano (sobrecarga operativa)
+
+**Resultado:** `parseSucursal()` devuelve `'alta' | 'media' | 'ninguna'`. Normaliza acentos (NFD) y usa límites de palabra (`\b`) para evitar subcadenas falsas. Variantes soportadas: "la de [dirección]", "la que está por", "Av. Morelos" → Centro media, "por el norte/sur", "sucursal [nombre]", "tlaxcala". Con 'media' se almacena la sucursal y se activa `sucursal_por_confirmar` en `PedidoActual`; el prompt builder marca "(POR CONFIRMAR)" para que el LLM pida confirmación. Fallo seguro: si no se determina, queda vacío (Error #2 nunca se reintroduce).
+
+**Ventajas:** El criterio de éxito se cumple ("La que está por la Av. Morelos" → Centro media). Sin sucursales inventadas. Compatible con historial existente.
+
+**Desventajas:** El flag `sucursal_por_confirmar` depende de que el LLM respete la marca en el prompt; la confirmación real la valida el backend al cerrar.
+
+---
+
+## DEC-054: Cooldown largo para bloqueo de IP por WhatsApp (404/405)
+
+**Fecha:** 2026-07-31
+**Estado:** Aceptada
+
+**Motivo:** Módulo 0.1. WhatsApp bloqueó la IP de la VM de GCP por exceso de reconexiones (HTTP 404/405). El handler de `connection === 'close'` no distinguía el bloqueo y reconectaba con backoff corto (máx. 60s), manteniendo la IP en lista negra.
+
+**Alternativas consideradas:**
+1. Dejar el backoff corto genérico (mantiene el bloqueo)
+2. Detectar 403/404/405 y esperar cooldown largo de 30 min antes de reintentar (elegida)
+3. Cambiar de IP automáticamente vía API de GCP (requiere credenciales en la VM, riesgo de seguridad)
+
+**Resultado:** En `bot.ts`, si `reason` es 403/404/405 se marca estado `error`, se emite `BOT_DISCONNECTED` y se programa `programarReinicioBaileys` con `BLOQUEO_IP_COOLDOWN_MS = 30 min`. La operación de cambio de IP en GCP queda manual (consola), ya que requiere interacción del dueño.
+
+**Ventajas:** No se bombardea a WhatsApp con reconexiones durante un bloqueo. El dashboard muestra estado claro.
+
+**Desventajas:** Si la IP sigue bloqueada tras el cooldown, el bot tarda 30 min en volver a intentar; es la política deseada para salir de la lista negra.
+

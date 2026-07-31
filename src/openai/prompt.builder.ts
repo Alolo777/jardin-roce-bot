@@ -105,7 +105,7 @@ function formatearPedido(pedido: PedidoActual | null): string {
   if (!pedido) return 'Sin pedido activo'
   const partes: string[] = [`Estado: ${pedido.estado ?? 'Sin estado'}`]
   if (pedido.nombre) partes.push(`Nombre: ${pedido.nombre}`)
-  if (pedido.sucursal) partes.push(`Sucursal: ${pedido.sucursal}`)
+  if (pedido.sucursal) partes.push(`Sucursal: ${pedido.sucursal}${pedido.sucursal_por_confirmar ? ' (POR CONFIRMAR — pide confirmación antes de cerrar)' : ''}`)
   if (pedido.arreglo) partes.push(`Arreglo: ${pedido.arreglo.nombre} ($${pedido.arreglo.precio})`)
   if (pedido.productoPersonalizado) partes.push(`Personalizado: ${pedido.productoPersonalizado}`)
   if (pedido.precioPersonalizado) partes.push(`Precio personalizado: $${pedido.precioPersonalizado}`)

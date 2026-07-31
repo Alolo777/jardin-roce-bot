@@ -10,10 +10,8 @@ const STOP_WORDS = [
   'quiere', 'quiero', 'quieren', 'podría', 'podria', 'podrías', 'podrias', 'podríamos',
   'podriamos', 'estaría', 'estaria', 'estarían', 'estarian', 'sería', 'seria',
   'puede', 'puedo', 'pueden', 'piensa', 'pienso', 'dice', 'digo', 'dijo',
-  'sabe', 'sé', 'sabes', 'saben', 'recoger', 'entrega', 'entregan', 'envio', 'envío',
-  'direccion', 'dirección', 'transferencia', 'comprobante', 'pago', 'mañana', 'hoy',
-  'viernes', 'lunes', 'martes', 'miercoles', 'miércoles', 'jueves', 'sabado', 'sábado',
-  'domingo', 'ramo', 'sucursal', 'centro', 'norte', 'sur', 'listo', 'arreglo',
+  'sabe', 'sé', 'sabes', 'saben',
+  'transferencia', 'comprobante',
   'gracias', 'aperte', 'aparta', 'apartas', 'apartan',
 ]
 const STOP_WORDS_JOINED = STOP_WORDS.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
@@ -21,7 +19,7 @@ const STOP_WORDS_REGEX = new RegExp(`\\b(${STOP_WORDS_JOINED})\\b`, 'i')
 
 const STOP_PATTERN = new RegExp(`${STOP_PUNTUACION.source}|${STOP_WORDS_REGEX.source}`, 'i')
 
-const NO_ES_NOMBRE_REGEX = /\b(hola|buenas|gracias|ok|okay|okey|si|sí|está|esta|bien|vale|dale|va|ramo|sucursal|centro|norte|sur|envio|envío|mañana|hoy|viernes|lunes|martes|miercoles|miércoles|jueves|sabado|sábado|domingo|recoger|entrega|entregan|direccion|dirección|transferencia|comprobante|pago|podría|podria|necesito|quisiera|quiere|quiero|tiene|tienen|listo)\b/i
+const NO_ES_NOMBRE_REGEX = /\b(hola|buenas|gracias|ok|okay|okey|si|sí|está|esta|bien|vale|dale|va|sucursal|envio|envío|mañana|hoy|viernes|lunes|martes|miercoles|miércoles|jueves|sabado|sábado|domingo|transferencia|comprobante|pago|podría|podria|necesito|quisiera)\b/i
 const NO_INDEPENDIENTE = /(?:^|[\s,.;:!?¡¿])no(?:$|[\s,.;:!?¡¿])/i
 
 function esNoNombre(texto: string): boolean {

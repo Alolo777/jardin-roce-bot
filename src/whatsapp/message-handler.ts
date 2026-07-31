@@ -28,7 +28,8 @@ import { detectarCancelacion, detectarQueja, detectarEvento, detectarInteresComp
 import { validarHorario, esHorarioAnticipado, HORARIO_APERTURA } from '../validators/horario.validator'
 import { obtenerTextoCuenta } from '../validators/pago.validator'
 import { validarSucursal, obtenerTextoConfirmacionSucursal } from '../validators/sucursal.validator'
-import { buscarEnvio, pareceConsultaEnvio } from '../validators/envio.validator'
+import { buscarEnvio, pareceConsultaEnvio, detectarLinkMaps, formatearZonasParaPrompt } from '../validators/envio.validator'
+import { validarRespuestaIA, sanitizarRespuestaIA } from '../validators/response.validator'
 import { evaluarCancelacion } from '../validators/cancelacion.validator'
 import { evaluarQueja } from '../validators/queja.validator'
 import { getAIResponse, clasificarImagenVenta } from '../../lib/ai'
@@ -60,8 +61,6 @@ export interface MsgHandlerDeps {
 }
 
 const MAX_LONGITUD_MENSAJE = 1000
-const GOOGLE_MAPS_REGEX = /https?:\/\/(?:www\.)?(?:google\.[a-z]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl)[^\s]*/i
-
 function extraerFechaHoraPedido(texto: string): { fecha?: string; hora?: string } {
   return { fecha: extraerFecha(texto) ?? undefined, hora: extraerHora(texto) ?? undefined }
 }
@@ -105,10 +104,6 @@ function detectarIntencion(texto: string, clienteId: string, deps: Pick<MsgHandl
   return decision.intencionCatalogo
 }
 
-function detectarLinkMaps(texto: string): boolean {
-  return GOOGLE_MAPS_REGEX.test(texto)
-}
-
 function limpiarRespuestaIA(texto: string): string {
   return texto
     .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$2')
@@ -118,6 +113,8 @@ function limpiarRespuestaIA(texto: string): string {
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 }
+
+const GOOGLE_MAPS_REGEX = /https?:\/\/(?:www\.)?(?:google\.[a-z]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl)[^\s]*/i
 
 function limpiarDireccionCliente(texto: string): string {
   // BUG-007 (opcion A): si es un link de Maps, se CONSERVA como direccion
@@ -133,113 +130,13 @@ function limpiarDireccionCliente(texto: string): string {
     .trim()
 }
 
-interface ZonaEnvioData {
-  id: string; zona: string; precio: number; palabras_clave: string
-}
 
-let cacheZonas: { zonas: ZonaEnvioData[]; ts: number } | null = null
 
-async function obtenerZonasEnvio(): Promise<ZonaEnvioData[]> {
-  const ahora = Date.now()
-  if (cacheZonas && ahora - cacheZonas.ts < 120_000) return cacheZonas.zonas
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('zonas_envio').select('id, zona, precio, palabras_clave').order('precio', { ascending: true })
-    if (error) throw error
-    cacheZonas = { zonas: data ?? [], ts: ahora }
-    return data ?? []
-  } catch (err) { console.error('[bot] Error obteniendo zonas:', err); return [] }
-}
-
-function formatearZonasParaPrompt(zonas: ZonaEnvioData[]): string {
-  if (!zonas.length) return ''
-  return zonas.map(z => `- ${z.zona}: $${z.precio.toFixed(2)} MXN (${z.palabras_clave})`).join('\n')
-}
-
-interface MunicipioEnvioData {
-  id: string; municipio: string; codigo_postal: string
-  colonia: string | null; zona: string; precio_envio: number
-}
-
-let cacheMunicipios: { data: MunicipioEnvioData[]; ts: number } | null = null
-
-async function obtenerMunicipiosEnvio(): Promise<MunicipioEnvioData[]> {
-  const ahora = Date.now()
-  if (cacheMunicipios && ahora - cacheMunicipios.ts < 120_000) return cacheMunicipios.data
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('municipios_envio').select('*').order('municipio', { ascending: true })
-    if (error) throw error
-    cacheMunicipios = { data: data ?? [], ts: ahora }
-    return data ?? []
-  } catch (err) { console.error('[bot] Error obteniendo municipios:', err); return [] }
-}
 
 
 
 export function esTextoReferenciaOCotizacion(texto: string): boolean {
   return /\b(cotiz|cotizar|cotizaci[oó]n|cu[aá]nto|cuanto|precio|saldr[ií]a|costar[ií]a|ramo\s+as[ií]|como\s+(este|esta|la\s+foto|imagen)|referencia|foto\s+de\s+referencia|imagen\s+de\s+referencia|hacer\s+un\s+ramo|podr[ií]an\s+hacer|hortensias?|lilis?|rosas?|flores?\s+de\s+la\s+imagen)\b/i.test(texto)
-}
-
-type ResultadoEnvio = { zona: string; precio: number; fuente: string } | { ambiguo: true; candidatos: Array<{ zona: string; precio: number; fuente: string }> }
-
-async function buscarPrecioEnvio(texto: string): Promise<ResultadoEnvio | null> {
-  const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  const tieneDatoDireccion = parseDireccion(texto).confianza !== 'ninguna'
-
-  const municipios = await obtenerMunicipiosEnvio()
-  if (municipios.length > 0) {
-    const candidatos = municipios
-      .map(m => {
-        const nomMunicipio = m.municipio.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-        const nomColonia = (m.colonia ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-        const cp = m.codigo_postal.trim()
-        let score = 0
-        if (cp && n.includes(cp)) score += 200
-        if (contieneFrase(n, nomMunicipio) || n.includes(nomMunicipio)) score += 120 + nomMunicipio.length
-        if (nomColonia && (contieneFrase(n, nomColonia) || n.includes(nomColonia))) {
-          score += nomColonia.length <= 7 ? 35 : 70 + nomColonia.length
-        }
-        return { municipio: m, score }
-      })
-      .filter(c => c.score > 0)
-      .sort((a, b) => b.score - a.score)
-
-    const mejor = candidatos[0]
-    const segundo = candidatos[1]
-    if (mejor) {
-      const match = mejor.municipio
-      const esMatchFuerte = mejor.score >= 180 || tieneDatoDireccion
-      const ambiguo = segundo && Math.abs(mejor.score - segundo.score) < 10
-      if (!esMatchFuerte || ambiguo) {
-        console.warn(`[envio] Zona ambigua/no fuerte para "${texto}". Mejor=${match.zona} score=${mejor.score}`)
-        return {
-          ambiguo: true,
-          candidatos: candidatos.slice(0, 5).map(c => ({ zona: c.municipio.zona, precio: c.municipio.precio_envio, fuente: 'municipios' })),
-        }
-      }
-      return { zona: match.zona, precio: match.precio_envio, fuente: 'municipios' }
-    }
-  }
-
-  const zonas = await obtenerZonasEnvio()
-  if (zonas.length > 0) {
-    const zonaMatch = zonas.find(z =>
-      z.palabras_clave.split(',').some(p => {
-        const palabra = p.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-        return palabra && contieneFrase(n, palabra)
-      })
-    )
-    if (zonaMatch && tieneDatoDireccion) return { zona: zonaMatch.zona, precio: zonaMatch.precio, fuente: 'zonas' }
-  }
-
-  return null
-}
-
-function contieneFrase(texto: string, frase: string): boolean {
-  if (!frase) return false
-  const segura = frase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`(^|\\s)${segura}(\\s|$)`).test(texto)
 }
 
 function extraerNombrePedido(texto: string): string | null {
@@ -260,8 +157,9 @@ function aplicarDatosPedidoDesdeTexto(clienteId: string, texto: string, deps: Pi
   if (!pedido.nombre && posibleNombre) pedido.nombre = posibleNombre.replace(/\s+/g, ' ').slice(0, 80)
 
   const sucParsed = parseSucursal(texto)
-  if (sucParsed.confianza === 'alta' && sucParsed.sucursal) {
+  if ((sucParsed.confianza === 'alta' || sucParsed.confianza === 'media') && sucParsed.sucursal) {
     pedido.sucursal = sucParsed.sucursal
+    pedido.sucursal_por_confirmar = sucParsed.confianza === 'media'
   }
 
   if (/\b(transferencia|transfer|comprobante|recibo|ticket|listo\s+ese\s+es\s+el\s+recibo|pago\s+con\s+transferencia)\b/i.test(texto)) {
@@ -708,7 +606,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         contextoExtra += instruccionEnvio
       }
 
-      const resultadoEnvio = pareceEnvio ? await buscarPrecioEnvio(textoCliente).catch(() => null) : null
+      const resultadoEnvio = pareceEnvio ? await buscarEnvio(textoCliente).catch(() => null) : null
 
       const envioCooldown = ENVIO_NOTIFICADO.get(clienteId) ?? 0
       const puedeNotificarEnvio = Date.now() - envioCooldown > 30 * 60_000
@@ -936,8 +834,9 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       }
 
       const sucParsed = parseSucursal(textoCliente)
-      if (sucParsed.confianza === 'alta' && sucParsed.sucursal && deps.tieneArregloVerificado(clienteId)) {
+      if ((sucParsed.confianza === 'alta' || sucParsed.confianza === 'media') && sucParsed.sucursal && deps.tieneArregloVerificado(clienteId)) {
         deps.pedidoActual(clienteId).sucursal = sucParsed.sucursal
+        deps.pedidoActual(clienteId).sucursal_por_confirmar = sucParsed.confianza === 'media'
         if (!consultaPagoEnviado) {
           deps.pedidoActual(clienteId).metodoPago = /tarjeta/i.test(textoCliente) ? 'tarjeta_recoger' : 'efectivo_recoger'
           deps.pedidoActual(clienteId).estadoFlujo = 'esperando_fecha_hora'
@@ -1004,9 +903,6 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       }
 
       if (!ventaCerrada) {
-        const zonas = await obtenerZonasEnvio()
-        const zonasPrompt = formatearZonasParaPrompt(zonas)
-        if (zonasPrompt) contextoExtra += `\n\nZonas de envío disponibles:\n${zonasPrompt}`
 
         contextoExtra += `\n\nForma de pago:\n${obtenerTextoCuenta()}\n` +
           `(Pregunta el nombre para apartarlo)`
@@ -1037,7 +933,19 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           return
         }
 
-        const mensajeParaEnviar = limpiarRespuestaIA(respuestaIA.mensaje)
+        const mensajeParaEnviar = sanitizarRespuestaIA(limpiarRespuestaIA(respuestaIA.mensaje))
+
+        const validacion = validarRespuestaIA(mensajeParaEnviar, contextoExtra)
+        if (!validacion.valido) {
+          console.warn(`[response-validator] Respuesta IA rechazada para ${telefono}: ${validacion.razon}`)
+          eventBus.emit(EventType.HUMAN_REQUIRED, {
+            telefono: await numeroRealPromise,
+            cliente: msg.pushName || '',
+            prioridad: 'alta',
+            descripcion: `[VALIDACION IA] El LLM intentó responder con información no verificada: ${validacion.razon}. Se requiere atención humana. Mensaje original: ${textoCliente.substring(0, 200)}`,
+            contexto: 'Response validator reject',
+          })
+        }
 
         const ventaEstado = deps.ventaDesdeEstado(clienteId)
         if (!deps.pedidoEstaCerrado(clienteId) && ventaEstado && deps.ventaListaParaCerrar(clienteId) && (

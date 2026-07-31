@@ -27,29 +27,57 @@ const TRANSICIONES_VALIDAS: Record<string, EstadoPedido[]> = {
   [EstadoPedido.POSTVENTA]: [EstadoPedido.ARCHIVADO],
 }
 
-const PEDIDOS = new Map<string, PedidoActual>()
+const PEDIDOS = new Map<string, PedidoActual[]>()
 let pedidoCounter = 0
+
+const MAX_RETRIES_PERSISTENCIA = 3
+
+async function persistirConRetry(): Promise<boolean> {
+  for (let i = 0; i < MAX_RETRIES_PERSISTENCIA; i++) {
+    try {
+      await guardarPedidos(PEDIDOS)
+      await sincronizarPedidosBot(PEDIDOS)
+      return true
+    } catch (err) {
+      console.error(`[pedidos] Error persistencia (intento ${i + 1}/${MAX_RETRIES_PERSISTENCIA}):`, err)
+      if (i < MAX_RETRIES_PERSISTENCIA - 1) {
+        await new Promise(r => setTimeout(r, 1000 * (i + 1)))
+      }
+    }
+  }
+  console.error(`[pedidos] Persistencia fallo despues de ${MAX_RETRIES_PERSISTENCIA} intentos`)
+  return false
+}
+
+function persistir(): void {
+  persistirConRetry().catch(err => {
+    console.error('[pedidos] Error persistencia en background:', err)
+  })
+}
+
+export async function persistirPedidosEngine(): Promise<void> {
+  await persistirConRetry()
+}
+
+function esPedidoActivo(pedido: PedidoActual): boolean {
+  return pedido.estado !== EstadoPedido.ARCHIVADO && pedido.estado !== EstadoPedido.CANCELADO
+}
+
+function obtenerPedidosDeCliente(clienteId: string): PedidoActual[] {
+  return PEDIDOS.get(clienteId) ?? []
+}
 
 function generarId(): string {
   return `ped_${Date.now()}_${++pedidoCounter}`
 }
 
-function persistir(): void {
-  guardarPedidos(PEDIDOS).catch(() => {})
-  sincronizarPedidosBot(PEDIDOS).catch(() => {})
-}
-
-export function persistirPedidosEngine(): void {
-  persistir()
-}
-
 export async function cargarPedidosDesdeBD(): Promise<void> {
   const restaurados = await cargarPedidos()
-  for (const [id, pedido] of restaurados) {
-    PEDIDOS.set(id, pedido)
+  for (const [id, pedidos] of restaurados) {
+    PEDIDOS.set(id, pedidos)
   }
   if (restaurados.size > 0) {
-    console.log(`[pedidos] Restaurados ${restaurados.size} pedidos activos`)
+    console.log(`[pedidos] Restaurados ${restaurados.size} clientes con pedidos activos`)
   }
 }
 
@@ -172,7 +200,9 @@ export function crearPedido(clienteId: string, telefono: string, datosIniciales?
     ...datosIniciales,
   }
 
-  PEDIDOS.set(clienteId, pedido)
+  const existentes = obtenerPedidosDeCliente(clienteId)
+  existentes.push(pedido)
+  PEDIDOS.set(clienteId, existentes)
   persistir()
 
   eventBus.emit(EventType.ORDER_CREATED, {
@@ -187,8 +217,13 @@ export function crearPedido(clienteId: string, telefono: string, datosIniciales?
   return pedido
 }
 
+export function obtenerPedidosActivos(clienteId: string): PedidoActual[] {
+  return obtenerPedidosDeCliente(clienteId).filter(esPedidoActivo)
+}
+
 export function obtenerPedido(clienteId: string): PedidoActual | null {
-  return PEDIDOS.get(clienteId) ?? null
+  const activos = obtenerPedidosActivos(clienteId)
+  return activos[activos.length - 1] ?? null
 }
 
 export function syncLegacyToEngine(clienteId: string, telefono: string, legado: Record<string, unknown>): PedidoActual {
@@ -272,7 +307,7 @@ export function obtenerHistorialTransiciones(pedido: PedidoActual): TransicionEs
 }
 
 export function archivarPedido(clienteId: string, motivo?: string): boolean {
-  const pedido = PEDIDOS.get(clienteId)
+  const pedido = obtenerPedido(clienteId)
   if (!pedido || !pedido.estado) return false
 
   const ok = transitar(pedido, EstadoPedido.ARCHIVADO)
@@ -281,23 +316,21 @@ export function archivarPedido(clienteId: string, motivo?: string): boolean {
     pedido.actualizadoEn = new Date().toISOString()
   }
 
-  PEDIDOS.delete(clienteId)
   persistir()
   return true
 }
 
 export function archivarSilencioso(clienteId: string): boolean {
-  const pedido = PEDIDOS.get(clienteId)
+  const pedido = obtenerPedido(clienteId)
   if (!pedido) return false
   pedido.estado = EstadoPedido.ARCHIVADO
   pedido.actualizadoEn = new Date().toISOString()
-  PEDIDOS.delete(clienteId)
   persistir()
   return true
 }
 
 export function cancelarPedido(clienteId: string, motivo?: string): boolean {
-  const pedido = PEDIDOS.get(clienteId)
+  const pedido = obtenerPedido(clienteId)
   if (!pedido || !pedido.estado) return false
 
   if (!transitar(pedido, EstadoPedido.CANCELADO)) {
@@ -305,13 +338,12 @@ export function cancelarPedido(clienteId: string, motivo?: string): boolean {
     pedido.actualizadoEn = new Date().toISOString()
   }
 
-  PEDIDOS.delete(clienteId)
   persistir()
   return true
 }
 
 export function transitarDesdeFlujo(clienteId: string, flujo: string, motivo?: string): boolean {
-  const pedido = PEDIDOS.get(clienteId)
+  const pedido = obtenerPedido(clienteId)
   if (!pedido || !pedido.estado) return false
 
   if (!pedido.telefono) {
@@ -351,9 +383,11 @@ export function pedidoTieneDatosCompletos(pedido: PedidoActual): boolean {
 }
 
 export function resetearPedido(clienteId: string): void {
-  const pedido = PEDIDOS.get(clienteId)
+  const pedido = obtenerPedido(clienteId)
   if (!pedido) return
-  PEDIDOS.delete(clienteId)
+  const existentes = obtenerPedidosDeCliente(clienteId).filter(p => p.id !== pedido.id)
+  if (existentes.length === 0) PEDIDOS.delete(clienteId)
+  else PEDIDOS.set(clienteId, existentes)
   persistir()
 }
 
@@ -365,11 +399,16 @@ export function sincronizarConCaso(pedido: PedidoActual, casoId: string): void {
 
 export function limpiarCachesPedidos(): void {
   const ahora = Date.now()
-  for (const [clienteId, pedido] of PEDIDOS) {
-    if (pedido.actualizadoEn) {
-      const horas = (ahora - new Date(pedido.actualizadoEn).getTime()) / (1000 * 60 * 60)
-      if (horas > 72) PEDIDOS.delete(clienteId)
-    }
+  for (const [clienteId, pedidos] of PEDIDOS) {
+    const vigentes = pedidos.filter(pedido => {
+      if (pedido.actualizadoEn) {
+        const horas = (ahora - new Date(pedido.actualizadoEn).getTime()) / (1000 * 60 * 60)
+        return horas <= 72
+      }
+      return true
+    })
+    if (vigentes.length === 0) PEDIDOS.delete(clienteId)
+    else if (vigentes.length !== pedidos.length) PEDIDOS.set(clienteId, vigentes)
   }
 }
 

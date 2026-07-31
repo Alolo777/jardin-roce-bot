@@ -1,6 +1,78 @@
 # CHANGELOG
 
-## 2026-07-28
+## 2026-07-31
+
+### Módulo 0.1 — Reconexión WhatsApp: detección de bloqueo por IP (código)
+
+**Problema:** WhatsApp bloqueó la IP de la VM de GCP por exceso de reconexiones (404/405). El bot reconectaba cada 60s con backoff corto, manteniendo el bloqueo activo.
+
+**Solución (código):** `bot.ts` ahora distingue el bloqueo por IP (HTTP 403/404/405) en `connection === 'close'`. Si se detecta, se emite `BOT_DISCONNECTED`, se marca estado `error` ("IP posiblemente bloqueada — reintento en 30 min") y se programa reconexión con cooldown largo de 30 min (`BLOQUEO_IP_COOLDOWN_MS`) en lugar del backoff corto de 60s, evitando re-bloqueo. Ya existían y se verificaron: cooldown 30 min para BOT_DISCONNECTED, backoff 5s→60s, crash detector que limpia sesión tras 3 crashes en 10 min.
+
+**Archivos modificados:**
+- `bot.ts` — constante `BLOQUEO_IP_COOLDOWN_MS` + rama `esBloqueoIp` en el handler de cierre
+
+**Pendiente (operación GCP, manual):** cambiar la IP externa de la VM `jardin-roce-bot` en GCP Console (parar → Editar red → crear IP temporal nueva → iniciar) para salir de la lista negra de WhatsApp.
+
+**Impacto:** Compatible. Compilación 0 errores.
+
+**Rollback:** Revertir la rama `esBloqueoIp`.
+
+---
+
+### Módulos 1.1–1.4 del Plan Maestro de Soluciones
+
+**1.1 Múltiples pedidos por cliente (P0):** `PEDIDOS` pasa de `Map<string, PedidoActual>` a `Map<string, PedidoActual[]>`. `obtenerPedidosActivos()` exportado; persistencia con arrays y retro-compatibilidad con pedido único.
+
+**1.2 Persistencia síncrona con retry (P0):** `guardarPedidos()` ahora lanza error; `sincronizarPedidosBot()` acumula errores y lanza. `persistirConRetry()` (3 intentos, backoff 1s→2s), `persistirPedidosEngine()` async, wrapper sync `persistir()`. `bot.ts` hace `await persistirPedidosEngine()`.
+
+**1.3 Ventana de agrupación de 60s→50s (P0):** `AGRUPAR_MENSAJES_MS = 50_000`. Respaldo ante crash = rescate nativo existente (`rescatarMensajesNoLeidos()` en `messaging-history.set`); la tabla `mensajes_pendientes` no existe (PGRST205), no se creó (Principio 2: no duplicar datos).
+
+**1.4 Parser de sucursal robusto (P1):** `parseSucursal()` ahora usa confianza gradual `'alta' | 'media' | 'ninguna'`, normalización de acentos (NFD), límites de palabra (`\b`) y variantes: "la de", "la que está por", "Av. Morelos", "por el norte/sur", "sucursal [nombre]", "tlaxcala". Confianza 'media' almacena la sucursal y activa `sucursal_por_confirmar` para que el bot pida confirmación antes de cerrar. Fallo seguro: deja vacío. `validarSucursal()` y `obtenerTextoConfirmacionSucursal()` manejan 'media'; el flag viaja al prompt builder.
+
+**Archivos modificados:**
+- `src/parser/sucursal.parser.ts`
+- `src/validators/sucursal.validator.ts`
+- `src/whatsapp/message-handler.ts` (2 usos del parser)
+- `src/models/types.ts` (campo `sucursal_por_confirmar`)
+- `src/openai/prompt.builder.ts` (marca "(POR CONFIRMAR)")
+- `src/pedidos/pedido.service.ts`, `src/pedidos/pedido.repository.ts`, `bot.ts`, `src/parser/nombre.parser.ts`, `src/validators/response.validator.ts` (cambios de sesiones previas sin commitear)
+
+**Impacto:** Compatible. Compilación 0 errores.
+
+**Rollback:** Revertir los archivos modificados; eliminar el flag `sucursal_por_confirmar` y la confianza 'media'.
+
+**Verificado:** `npx tsc --noEmit` → 0 errores. Criterio de éxito 1.4: `"La que está por la Av. Morelos"` → `{ sucursal: 'Centro', confianza: 'media' }`.
+
+---
+
+## 2026-07-29
+
+### Fase 10 — 4 correcciones críticas: fotos, response validator, código duplicado, parser
+
+**Problemas resueltos:**
+
+**P0-1 (Fotos de referencia perdidas al reiniciar):** `sanitizarParaCache` eliminaba `fotoReferenciaBase64`, `fotoReferenciaMimetype`, `fotoReferenciaCaption` y `fotoReferenciaRecibidaEn` al persistir en `bot_cache`. Tras reinicio, todas las fotos de referencia desaparecían.
+
+**P0-3 (Response Validator inexistente):** AGENTS.md Parte 3 especifica un Response Validator que verifica que el LLM no invente horarios, precios, sucursales, pagos. No existía en el código.
+
+**P1-11 (Código de envío duplicado):** `buscarPrecioEnvio`, `obtenerZonasEnvio`, `obtenerMunicipiosEnvio`, `formatearZonasParaPrompt`, `contieneFrase`, `detectarLinkMaps` estaban duplicados en `message-handler.ts` con implementaciones casi idénticas a `envio.validator.ts`.
+
+**P0-4 (Parser de nombre rechazaba nombres válidos):** `NO_ES_NOMBRE_REGEX` y `STOP_WORDS` incluían "tiene", "tienen", "listo", "entrega", "recoger", "direccion", "pago", "ramo", "centro", "norte", "sur", "arreglo" — palabras que pueden ser parte de nombres reales.
+
+**Archivos modificados:**
+- `src/pedidos/pedido.repository.ts` — `cargarPedidos()` ahora restaura fotos desde `pedidos_bot` tras cargar desde `bot_cache`
+- `src/validators/response.validator.ts` — **NUEVO**: Valida que el LLM no confirme horarios fuera de rango, inventario, entregas o pagos sin respaldo del backend
+- `src/whatsapp/message-handler.ts` — Removidas funciones duplicadas de envío; ahora importa `buscarEnvio`, `detectarLinkMaps`, `formatearZonasParaPrompt` desde `envio.validator.ts`; integrado `validarRespuestaIA` tras respuesta del LLM
+- `src/parser/nombre.parser.ts` — STOP_WORDS y NO_ES_NOMBRE_REGEX reducidos: removidas palabras que pueden ser nombres ("tiene", "listo", "entrega", "ramo", etc.)
+
+**Archivos creados:**
+- `src/validators/response.validator.ts` — 162 líneas con `validarRespuestaIA()`, `sanitizarRespuestaIA()`, `extraerPreciosRespuesta()`
+
+**Impacto:** Compatible. Compilación 0 errores.
+
+**Rollback:** Revertir los 4 archivos modificados + eliminar response.validator.ts.
+
+---
 
 ### FASE 10: Optimización — auditoría de duplicación (message-handler.ts + bot.ts)
 

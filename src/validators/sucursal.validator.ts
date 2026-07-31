@@ -2,7 +2,7 @@ import { parseSucursal } from '../parser/sucursal.parser'
 
 export interface SucursalInfo {
   sucursal: string | null
-  confianza: 'alta' | 'baja' | 'ninguna'
+  confianza: 'alta' | 'media' | 'ninguna'
   direccion: string
   horario: string
 }
@@ -12,13 +12,14 @@ export const SUCURSALES_INFO: Record<string, SucursalInfo> = {
   'Centro': { sucursal: 'Centro', confianza: 'alta', direccion: 'Av. Hidalgo 12, Apizaco Centro', horario: 'Lun-Sáb 10:00-19:00, Dom 10:00-17:00' },
   'Sur': { sucursal: 'Sur', confianza: 'alta', direccion: 'Av. Hidalgo 12, Apizaco Centro', horario: 'Lun-Sáb 10:00-19:00, Dom 10:00-17:00' },
   'Apizaco': { sucursal: 'Apizaco', confianza: 'alta', direccion: 'Av. Hidalgo 12, Apizaco Centro', horario: 'Lun-Sáb 10:00-19:00, Dom 10:00-17:00' },
+  'Tlaxcala': { sucursal: 'Tlaxcala', confianza: 'alta', direccion: 'Av. Hidalgo 12, Apizaco Centro', horario: 'Lun-Sáb 10:00-19:00, Dom 10:00-17:00' },
 }
 
 export function validarSucursal(texto: string): SucursalInfo {
   const parsed = parseSucursal(texto)
-  if (parsed.confianza === 'alta' && parsed.sucursal) {
+  if ((parsed.confianza === 'alta' || parsed.confianza === 'media') && parsed.sucursal) {
     return SUCURSALES_INFO[parsed.sucursal] ?? {
-      sucursal: parsed.sucursal, confianza: 'alta',
+      sucursal: parsed.sucursal, confianza: parsed.confianza,
       direccion: 'Av. Hidalgo 12, Apizaco Centro',
       horario: 'Lun-Sáb 10:00-19:00, Dom 10:00-17:00',
     }
@@ -27,7 +28,10 @@ export function validarSucursal(texto: string): SucursalInfo {
 }
 
 export function obtenerTextoConfirmacionSucursal(info: SucursalInfo): string {
-  if (info.confianza !== 'alta') return ''
+  if (!info.sucursal) return ''
+  if (info.confianza === 'media') {
+    return `El cliente mencionó la sucursal ${info.sucursal}. Confirma con él antes de cerrar.`
+  }
   return `Confirma dirección: ${info.direccion}. Horario: ${info.horario}.`
 }
 

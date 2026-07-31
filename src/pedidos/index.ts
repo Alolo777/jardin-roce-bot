@@ -1,6 +1,7 @@
 export {
   crearPedido,
   obtenerPedido,
+  obtenerPedidosActivos,
   transitar,
   cambiarEstado,
   transitarDesdeFlujo,

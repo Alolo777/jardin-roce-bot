@@ -318,7 +318,7 @@ async function obtenerClientesAtendidosHoy(): Promise<number> {
 export const COLA_POR_CLIENTE = new Map<string, Promise<void>>()
 export const MENSAJES_POR_AGRUPAR = new Map<string, { mensajes: any[]; timer: NodeJS.Timeout }>()
 export const MEDIA_POR_CLIENTE = new Map<string, { base64: string; mimetype: string; caption: string }[]>()
-export const AGRUPAR_MENSAJES_MS = 60_000
+export const AGRUPAR_MENSAJES_MS = 50_000
 
 export function encolarPorCliente(id: string, tarea: () => Promise<void>): void {
   const previa    = COLA_POR_CLIENTE.get(id) ?? Promise.resolve()
@@ -496,7 +496,7 @@ function resumirPedidoOperativo(clienteId: string, telefono: string | null): str
 }
 
 async function persistirPedido(clienteId: string, telefono: string | null, estado: 'cotizacion' | 'apartado' | 'pagado' | 'entregado' | 'cancelado', ultimoMensaje?: string): Promise<void> {
-  persistirPedidosEngine()
+  await persistirPedidosEngine()
 }
 
 function resetearPedidoCliente(clienteId: string): void {
@@ -844,6 +844,8 @@ let RECONNECT_TIMER: NodeJS.Timeout | null = null
 let RECONNECT_ATTEMPT = 0
 let ULTIMO_BOT_DISCONNECTED_EMIT = 0
 
+const BLOQUEO_IP_COOLDOWN_MS = 30 * 60_000
+
 function actualizarEstadoBot(estado: typeof BOT_ESTADO, detalle: string): void {
   BOT_ESTADO = estado
   BOT_ESTADO_DETALLE = detalle
@@ -1046,6 +1048,7 @@ async function iniciarBaileys(): Promise<void> {
       const isBadSession = reason === DisconnectReason.badSession
       const isForbidden = reason === DisconnectReason.forbidden
       const isRestart = reason === DisconnectReason.restartRequired
+      const esBloqueoIp = reason === 403 || reason === 404 || reason === 405
 
       console.warn(`⚠️ Conexión cerrada: ${reason || 'desconocido'}`)
 
@@ -1060,6 +1063,14 @@ async function iniciarBaileys(): Promise<void> {
       if (ahora - ULTIMO_BOT_DISCONNECTED_EMIT >= 30 * 60_000) {
         ULTIMO_BOT_DISCONNECTED_EMIT = ahora
         eventBus.emit(EventType.BOT_DISCONNECTED, { telefono: 'system', descripcion: `Conexión cerrada (${reason || 'desconocido'})` })
+      }
+
+      if (esBloqueoIp) {
+        console.warn(`🚫 Posible bloqueo de IP por WhatsApp (${reason}). Reintento en ${BLOQUEO_IP_COOLDOWN_MS / 60_000} min para no mantener el bloqueo.`)
+        actualizarEstadoBot('error', `IP posiblemente bloqueada por WhatsApp (${reason}). Reintento en 30 min.`)
+        publicarEstadoBot().catch(() => {})
+        programarReinicioBaileys('Posible bloqueo de IP, esperando cooldown largo', BLOQUEO_IP_COOLDOWN_MS)
+        return
       }
 
       if (isLoggedOut || isBadSession || isForbidden) {

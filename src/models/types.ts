@@ -147,6 +147,7 @@ export interface PedidoActual {
   envio?: EnvioInfo
   direccion?: string
   sucursal?: string
+  sucursal_por_confirmar?: boolean
   fechaEntrega?: string
   horaEntrega?: string
   metodoPago?: MetodoPago | string
