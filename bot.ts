@@ -24,7 +24,7 @@ import { clasificarConversacion, clasificarImagenVenta, getAIResponse, revisarRe
 import { eventBus } from './src/events/event-bus'
 import { EventType } from './src/events/types'
 import { subscribeTelegramEvents } from './src/events/telegram.subscriber'
-import { verificarConexionTelegram } from './lib/telegram'
+import { verificarConexionTelegram, iniciarTelegramListener, enviarMensajeTelegram } from './lib/telegram'
 import { subscribeLogEvents, logger, flushLogsNow } from './lib/logger.service'
 import { metrics } from './lib/metrics.service'
 import { supabaseAdmin } from './lib/supabase'
@@ -46,12 +46,12 @@ import {
   CACHE_CLIENTE_UUID,
   MENSAJES_PROCESADOS,
 } from './src/conversation/conversation.service'
-import { parseNombre, pareceNombreCliente, parseFecha, extraerFecha, parseHora, extraerHora, parseSucursal, parsePrecio, parseDireccion, limpiarTelefono } from './src/parser'
+import { parseNombre, pareceNombreCliente, esNombrePlausible, parseFecha, extraerFecha, parseHora, extraerHora, parseSucursal, parsePrecio, parseDireccion, limpiarTelefono } from './src/parser'
 import { getContenidoMensaje, getMessageBody, getMensajeTexto, getMessageType, hasQuotedMsg, getQuotedText, descargarMedia, jidANumero, ahoraCdmx, estaEnHorario, getFechaActual } from './src/whatsapp/message-utils'
-import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema, clasificarTipoCaso, limpiarCachesCasos, cargarCasosDesdeBD } from './src/casos/caso.service'
-import { crearPedido, obtenerPedido, transitar, transitarDesdeFlujo, archivarPedido, archivarSilencioso, cancelarPedido, limpiarCachesPedidos, cargarPedidosDesdeBD, persistirPedidosEngine } from './src/pedidos/pedido.service'
+import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema, clasificarTipoCaso, limpiarCachesCasos, cargarCasosDesdeBD, contarCasosActivos, contarCasosRequierenAtencionHumana, listarCasosRequierenAtencion } from './src/casos/caso.service'
+import { crearPedido, obtenerPedido, transitar, transitarDesdeFlujo, archivarPedido, archivarSilencioso, cancelarPedido, limpiarCachesPedidos, cargarPedidosDesdeBD, persistirPedidosEngine, contarPedidosPorEstado, listarPedidosActivosGlobales, obtenerPedidoPorId, serializarPedidoParaDashboard, cambiarEstado } from './src/pedidos/pedido.service'
 import { analizarIntencion, Decision } from './src/decision/decision.engine'
-import { Intencion, PedidoActual, EstadoPedido } from './src/models/types'
+import { Intencion, PedidoActual, EstadoPedido, EstadoFlujo, FuenteConfirmacionPrecio } from './src/models/types'
 import { createMessageHandler, esTextoReferenciaOCotizacion } from './src/whatsapp/message-handler'
 import type { MsgHandlerDeps } from './src/whatsapp/message-handler'
 import { createMessageEntry, type MessageEntryDeps } from './src/whatsapp/message-entry'
@@ -63,6 +63,9 @@ import { detectarCancelacion, detectarQueja, detectarEvento, detectarInteresComp
 import { FRUSTRACION_NOTIFICADA, ATENCION_HUMANA_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, RECLAMACION_NOTIFICADA, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, ALERTAS_DEDUP, ULTIMA_INTERVENCION_HUMANA, RATE_TIMESTAMPS, FOTOS_DISPONIBLES_TTL_MS, INTERVENCION_HUMANA_TTL_MS, limpiarCachesEstado, debeNotificarAtencionHumana, debeNotificarReclamacion, debeEnviarAlertaDedup, registrarIntervencionHumana, obtenerIntervencionHumanaReciente, extraerPrecioRespuesta, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, RATE_AVISADOS, estaRateLimited } from './src/whatsapp/bot-state'
 import { cargarEstado, guardarEstado, iniciarPersistenciaPeriodica } from './src/whatsapp/bot-state-persistence'
 import { validarHorario, esHorarioAnticipado, HORARIO_APERTURA } from './src/validators/horario.validator'
+import { refrescarConfiguracion } from './src/config/configuracion.service'
+import { refrescarInventario } from './src/config/inventario.service'
+import { listarReclamaciones, marcarReclamacionResuelta, formatearReclamaciones } from './src/reclamaciones/reclamacion.service'
 import { obtenerTextoCuenta, determinarInstruccionPago } from './src/validators/pago.validator'
 import { validarSucursal, obtenerTextoConfirmacionSucursal } from './src/validators/sucursal.validator'
 import { buscarEnvio, pareceConsultaEnvio } from './src/validators/envio.validator'
@@ -190,19 +193,31 @@ setInterval(() => {
 
 // ════════════════════════════════════════════════════════════════
 // ALERTA PERIÓDICA DE DESCONEXIÓN — cada 30 min revisa si toca avisar
+// RESUMEN DIARIO — a las 9am envía resumen del negocio a Telegram
 // ════════════════════════════════════════════════════════════════
 
 let ultimoDiaAlertaDiaria = ''
+let ultimoDiaResumenDiario = ''
+let ultimoDiaVerifTelegram = ''
 setInterval(() => {
-  if (BOT_READY) return
   const ahora = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' })
   const d     = new Date(ahora)
   const hora  = d.getHours()
   const dia   = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
-  if (hora === 8 && dia !== ultimoDiaAlertaDiaria) {
+  if (!BOT_READY && hora === 8 && dia !== ultimoDiaAlertaDiaria) {
     ultimoDiaAlertaDiaria = dia
     eventBus.emit(EventType.BOT_DAILY_ALERT, { telefono: 'system' })
+  }
+
+  if (hora === 9 && dia !== ultimoDiaResumenDiario) {
+    ultimoDiaResumenDiario = dia
+    enviarResumenDiario()
+  }
+
+  if (hora === 10 && dia !== ultimoDiaVerifTelegram) {
+    ultimoDiaVerifTelegram = dia
+    verificarTelegramDiario()
   }
 }, 30 * 60_000)
 
@@ -312,6 +327,58 @@ async function obtenerClientesAtendidosHoy(): Promise<number> {
   } catch (err) {
     console.error('[bot] Error obteniendo clientes hoy:', err)
     return 0
+  }
+}
+
+async function enviarResumenDiario(): Promise<void> {
+  try {
+    const ventas = await obtenerVentasHoy()
+    const clientes = await obtenerClientesAtendidosHoy()
+    const pedidos = contarPedidosPorEstado()
+    const esperandoPago = pedidos[EstadoPedido.ESPERANDO_PAGO] ?? 0
+    const activos = pedidos.ACTIVOS ?? 0
+    const casosActivos = contarCasosActivos()
+    const requierenAtencion = contarCasosRequierenAtencionHumana()
+
+    const fecha = new Date().toLocaleDateString('es-MX', {
+      timeZone: 'America/Mexico_City',
+      weekday: 'long', day: 'numeric', month: 'long',
+    })
+
+    const resumen = [
+      `🌸 *Resumen Flora — ${fecha}*`,
+      ``,
+      `✅ Clientes atendidos: *${clientes}*`,
+      `📦 Pedidos activos: *${activos}*`,
+      `⏳ Esperando pago: *${esperandoPago}*`,
+      `💰 Ventas hoy: *$${ventas.total.toFixed(2)} MXN* (${ventas.cantidad} pedidos)`,
+      `📋 Casos activos: *${casosActivos}*`,
+      `🔴 Requieren atención: *${requierenAtencion}*`,
+    ].join('\n')
+
+    eventBus.emit(EventType.BOT_DAILY_SUMMARY, {
+      telefono: 'system',
+      descripcion: resumen,
+    })
+  } catch (err) {
+    console.error('[bot] Error enviando resumen diario:', err)
+  }
+}
+
+async function verificarTelegramDiario(): Promise<void> {
+  try {
+    const r = await verificarConexionTelegram()
+    if (r.ok) {
+      console.log(`[Telegram] ✅ ${r.detalle}`)
+      return
+    }
+    console.warn(`[Telegram] ⚠️ ${r.detalle}`)
+    await notificarEmpleadosWhatsApp(
+      sock,
+      `⚠️ *Alerta Telegram:* ${r.detalle}\nVerifica TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID en la VM.`
+    )
+  } catch (err) {
+    console.error('[bot] Error verificando Telegram:', err)
   }
 }
 
@@ -556,7 +623,7 @@ function tienePrecioConfirmado(clienteId: string): boolean {
 
 function tieneNombreValido(clienteId: string): boolean {
   const nombre = pedidoActual(clienteId).nombre
-  return Boolean(nombre && !/verificar|confirmar|chat/i.test(nombre))
+  return Boolean(nombre && esNombrePlausible(nombre) && !/verificar|confirmar|chat/i.test(nombre))
 }
 
 // BUG-005: resuelve el nombre para mostrar en alertas. Prioridad:
@@ -569,10 +636,11 @@ function tieneNombreValido(clienteId: string): boolean {
 function nombreParaAlerta(clienteId: string, tokenCliente?: string): string {
   const pedido = pedidoActual(clienteId)
   const nombrePedido = pedido.nombre
-  const nombreTokenValido = tokenCliente && !/verificar|confirmar|chat|cuen|paga|transfe|envia|manda|compro/i.test(tokenCliente)
+  const tokenSucio = /verificar|confirmar|chat|cuen|paga|transfe|envia|manda|compro/i
+  const nombreTokenValido = tokenCliente && esNombrePlausible(tokenCliente) && !tokenSucio.test(tokenCliente)
     ? tokenCliente.trim().slice(0, 80)
     : ''
-  if (nombrePedido && !/verificar|confirmar|chat/i.test(nombrePedido)) {
+  if (nombrePedido && esNombrePlausible(nombrePedido) && !tokenSucio.test(nombrePedido)) {
     return nombrePedido
   }
   if (nombreTokenValido) {
@@ -1230,6 +1298,7 @@ verificarConexionTelegram().then(r => {
   if (r.ok) console.log(`[Telegram] ✅ ${r.detalle}`)
   else console.warn(`[Telegram] ⚠️ ${r.detalle}`)
 }).catch(() => {})
+iniciarTelegramListener(manejarComandoTelegram)
 setInterval(() => {
   Promise.resolve(
     supabaseAdmin
@@ -1240,6 +1309,10 @@ setInterval(() => {
 iniciarPersistenciaPeriodica()
 cargarPedidosDesdeBD().catch(() => {})
 cargarCasosDesdeBD().catch(() => {})
+refrescarConfiguracion(true).catch(() => {})
+setInterval(() => { refrescarConfiguracion().catch(() => {}) }, 5 * 60_000).unref?.()
+refrescarInventario(true).catch(() => {})
+setInterval(() => { refrescarInventario().catch(() => {}) }, 5 * 60_000).unref?.()
 iniciarBaileys().catch((err) => { console.error('❌ Error:', err); registrarCrash(); process.exit(1) })
 
 async function gracefulShutdown(signal: string): Promise<void> {
@@ -1284,6 +1357,112 @@ function getDiagnosticoChat(chatId: string): import('./src/api/server').Diagnost
   }
 }
 
+function haceTexto(timestamp?: string): string {
+  if (!timestamp) return '—'
+  const mins = Math.round((Date.now() - new Date(timestamp).getTime()) / 60_000)
+  if (mins < 1) return 'ahora'
+  if (mins < 60) return `${mins} min`
+  const horas = Math.round(mins / 60)
+  if (horas < 24) return `${horas} h`
+  return `${Math.round(horas / 24)} d`
+}
+
+async function obtenerResumenOperativo(): Promise<import('./src/api/server').ResumenOperativo> {
+  const ventas = await obtenerVentasHoy()
+  const pedidos = listarPedidosActivosGlobales()
+  const casos = listarCasosRequierenAtencion()
+
+  const esperandoPago = pedidos
+    .filter(p => p.pedido.estado === EstadoPedido.ESPERANDO_PAGO)
+    .map(p => ({
+      telefono: p.pedido.telefono ?? p.clienteId,
+      cliente: p.pedido.nombre ?? null,
+      producto: p.pedido.productoPersonalizado ?? p.pedido.arreglo?.nombre ?? 'Por definir',
+      total: p.pedido.precioPersonalizado ?? p.pedido.arreglo?.precio ?? 0,
+      hace: haceTexto(p.pedido.actualizadoEn),
+    }))
+
+  const requierenAtencion = casos.map(caso => ({
+    telefono: caso.telefono,
+    cliente: pedidos.find(p => p.clienteId === caso.clienteId)?.pedido.nombre ?? null,
+    motivo: caso.tipo === 'QUEJA' ? 'Queja' : `Prioridad ${caso.prioridad}`,
+    hace: haceTexto(caso.ultimaActividad),
+  }))
+
+  const hoy = new Date().toISOString().slice(0, 10)
+  const pedidosHoy = pedidos.filter(p => p.pedido.creadoEn?.slice(0, 10) === hoy).length
+
+  return {
+    requierenAtencion,
+    esperandoPago,
+    pedidosHoy,
+    ventasHoy: ventas.total,
+  }
+}
+
+async function generarResumenEjecutivo(): Promise<string> {
+  const ventas = await obtenerVentasHoy()
+  const pedidos = contarPedidosPorEstado()
+  const requierenAtencion = contarCasosRequierenAtencionHumana()
+
+  const cotizando =
+    (pedidos[EstadoPedido.NUEVO] ?? 0) +
+    (pedidos[EstadoPedido.COTIZANDO] ?? 0) +
+    (pedidos[EstadoPedido.PRECIO_CONFIRMADO] ?? 0) +
+    (pedidos[EstadoPedido.ESPERANDO_DATOS] ?? 0)
+  const esperandoPago = pedidos[EstadoPedido.ESPERANDO_PAGO] ?? 0
+  const apartados =
+    (pedidos[EstadoPedido.APARTADO] ?? 0) +
+    (pedidos[EstadoPedido.EN_PRODUCCION] ?? 0) +
+    (pedidos[EstadoPedido.LISTO] ?? 0)
+  const entregadosHoy = pedidos[EstadoPedido.ENTREGADO] ?? 0
+
+  const lineas = [
+    '🌸 Resumen ejecutivo:',
+    `🟢 Cotizando: ${cotizando}`,
+    `💰 Esperando pago: ${esperandoPago}`,
+    `📦 Apartados: ${apartados}`,
+    `✅ Entregados hoy: ${entregadosHoy}`,
+    `🔴 Requieren atención: ${requierenAtencion}`,
+    `💵 Ventas hoy: $${ventas.total.toFixed(2)} MXN (${ventas.cantidad} pedidos)`,
+  ]
+  return lineas.join('\n')
+}
+
+const COMANDOS_RESUMEN = ['/resumen', 'resumen', 'qué pasó', 'que paso', 'que pasó', 'qué pasa', 'que pasa', 'estado', '/estado']
+
+async function manejarComandoTelegram(texto: string): Promise<void> {
+  const normalizado = texto.toLowerCase().trim().replace(/[¿?]/g, '')
+
+  if (normalizado === '/reclamaciones' || normalizado === 'reclamaciones') {
+    try {
+      const pendientes = await listarReclamaciones('pendiente')
+      await enviarMensajeTelegram(`📋 *Reclamaciones pendientes*\n\n${formatearReclamaciones(pendientes)}\n\nPara cerrar una: /marcar_resuelto <id>`)
+    } catch (err) {
+      console.error('[Telegram] Error al listar reclamaciones:', err)
+      await enviarMensajeTelegram('⚠️ No pude consultar las reclamaciones.')
+    }
+    return
+  }
+
+  const matchMarcar = normalizado.match(/^\/marcar_resuelto\s+([a-z0-9-]+)$/)
+  if (matchMarcar) {
+    try {
+      const ok = await marcarReclamacionResuelta(matchMarcar[1])
+      await enviarMensajeTelegram(ok ? `✅ Reclamación ${matchMarcar[1].slice(0, 8)} marcada como resuelta.` : `⚠️ No encontré la reclamación ${matchMarcar[1].slice(0, 8)}.`)
+    } catch (err) {
+      console.error('[Telegram] Error al marcar reclamación resuelta:', err)
+      await enviarMensajeTelegram('⚠️ No pude actualizar la reclamación.')
+    }
+    return
+  }
+
+  const esResumen = COMANDOS_RESUMEN.some(c => normalizado === c)
+  if (!esResumen) return
+  const resumen = await generarResumenEjecutivo()
+  await enviarMensajeTelegram(resumen)
+}
+
 process.on('SIGINT',  () => gracefulShutdown('SIGINT'))
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
 process.on('uncaughtException',  (err) => {
@@ -1302,6 +1481,32 @@ process.on('beforeExit', () => {
 })
 
 
+async function actualizarPrecioDesdeDashboard(id: string, precio: number): Promise<{ ok: boolean; error?: string }> {
+  const encontrado = obtenerPedidoPorId(id)
+  if (!encontrado) return { ok: false, error: 'Pedido no encontrado' }
+  const { pedido } = encontrado
+  pedido.precioPersonalizado = precio
+  pedido.precioConfirmadoPor = FuenteConfirmacionPrecio.EQUIPO
+  pedido.estadoFlujo = EstadoFlujo.PRECIO_CONFIRMADO
+  pedido.actualizadoEn = new Date().toISOString()
+  if (pedido.estado === EstadoPedido.NUEVO || pedido.estado === EstadoPedido.COTIZANDO) {
+    transitar(pedido, EstadoPedido.PRECIO_CONFIRMADO)
+  }
+  await persistirPedidosEngine()
+  return { ok: true }
+}
+
+async function cambiarEstadoDesdeDashboard(id: string, estado: string): Promise<{ ok: boolean; error?: string }> {
+  const encontrado = obtenerPedidoPorId(id)
+  if (!encontrado) return { ok: false, error: 'Pedido no encontrado' }
+  const { pedido } = encontrado
+  const nuevoEstado = estado as EstadoPedido
+  const ok = cambiarEstado(pedido, nuevoEstado, 'Cambio manual desde dashboard', 'dashboard')
+  if (!ok) return { ok: false, error: `Transición inválida: ${pedido.estado} → ${nuevoEstado}` }
+  await persistirPedidosEngine()
+  return { ok: true }
+}
+
 startServer({
   getPausado: () => BOT_PAUSADO,
   setPausado: (v) => { BOT_PAUSADO = v; ultimaVerifPausa = Date.now() },
@@ -1318,4 +1523,12 @@ startServer({
   obtenerClientesAtendidosHoy: () => obtenerClientesAtendidosHoy(),
   getDiagnosticoChat,
   syncPedidoFromDashboard,
+  obtenerResumenOperativo: () => obtenerResumenOperativo(),
+  listarPedidosActivos: () => listarPedidosActivosGlobales().map(({ clienteId, pedido }) => serializarPedidoParaDashboard(clienteId, pedido)),
+  obtenerDetallePedido: (id) => {
+    const encontrado = obtenerPedidoPorId(id)
+    return encontrado ? serializarPedidoParaDashboard(encontrado.clienteId, encontrado.pedido) : null
+  },
+  actualizarPrecioPedido: (id, precio) => actualizarPrecioDesdeDashboard(id, precio),
+  cambiarEstadoPedido: (id, estado) => cambiarEstadoDesdeDashboard(id, estado),
 })

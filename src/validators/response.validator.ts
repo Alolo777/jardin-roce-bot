@@ -1,6 +1,10 @@
-import { validarHorario } from './horario.validator'
 import { obtenerTextoCuenta } from './pago.validator'
-import { validarSucursal } from './sucursal.validator'
+import { SUCURSALES_INFO } from './sucursal.validator'
+import { obtenerPreciosReferencia, obtenerHorarios, obtenerPrecios } from '../config/configuracion.service'
+import { obtenerInventarioDisponible } from '../config/inventario.service'
+import { normalizarTexto } from '../conversation/conversation.service'
+import type { ProductoDetalle } from '../models/types'
+import { ahoraCdmx } from '../whatsapp/message-utils'
 
 interface ValidationResult {
   valido: boolean
@@ -23,7 +27,8 @@ function extraerHoras(texto: string): string[] {
 function extraerPrecios(texto: string): number[] {
   const precios: number[] = []
   let match: RegExpExecArray | null
-  while ((match = PRECIO_REGEX.exec(texto)) !== null) {
+  const re = new RegExp(PRECIO_REGEX.source, 'gi')
+  while ((match = re.exec(texto)) !== null) {
     const num = parseFloat(match[0].replace(/[$,]/g, ''))
     if (!isNaN(num)) precios.push(num)
   }
@@ -31,13 +36,13 @@ function extraerPrecios(texto: string): number[] {
 }
 
 const FRASES_CONFIRMACION_INVENTARIO = [
-  /\bs[ií] tenemos\b/i,
+  /\bs[ií],?\s+tenemos\b/i,
   /\blo tenemos disponible\b/i,
-  /\bs[ií] hay\b/i,
+  /\bs[ií],?\s+hay\b/i,
   /\bhay\s+existencia\b/i,
   /\btenemos\s+(en\s+)?stock\b/i,
   /\bcontamos\s+con\b/i,
-  /\bs[ií]\s+se\s+puede\b/i,
+  /\bs[ií],?\s+se\s+puede\b/i,
 ]
 
 const FRASES_CONFIRMACION_PAGO = [
@@ -53,22 +58,12 @@ const FRASES_CONFIRMACION_ENTREGA = [
 ]
 
 const FRASES_CONFIRMACION_HORARIO = [
-  /\bs[ií]\s+(podemos|alcanzamos|nos\s+damos\s+tiempo)\b/i,
-  /\bs[ií]\s+est[aá]\s+a\s+tiempo\b/i,
+  /\bs[ií],?\s+(podemos|alcanzamos|nos\s+damos\s+tiempo)\b/i,
+  /\bs[ií],?\s+est[aá]\s+a\s+tiempo\b/i,
   /\blo\s+tenemos?\s+(?:a\s+las|para\s+las)\b/i,
 ]
 
-const PRECIO_FLORES_REFERENCIA: Record<string, number> = {
-  'rosa': 25,
-  'hortensia': 40,
-  'lishianthus': 35,
-  'margarita': 20,
-  'gerbera': 30,
-  'lily': 35,
-  'girasol': 35,
-  'tulip[aá]n': 40,
-  'clavel': 15,
-}
+const PRECIO_FLORES_REFERENCIA: Record<string, number> = obtenerPreciosReferencia()
 
 export interface PrecioExtraido {
   producto: string
@@ -98,26 +93,115 @@ export function extraerPreciosRespuesta(texto: string): PrecioExtraido[] {
   return encontrados
 }
 
+// ──────────────────────────────────────────────────────────────────
+// Módulo 4.2: validaciones adicionales para evitar alucinaciones.
+// ──────────────────────────────────────────────────────────────────
+
+const PRECIO_INVENTADO_MIN = 100
+
+function preciosAutorizados(contexto: string): Set<number> {
+  const set = new Set<number>(extraerPrecios(contexto))
+  for (const p of Object.values(PRECIO_FLORES_REFERENCIA)) set.add(p)
+  const precios = obtenerPrecios()
+  if (precios.precioMinimo > 0) set.add(precios.precioMinimo)
+  return set
+}
+
+function validarPreciosRespuesta(respuesta: string, contexto: string): string | null {
+  const precios = extraerPrecios(respuesta)
+  if (precios.length === 0) return null
+
+  const autorizados = preciosAutorizados(contexto)
+  const lista = [...autorizados]
+  const esDerivado = (p: number): boolean => {
+    for (const a of lista) {
+      for (const b of lista) {
+        if (a + b === p || Math.abs(a + b - p) <= 1) return true
+      }
+    }
+    return false
+  }
+
+  for (const precio of precios) {
+    if (precio <= PRECIO_INVENTADO_MIN) continue
+    if (autorizados.has(precio)) continue
+    if (esDerivado(precio)) continue
+    return `Precio $${precio} no verificado en contexto (posible alucinación)`
+  }
+  return null
+}
+
+function validarSucursalRespuesta(respuesta: string): string | null {
+  const nombres = Object.keys(SUCURSALES_INFO)
+  const mencionadas: string[] = []
+  const re = /\bsucursal(?:es)?\s+(?:de\s+|en\s+)?([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)/gi
+  let match: RegExpExecArray | null
+  while ((match = re.exec(respuesta)) !== null) {
+    mencionadas.push(match[1])
+  }
+  for (const m of mencionadas) {
+    if (!nombres.some(n => n.toLowerCase() === m.toLowerCase())) {
+      return `Sucursal no reconocida: ${m}`
+    }
+  }
+  return null
+}
+
+function validarEntregaFecha(respuesta: string, contexto: string): string | null {
+  const match = respuesta.match(/\b(?:se\s+entrega|entregamos|est[aá]r[aá]\s+listo)\s+(?:el\s+)?(\d{1,2}(?:\s+de\s+[a-záéíóúñ]+)?|hoy|mañana)\b/i)
+  if (!match) return null
+  const fecha = match[1].toLowerCase()
+  if (!contexto.toLowerCase().includes(fecha)) {
+    return `Confirmó entrega para "${match[1]}" sin respaldo en el contexto`
+  }
+  return null
+}
+
+const STOPWORDS_NOMBRE = new Set(['ramo', 'ramos', 'de', 'las', 'los', 'del', 'la', 'el', 'con', 'en', 'un', 'una', 'para'])
+
+export function esProductoMencionado(respuesta: string, inventario: ProductoDetalle[]): boolean {
+  const tokens = new Set(singularizarTodo(normalizarTexto(respuesta)).split(/\s+/).filter(t => t.length >= 4 && !STOPWORDS_NOMBRE.has(t)))
+  if (tokens.size === 0) return false
+  return inventario.some((p) => {
+    const nombreTokens = singularizarTodo(normalizarTexto(p.nombre)).split(/\s+/).filter(t => t.length >= 4 && !STOPWORDS_NOMBRE.has(t))
+    return nombreTokens.some(t => tokens.has(t))
+  })
+}
+
+function singularizar(palabra: string): string {
+  if (palabra.endsWith('es') && palabra.length > 4) return palabra.slice(0, -2)
+  if (palabra.endsWith('s') && palabra.length > 3) return palabra.slice(0, -1)
+  return palabra
+}
+
+function singularizarTodo(texto: string): string {
+  return texto.split(/\s+/).map(singularizar).join(' ')
+}
+
+function mencionaProductoDisponible(respuesta: string): boolean {
+  return esProductoMencionado(respuesta, obtenerInventarioDisponible())
+}
+
 export function validarRespuestaIA(respuesta: string, contexto: string): ValidationResult {
   const textoLower = respuesta.toLowerCase()
 
   const horasMencionadas = extraerHoras(respuesta)
   if (horasMencionadas.length > 0) {
-    const horarioBackend = validarHorario()
+    const horarios = obtenerHorarios()
+    const aperturaMin = horarios.apertura * 60
+    const cierreMinSemana = horarios.cierreSemana * 60
+    const cierreMinFinSemana = horarios.cierreFinSemana * 60
     for (const hora of horasMencionadas) {
       const [h, m] = hora.split(':').map(Number)
       if (isNaN(h)) continue
       const minutos = h * 60 + (m || 0)
-      const aperturaMin = 10 * 60
-      const cierreMinSemana = 19 * 60
-      const cierreMinFinSemana = 17 * 60
-      const esFinde = [0, 6].includes(new Date().getDay())
+      const esFinde = [0, 6].includes(ahoraCdmx().dia)
       const cierreMin = esFinde ? cierreMinFinSemana : cierreMinSemana
 
       if (minutos < aperturaMin || minutos >= cierreMin) {
         for (const frase of FRASES_CONFIRMACION_HORARIO) {
           if (frase.test(respuesta)) {
-            return { valido: false, razon: `El LLM confirmó horario (${hora}) fuera del horario de atención (${aperturaMin / 60}:00-${Math.floor(cierreMin / 60)}:00)` }
+            return { valido: false, razon: `El LLM confirmó horario (${hora}) fuera del horario de atención (${horarios.apertura}:00-${Math.floor(cierreMin / 60)}:00)` }
           }
         }
       }
@@ -126,7 +210,9 @@ export function validarRespuestaIA(respuesta: string, contexto: string): Validat
 
   for (const frase of FRASES_CONFIRMACION_INVENTARIO) {
     if (frase.test(textoLower)) {
-      return { valido: false, razon: 'El LLM confirmó disponibilidad de inventario sin respaldo del backend' }
+      if (!mencionaProductoDisponible(respuesta)) {
+        return { valido: false, razon: 'El LLM confirmó disponibilidad de inventario sin respaldo del backend' }
+      }
     }
   }
 
@@ -134,6 +220,21 @@ export function validarRespuestaIA(respuesta: string, contexto: string): Validat
     if (frase.test(textoLower)) {
       return { valido: false, razon: 'El LLM confirmó entrega o producción sin respaldo del backend' }
     }
+  }
+
+  const errorEntregaFecha = validarEntregaFecha(respuesta, contexto)
+  if (errorEntregaFecha) {
+    return { valido: false, razon: errorEntregaFecha }
+  }
+
+  const errorPrecio = validarPreciosRespuesta(respuesta, contexto)
+  if (errorPrecio) {
+    return { valido: false, razon: errorPrecio }
+  }
+
+  const errorSucursal = validarSucursalRespuesta(respuesta)
+  if (errorSucursal) {
+    return { valido: false, razon: errorSucursal }
   }
 
   const contextLower = contexto.toLowerCase()

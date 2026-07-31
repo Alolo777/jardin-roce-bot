@@ -238,6 +238,9 @@ function getTemplate(
         ...(descripcion ? [esc(descripcion.slice(0, 300))] : []),
       ].join('\n')
 
+    case 'BOT_DAILY_SUMMARY':
+      return descripcion ?? '📊 *Resumen diario*'
+
     default:
       return [
         `📋 ${esc(eventType)}`,

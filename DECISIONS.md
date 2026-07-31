@@ -1187,3 +1187,285 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 **Desventajas:** Si la IP sigue bloqueada tras el cooldown, el bot tarda 30 min en volver a intentar; es la política deseada para salir de la lista negra.
 
+---
+
+## DEC-055: Resumen diario vía evento del sistema (BOT_DAILY_SUMMARY)
+
+**Fecha:** 2026-07-31
+**Estado:** Aceptada
+
+**Motivo:** Módulo 2.1. El dueño no tenía visibilidad del estado del negocio (ventas, pedidos activos, pagos pendientes, casos con atención humana). Además, el AGENTS.md exige que Telegram dependa exclusivamente de eventos del sistema, nunca de texto generado por OpenAI.
+
+**Alternativas consideradas:**
+1. Enviar el resumen llamando directamente a `enviarMensajeTelegram()` desde `bot.ts` sin evento (rompe la regla de que Telegram depende de eventos)
+2. Hacer que el LLM redacte el resumen con datos de Supabase (viola DEC-001: el LLM no consulta Supabase ni decide)
+3. Crear el evento `BOT_DAILY_SUMMARY` y recorrer el pipeline de notificaciones (elegida)
+
+**Resultado:** Nuevo evento `BOT_DAILY_SUMMARY` en `SYSTEM_EVENTS_SKIP_AI`. A las 9am CDMX, `enviarResumenDiario()` compila métricas desde el backend (`reporte_ventas`, `historial_chat`, `contarPedidosPorEstado()`, `contarCasosActivos()`, `contarCasosRequierenAtencionHumana()`) y emite el evento con el texto ya armado en `descripcion`. El template builder lo renderiza tal cual. La alerta de desconexión de las 8am se conserva (ahora `!BOT_READY && hora === 8`).
+
+**Ventajas:** El resumen llega por el mismo pipeline de notificaciones (validación, logs, retry de Telegram). El LLM no participa. Los contadores viven en los servicios (`pedido.service.ts`, `caso.service.ts`) sin duplicar lógica.
+
+**Desventajas:** El texto del resumen se arma en `bot.ts` (un solo lugar); si el negocio crece, la función podría trasladarse a un servicio dedicado sin cambiar el contrato del evento.
+
+---
+
+## DEC-056: Heartbeat diario de Telegram con alerta por WhatsApp
+
+**Fecha:** 2026-07-31
+**Estado:** Aceptada
+
+**Motivo:** Módulo 0.2. No había verificación periódica de que Telegram funcionara; un token inválido o chat ID cambiado solo se detectaba al fallar un envío.
+
+**Alternativas consideradas:**
+1. Verificar solo al arranque (existente) — no detecta fallos posteriores
+2. Enviar mensaje de prueba diario a Telegram (spam innecesario al dueño)
+3. Verificar la conexión diariamente a las 10am y, si falla, alertar a empleados por WhatsApp (elegida)
+
+**Resultado:** `verificarTelegramDiario()` en `bot.ts` llama a `verificarConexionTelegram()` una vez al día (10am CDMX). Éxito → log `[Telegram] ✅ Conectado`. Falla → `notificarEmpleadosWhatsApp()` con el detalle del error.
+
+**Ventajas:** Detección temprana de problemas de configuración. No genera spam. Reutiliza `verificarConexionTelegram()` y el servicio de notificación WhatsApp existentes.
+
+**Desventajas:** La alerta por WhatsApp depende de que el bot esté conectado a WhatsApp; si ambos canales fallan, no hay aviso (caso límite aceptable).
+
+---
+
+## DEC-057: Endpoint HTTP /api/resumen para resumen operativo
+
+**Fecha:** 2026-07-31
+**Estado:** Aceptada
+
+**Motivo:** Módulo 2.2. El dueño solo veía un chat a la vez; no existía forma de listar todos los chats que requieren atención.
+
+**Alternativas consideradas:**
+1. Enviar el resumen solo por Telegram (requiere horario, no es "a demanda")
+2. Crear endpoint HTTP `GET /api/resumen` que itere sobre los pedidos y casos en memoria (elegida)
+3. Consultar Supabase por cada chat (lento, no refleja el estado en memoria del bot)
+
+**Resultado:** `listarPedidosActivosGlobales()` en `pedido.service.ts` itera el Map `PEDIDOS`; `listarCasosRequierenAtencion()` en `caso.service.ts` filtra casos QUEJA o prioridad alta/crítica. `obtenerResumenOperativo()` en `bot.ts` los combina con `obtenerVentasHoy()` y se expone vía `GET /api/resumen` en el puerto `BOT_PORT` (10000).
+
+**Ventajas:** Respuesta a demanda, sin horario. Refleja el estado real en memoria del bot. Reutiliza funciones existentes.
+
+**Desventajas:** El endpoint expone datos del negocio; queda protegido por la red/VM (mismo acceso que `/status` y `/diag/:chatId`).
+
+---
+
+## DEC-058: Agregador de notificaciones Telegram (anti-spam)
+
+**Fecha:** 2026-07-31
+**Estado:** Aceptada
+
+**Motivo:** Módulo 2.3. Un solo pedido generaba 6+ notificaciones de Telegram en cadena, saturando al dueño y ocultando lo importante (AGENTS.md: Telegram es panel operativo, no spam).
+
+**Alternativas consideradas:**
+1. Enviar cada evento individual (estado anterior — 6+ notificaciones por pedido)
+2. Eliminar eventos del subscriber sin buffer (se pierden transiciones relevantes como pago recibido o pedido listo)
+3. Buffer de 2 min por pedido con clasificación de prioridad (elegida)
+
+**Resultado:** `notification-aggregator.ts` clasifica eventos en críticos (inmediato), importantes (agrupados 2 min por `orderId`/`telefono`) e informativos (solo resumen diario). `telegram.subscriber.ts` enruta todo vía `routeNotification()`; PHOTO_RECEIVED mantiene `withPipelinePhoto`.
+
+**Ventajas:** El dueño recibe 1 notificación por pedido cada 2 min. Los críticos (queja, atención humana, cancelación, pago confirmado) llegan inmediato. Los informativos (cambios de estado intermedios) se omiten del flujo y quedan en el resumen diario (2.1).
+
+**Desventajas:** El buffer retrasa hasta 2 min las notificaciones importantes; si el proceso muere antes de expirar el buffer, esos eventos no se notifican (el resumen diario y el endpoint `/api/resumen` son el respaldo).
+
+---
+
+## DEC-059: Comando "¿Qué pasó?" por Telegram vía long-polling
+
+**Fecha:** 2026-07-31
+**Estado:** Aceptada
+
+**Motivo:** Módulo 2.4. El dueño no podía consultar el estado global del negocio desde Telegram; el único acceso era el endpoint HTTP `GET /api/resumen` (2.2), que requería abrir el navegador.
+
+**Alternativas consideradas:**
+1. Webhook de Telegram (requiere URL pública HTTPS + ajuste de firewall de la VM; no existía)
+2. Long-polling `getUpdates` con filtro por chat autorizado (elegida — solo lectura, no requiere infraestructura nueva)
+3. Botón inline de Telegram (requiere webhook o polling igualmente, además de keyboard markup)
+
+**Resultado:** `iniciarTelegramListener()` en `lib/telegram.ts` hace polling `getUpdates` con long-poll 25s, ignora mensajes de chats no autorizados y procesa cada `update_id` una sola vez vía `offset`. `bot.ts` reconoce `/resumen`, `resumen`, `qué pasó`, `que paso`, `qué pasa`, `estado`, `/estado` y responde con `generarResumenEjecutivo()`, que reutiliza los mismos conteos del módulo 2.2 (Principio 1: no duplicar lógica).
+
+**Ventajas:** Consulta bajo demanda sin infraestructura extra; mismo resumen que el panel HTTP; filtro por `TELEGRAM_CHAT_ID` evita que cualquiera consulte el estado; `getUpdates` solo lee, no abre puertos.
+
+**Desventajas:** Long-polling agrega 1 petición extra cada ~26s al limit de la API de Telegram; si hay más de un proceso del bot corriendo, el mismo update puede consumirse por ambos (por eso el listener se inicia una sola vez en el arranque de bot.ts).
+
+---
+
+## DEC-060: Precios y horarios dinámicos desde Supabase
+
+**Fecha:** 2026-07-31
+**Estado:** Aceptada
+
+**Motivo:** Módulo 3.1. Los precios de flores y los horarios estaban hardcodeados en varios archivos (`prompt.builder.ts`, `horario.validator.ts`, `message-utils.ts`, `response.validator.ts`). Cambiar un precio requería redeploy (AGENTS.md Principio 7: reglas de negocio nunca en el prompt; sus valores deben ser editables).
+
+**Alternativas consideradas:**
+1. Hardcode actual (cada cambio = redeploy)
+2. Tablas de configuración en Supabase con caché en memoria de 5 min (elegida)
+3. Endpoint de administración para escribir la tabla (futuro, sin bloqueo)
+
+**Resultado:** `configuracion.service.ts` centraliza precios y horarios con fallback a valores por defecto. Todos los validadores y el prompt builder leen de ahí. bot.ts refresca al arranque y cada 5 min.
+
+**Ventajas:** Cambiar un precio u horario en Supabase surte efecto en ≤5 min sin redeploy; una sola fuente de verdad (Principio 1 y 2).
+
+**Desventajas:** Depende de disponibilidad de Supabase al arranque; si falla, se usan los valores por defecto (por diseño, fallo seguro).
+
+---
+
+## DEC-061: transitarDesdeFlujo valida contra la máquina de estados
+
+**Fecha:** 2026-07-31
+**Estado:** Aceptada
+
+**Motivo:** Módulo 3.2. `transitarDesdeFlujo()` ignoraba el resultado de `transitar()` y retornaba siempre `true`, ocultando transiciones inválidas (pedido pagado regresando a cotizando).
+
+**Alternativas consideradas:**
+1. Devolver el resultado de `transitar()` (elegida)
+2. Eliminar `transitarDesdeFlujo()` y usar `transitar()` directo (migración mayor, rompe compatibilidad con llamadas existentes)
+3. Lanzar excepción en transición inválida (rompe el flujo de WhatsApp)
+
+**Resultado:** `transitarDesdeFlujo()` retorna el booleano real, es idempotente y emite `PROVIDER_FAILURE` con dedup de 30 min al fallar. `transitarDesdeFlujoSeguro()` en message-handler bloquea estados pagados/terminales antes de intentar la transición.
+
+**Ventajas:** Las transiciones inválidas se detectan, loguean y notifican a Telegram sin romper el chat con el cliente.
+
+**Desventajas:** Un `PROVIDER_FAILURE` por transición inválida llega a Telegram (crítico); con dedup de 30 min no satura.
+
+---
+
+## DEC-062: Cooldown específico por tipo de evento de notificación
+
+**Fecha:** 2026-07-31
+**Estado:** Aceptada
+
+**Motivo:** Módulo 3.3. Algunas emisiones no pasaban por `debeEnviarAlertaDedup()` ni por cooldown, arriesgando notificaciones repetidas (PHOTO_SENT, HUMAN_REQUIRED de imagen, ZONA_AMBIGUA).
+
+**Alternativas consideradas:**
+1. Dejar como estaba (spam potencial)
+2. Un solo cooldown global (podría suprimir eventos urgentes)
+3. Cooldown por tipo con la key correcta (elegida)
+
+**Resultado:** Queja (CUSTOMER_ANGRY) 30 min, cancelación 20 min, PHOTO_SENT 30 min, imagen sin contexto 20 min, ZONA_AMBIGUA 30 min. Los cooldowns existentes (HUMAN_REQUIRED 20, COTIZACION 30, ENVIO 30, PHOTO_REQUESTED 60) se verificaron correctos.
+
+**Ventajas:** Cada tipo de evento tiene su propio período; los urgentes nunca se suprimen por cooldowns de otros tipos.
+
+**Desventajas:** Un evento suprimido por dedup no se emite (respaldo: resumen diario y `/api/resumen`).
+
+---
+
+## DEC-063: Validador central de nombres plausibles (esNombrePlausible)
+
+**Fecha:** 2026-07-31
+**Estado:** Aceptada
+
+**Motivo:** Módulo 4.1. El parser de nombre aceptaba contaminación (números, emojis, URLs, relleno) y el fallback de message-handler.ts podía guardar nombres que el parser rechazaba. AGENTS.md ERROR #1 (caso Lizet) exigía no volver a almacenar frases completas.
+
+**Alternativas consideradas:**
+1. Regex monolíticos gigantes (rechazados: AGENTS.md prohíbe regex complejos)
+2. Una sola función `esNombrePlausible()` reutilizada en parser, bot.ts y message-handler (elegida)
+3. Solo arreglar el parser, sin tocar los fallbacks (rechazada: dejaba la vía de escape en message-handler:832)
+
+**Resultado:** `esNombrePlausible()` centraliza: STOP_WORDS (con palabras de relleno), `MAX_WORDS = 5`, `MIN_LENGTH = 2`, rechazo de números/emojis/URLs/caracteres especiales y frases no válidas. Se usa en `parseNombre`, `pareceNombreCliente`, `tieneNombreValido`, `nombreParaAlerta` y el fallback de extracción de nombre.
+
+**Ventajas:** Una única fuente de verdad para "esto parece un nombre"; los fallbacks ya no reintroducen contaminación; cubre el caso Lizet y evita nombres con URLs/números/emojis.
+
+**Desventajas:** Nombres poco convencionales (apodos con números, nombres extranjeros con guiones) se rechazan; es el trade-off esperado para evitar datos corruptos.
+
+---
+
+## DEC-064: Response Validator con set autorizado de precios y validaciones por confirmación explícita
+
+**Fecha:** 2026-07-31
+**Estado:** Aceptada
+
+**Motivo:** Módulo 4.2. El response validator solo cubría algunos casos de alucinación. AGENTS.md Parte 3 exige que el LLM nunca confirme horarios, stock, entregas, pagos, precios o sucursales sin respaldo del backend.
+
+**Alternativas consideradas:**
+1. Regex monolíticos que rechazaran cualquier número/hora/sucursal no literal en contexto (rechazada: demasiados falsos positivos, el LLM legitima sumas de precios y menciona horas neutrales)
+2. Set autorizado de precios (contexto ∪ precios referenciales ∪ `precioMinimo`) con suma derivada permitida + validaciones de confirmación que solo se disparan con frase explícita (elegida)
+3. Confiar en `validarHorario()` para horas (rechazada: depende de horarios estáticos; el módulo 3.1 ya trae `obtenerHorarios()` dinámicos con cierre de fin de semana)
+
+**Resultado:** `validarPreciosRespuesta()` acepta precios ≤ 100 (notas/referencias), precios del set autorizado o sumas derivadas (a+b±1). Las horas se validan contra `obtenerHorarios()` y solo se rechazan si hay frase de confirmación ("sí podemos", "está a tiempo"). Stock, entrega, pago y sucursal se rechazan con frases explícitas; `validarEntregaFecha()` y `validarSucursalRespuesta()` exigen respaldo literal en contexto/`SUCURSALES_INFO`. Frases con "sí," toleran coma (caso real "Sí, tenemos...").
+
+**Ventajas:** Bajo índice de falsos positivos (solo rechaza confirmaciones explícitas sin respaldo); precios referenciales y horarios dinámicos; se corrigió además el bug latente de `lastIndex` en `extraerPrecios()` con regex global compartido.
+
+**Desventajas:** Una alucinación que no use frase explícita de confirmación podría no detectarse; se compensa con el `HUMAN_REQUIRED` cuando el LLM inventa contexto no validado.
+
+---
+
+## DEC-065: Inventario dinámico desde Supabase con validación de confirmaciones de stock
+
+**Fecha:** 2026-07-31
+**Estado:** Aceptada
+
+**Motivo:** Módulo 5.1. El bot podía prometer arreglos inexistentes. No existía verificación de inventario. AGENTS.md (Parte 3) exige que el backend valide inventario y que el LLM nunca confirme disponibilidad sin respaldo.
+
+**Alternativas consideradas:**
+1. Inventario estático en TypeScript (rechazada: viola "reglas de negocio editables sin redeploy" y el patrón ya creado en el módulo 3.1 con `configuracion.service`)
+2. Nuevo `inventario.service.ts` con caché TTL 5 min + tabla Supabase (elegida — misma arquitectura que precios/horarios)
+3. Que el response validator siguiera rechazando TODAS las confirmaciones de stock (rechazada: con inventario real, "sí tenemos rosas" cuando hay rosas es correcto; rechazarlo generaría falsos HUMAN_REQUIRED)
+
+**Resultado:** `inventario.service.ts` expone `obtenerInventarioDisponible()`, `verificarDisponibilidad()` y `obtenerTextoDisponibilidad()`. El prompt recibe `[PRODUCTOS DISPONIBLES]` solo cuando hay datos. El response validator usa `esProductoMencionado()` (normaliza con `normalizarTexto` y singulariza plurales: "ramos de rosas"→"ramo", "rosas"→"rosa") para permitir confirmar stock únicamente cuando la respuesta menciona un producto real disponible; sin datos conserva el rechazo del módulo 4.2.
+
+**Ventajas:** El bot solo confirma lo que el backend verifica; sin tabla creada no rompe nada (se comporta como antes); misma convención de caché que el módulo 3.1; prepara la base para inventario inteligente (Fase D de AGENTS.md).
+
+**Desventajas:** La detección por tokens puede tener falsos positivos con nombres de una sola palabra muy genérica; se mitigó exigiendo tokens ≥4 caracteres y excluyendo stopwords. La tabla debe mantenerse manualmente.
+
+---
+
+## DEC-066: Seguimiento de reclamaciones vía comandos de Telegram
+
+**Fecha:** 2026-07-31
+**Estado:** Aceptada
+
+**Motivo:** Módulo 5.2. Las reclamaciones se registraban en Supabase (`registrarReclamacion()`) pero nadie podía verlas ni cerrarlas: quedaban en "pendiente" para siempre.
+
+**Alternativas consideradas:**
+1. Panel web administrativo completo (rechazada: es el módulo 5.3, más grande; el dueño ya opera por Telegram)
+2. Comandos de Telegram `/reclamaciones` y `/marcar_resuelto <id>` (elegida — el dueño ya usa Telegram como panel operativo según AGENTS.md)
+3. Correo automático por cada reclamación (rechazada: spam; mejor consulta bajo demanda)
+
+**Resultado:** `src/reclamaciones/reclamacion.service.ts` con `listarReclamaciones(estado?)`, `marcarReclamacionResuelta(id)` y `formatearReclamaciones()` (formato Telegram con id corto para marcar resuelto). `bot.ts` `manejarComandoTelegram()` soporta `/reclamaciones` y `/marcar_resuelto <id>`.
+
+**Ventajas:** El dueño ve y cierra reclamaciones desde su celular sin tocar la web; Telegram sigue siendo panel operativo y no una copia de WhatsApp (Principio AGENTS.md); prepara el camino para el dashboard del módulo 5.3.
+
+**Desventajas:** La identificación por uuid corto (7 caracteres) es suficiente por cardinalidad actual pero podría colisionar con muchas reclamaciones; se documenta para revisar si escala.
+
+---
+
+## DEC-067: Prompt system alineado con la arquitectura de motores
+
+**Fecha:** 2026-07-31
+**Estado:** Aceptada
+
+**Motivo:** Revisión solicitada por el dueño del prompt subido en Supabase. El `system_prompt` (15,189 caracteres, 2026-07-17) estaba desalineado con la arquitectura actual: nombraba anotaciones que el código ya no emite (`[PEDIDO EN CURSO VERIFICADO POR SISTEMA]`, `[CLIENTE RESPONDIO A LA FOTO DE...]`, `[CLIENTE MENCIONO UNA ZONA...]`, `[CLASIFICACION_JSON]`, `[Fecha actual]`), hardcodeaba horarios/precios que ahora son dinámicos (módulo 3.1), no mencionaba `[REGLAS VALIDADAS POR EL BACKEND]` ni `[PRODUCTOS DISPONIBLES]` (módulo 5.1), no incluía el anticipo 50% y trataba `[VENTA_CERRADA:...]` como mecanismo principal de cierre (contradice ERROR #4 de AGENTS.md).
+
+**Alternativas consideradas:**
+1. Mantener el prompt de Supabase tal cual (rechazada: el LLM obedecía anotaciones que no existen y podía contradecir precios/horarios dinámicos)
+2. Escribir el prompt corregido solo en la página del cerebro de Flora (rechazada: sin versión en el repo no hay trazabilidad ni rollback)
+3. Nuevo `src/prompts/system-prompt.corregido.ts` como fuente oficial en el repo + `scripts/subir-prompt-corregido.ts` para publicarlo en `configuracion_bot` (elegida)
+
+**Resultado:** El prompt corregido (11,860 caracteres) delega horarios, pagos, sucursales y precios a la sección `[REGLAS VALIDADAS POR EL BACKEND]` que el backend inyecta siempre (Principio 7 de AGENTS.md: reglas de negocio fuera del prompt); documenta las anotaciones reales; añade la regla de stock del módulo 5.1; convierte `[VENTA_CERRADA:...]` en respaldo opcional (el backend ya registra el pedido). Se subió a Supabase el 2026-07-31 y se verificó su contenido.
+
+**Ventajas:** El LLM nunca contradice la configuración dinámica; una sola fuente de verdad del prompt en el repo; rollback simple re-subiendo la versión anterior; el prompt es ~3,300 caracteres más corto.
+
+**Desventajas:** Si alguien edita el prompt directamente en la página del cerebro de Flora, el repo queda desincronizado (el prompt de Supabase manda sobre el fallback). Se mitiga documentando el flujo: editar en el repo → subir con el script.
+
+---
+
+## DEC-068: Dashboard administrativo web vía REST en api/server.ts
+
+**Fecha:** 2026-07-31
+**Estado:** Aceptada
+
+**Motivo:** Módulo 5.3. El servidor Express del bot (`startServer()`) existía pero el dueño no podía consultar ni modificar pedidos activos desde el navegador; solo había `/status`, `/qr`, `/diag/:chatId`, `/api/pedidos/sync` y `/api/resumen`.
+
+**Alternativas consideradas:**
+1. Construir el dashboard entero en Next.js leyendo `pedidos_bot` (rechazada: duplicaría la máquina de estados y el Order Engine en el frontend)
+2. Exponer el estado en memoria directamente (rechazada: filtraba `fotoReferenciaBase64` y datos internos)
+3. Endpoints REST finos en `api/server.ts` que delegan en `pedido.service.ts` vía `BotContext` (elegida)
+
+**Resultado:** `BotContext` ampliado con `listarPedidosActivos`, `obtenerDetallePedido`, `actualizarPrecioPedido` y `cambiarEstadoPedido`. Nuevos endpoints `GET /api/pedidos`, `GET /api/pedidos/:id`, `POST /api/pedidos/:id/precio`, `POST /api/pedidos/:id/estado`. Nuevo `PedidoResumenDTO` que nunca expone la foto base64. `obtenerPedidoPorId(id)` resuelve por `id` de pedido o `clienteId`. El cambio de precio fija `precioConfirmadoPor=EQUIPO` y transita a `PRECIO_CONFIRMADO`; el cambio de estado valida la máquina de estados con `cambiarEstado` (sin saltos, regla de AGENTS.md). Ambos persisten con `persistirPedidosEngine()` y emiten eventos → Telegram se entera sin tocar el texto del LLM (Principio 9 de AGENTS.md).
+
+**Ventajas:** El backend sigue siendo el único que decide (OpenAI nunca modifica precios/estados); la UI de `app/admin/operaciones` ya escribe a `pedidos_bot` y puede consumir estos endpoints o continuar con el flujo PATCH + `/api/pedidos/sync`; sin duplicación de lógica; los POST siguen la máquina de estados.
+
+**Desventajas:** Los cambios manuales de estado/​precio desde el dashboard no piden confirmación adicional; el `BotContext` crece (mitigado: cada método delega en servicios y no contiene lógica).
+
+---
+

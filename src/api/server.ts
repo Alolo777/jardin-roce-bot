@@ -1,5 +1,6 @@
 import express from 'express'
 import { metrics } from '../../lib/metrics.service'
+import { PedidoResumenDTO, EstadoPedido } from '../models/types'
 
 // Constantes de configuración
 const BOT_QR_TTL_MS = 60_000
@@ -19,6 +20,24 @@ export interface DiagnosticoChat {
   estadoFlujo: string | null
 }
 
+export interface ResumenOperativo {
+  requierenAtencion: {
+    telefono: string
+    cliente: string | null
+    motivo: string
+    hace: string
+  }[]
+  esperandoPago: {
+    telefono: string
+    cliente: string | null
+    producto: string
+    total: number
+    hace: string
+  }[]
+  pedidosHoy: number
+  ventasHoy: number
+}
+
 export interface BotContext {
   getPausado: () => boolean
   setPausado: (v: boolean) => void
@@ -35,6 +54,11 @@ export interface BotContext {
   obtenerClientesAtendidosHoy: () => Promise<number>
   getDiagnosticoChat: (chatId: string) => DiagnosticoChat | null
   syncPedidoFromDashboard: (clienteId: string, updates: Record<string, unknown>) => Promise<void>
+  obtenerResumenOperativo: () => Promise<ResumenOperativo>
+  listarPedidosActivos: () => PedidoResumenDTO[]
+  obtenerDetallePedido: (id: string) => PedidoResumenDTO | null
+  actualizarPrecioPedido: (id: string, precio: number) => Promise<{ ok: boolean; error?: string }>
+  cambiarEstadoPedido: (id: string, estado: string) => Promise<{ ok: boolean; error?: string }>
 }
 
 export function startServer(ctx: BotContext): void {
@@ -137,12 +161,71 @@ export function startServer(ctx: BotContext): void {
     }
   })
 
+  app.get('/api/pedidos', (_req, res) => {
+    try {
+      const pedidos = ctx.listarPedidosActivos()
+      res.json({ pedidos, cantidad: pedidos.length })
+    } catch (err) {
+      console.error('[server] Error en GET /api/pedidos:', err)
+      res.status(500).json({ error: 'Error listando pedidos' })
+    }
+  })
+
+  app.get('/api/pedidos/:id', (req, res) => {
+    try {
+      const detalle = ctx.obtenerDetallePedido(req.params.id)
+      if (!detalle) return res.status(404).json({ error: 'Pedido no encontrado' })
+      res.json(detalle)
+    } catch (err) {
+      console.error('[server] Error en GET /api/pedidos/:id:', err)
+      res.status(500).json({ error: 'Error obteniendo pedido' })
+    }
+  })
+
+  app.post('/api/pedidos/:id/precio', async (req, res) => {
+    const precio = Number(req.body?.precio)
+    if (!Number.isFinite(precio) || precio < 0) return res.status(400).json({ error: 'Precio inválido' })
+    try {
+      const resultado = await ctx.actualizarPrecioPedido(req.params.id, precio)
+      if (!resultado.ok) return res.status(404).json({ error: resultado.error ?? 'Pedido no encontrado' })
+      res.json({ ok: true })
+    } catch (err) {
+      console.error('[server] Error en POST /api/pedidos/:id/precio:', err)
+      res.status(500).json({ error: 'Error actualizando precio' })
+    }
+  })
+
+  app.post('/api/pedidos/:id/estado', async (req, res) => {
+    const estado = String(req.body?.estado ?? '').toUpperCase()
+    if (!Object.values(EstadoPedido).includes(estado as EstadoPedido)) {
+      return res.status(400).json({ error: `Estado inválido: ${estado}` })
+    }
+    try {
+      const resultado = await ctx.cambiarEstadoPedido(req.params.id, estado)
+      if (!resultado.ok) return res.status(400).json({ error: resultado.error ?? 'No se pudo cambiar el estado' })
+      res.json({ ok: true })
+    } catch (err) {
+      console.error('[server] Error en POST /api/pedidos/:id/estado:', err)
+      res.status(500).json({ error: 'Error cambiando estado' })
+    }
+  })
+
   app.get('/diag/:chatId', (req, res) => {
     const { chatId } = req.params
     if (!chatId) return res.status(400).json({ error: 'Falta chatId' })
     const diag = ctx.getDiagnosticoChat(chatId)
     if (!diag) return res.status(404).json({ error: 'Chat no encontrado' })
     res.json(diag)
+  })
+
+  app.get('/api/resumen', async (_req, res) => {
+    try {
+      const resumen = await ctx.obtenerResumenOperativo()
+      res.json(resumen)
+    } catch (err) {
+      console.error('[server] Error en /api/resumen:', err)
+      res.status(500).json({ error: 'Error obteniendo resumen operativo' })
+    }
   })
 
   app.get('/metrics', (_req, res) => {

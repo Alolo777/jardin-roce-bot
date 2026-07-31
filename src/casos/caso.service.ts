@@ -92,6 +92,24 @@ export function buscarCasosPorTelefono(telefono: string): Caso[] {
   return resultados
 }
 
+export function contarCasosActivos(): number {
+  return CASOS_ACTIVOS.size
+}
+
+export function listarCasosRequierenAtencion(): Caso[] {
+  const casos: Caso[] = []
+  for (const caso of CASOS_ACTIVOS.values()) {
+    if (caso.tipo === TipoCaso.QUEJA || caso.prioridad === Prioridad.ALTA || caso.prioridad === Prioridad.CRITICA) {
+      casos.push(caso)
+    }
+  }
+  return casos
+}
+
+export function contarCasosRequierenAtencionHumana(): number {
+  return listarCasosRequierenAtencion().length
+}
+
 export function archivarCaso(casoId: string, motivo?: string): void {
   for (const [clienteId, caso] of CASOS_ACTIVOS) {
     if (caso.id === casoId) {

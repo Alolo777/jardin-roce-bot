@@ -47,8 +47,9 @@ export function debeNotificarAtencionHumana(clienteId: string): boolean {
 export function debeNotificarReclamacion(clienteId: string, tipo: 'cancelacion' | 'queja'): boolean {
   const ahora = Date.now()
   const key = `${tipo}:${clienteId}`
+  const ttlMs = tipo === 'queja' ? 30 * 60_000 : 20 * 60_000
   const ultima = RECLAMACION_NOTIFICADA.get(key) ?? 0
-  if (ahora - ultima < 20 * 60_000) return false
+  if (ahora - ultima < ttlMs) return false
   RECLAMACION_NOTIFICADA.set(key, ahora)
   return true
 }

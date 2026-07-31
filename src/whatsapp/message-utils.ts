@@ -1,5 +1,6 @@
 import { getContentType, downloadContentFromMessage, isJidGroup } from '@whiskeysockets/baileys'
 import { Buffer } from 'node:buffer'
+import { obtenerHorarios } from '../config/configuracion.service'
 
 export function getContenidoMensaje(msg: any): any {
   let full = msg?.message
@@ -114,7 +115,8 @@ export function estaEnHorario(): boolean {
   const hora  = ahora.hora * 60 + ahora.minuto
   const dia   = ahora.dia
   const esFinDeSemana = dia === 0 || dia === 6
-  return hora >= 10 * 60 && hora < (esFinDeSemana ? 17 * 60 : 19 * 60)
+  const horarios = obtenerHorarios()
+  return hora >= horarios.apertura * 60 && hora < (esFinDeSemana ? horarios.cierreFinSemana * 60 : horarios.cierreSemana * 60)
 }
 
 export function getFechaActual(): string {
@@ -123,16 +125,17 @@ export function getFechaActual(): string {
 
 export function getContextoHorario(): string {
   const ahora = ahoraCdmx()
+  const horarios = obtenerHorarios()
   if (estaEnHorario()) {
     return `\n\n[CONTEXTO: Horario de atención] Hora actual CDMX: ${ahora.etiqueta}. Estamos ABIERTOS en este momento. No digas que estamos cerrados ni que se atenderá mañana.`
   }
-  const estadoHorario = ahora.hora < 10
-    ? 'Aún no abrimos (abrimos a las 10:00 am).'
-    : 'Ya cerramos por hoy (abrimos mañana a las 10:00 am).'
+  const estadoHorario = ahora.hora < horarios.apertura
+    ? `Aún no abrimos (abrimos a las ${horarios.apertura}:00 am).`
+    : `Ya cerramos por hoy (abrimos mañana a las ${horarios.apertura}:00 am).`
   return (
     `\n\n[CONTEXTO: Fuera de Horario] Hora actual CDMX: ${ahora.etiqueta}. ${estadoHorario} ` +
     `REGLA DE ORO: NUNCA le digas al cliente "mañana te muestro" o "mañana te atiendo". ` +
     `SÍ PUEDES y DEBES enviarle el link del catálogo o el cotizador web (https://floreria-app-mauve.vercel.app/) en este momento para que adelante su pedido y quede agendado para nuestra apertura. ` +
-    `Para cotizaciones de envío complejas que no estén en la web, dile amablemente que a las 10 am le confirmas el costo exacto.`
+    `Para cotizaciones de envío complejas que no estén en la web, dile amablemente que a las ${horarios.apertura} am le confirmas el costo exacto.`
   )
 }

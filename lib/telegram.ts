@@ -133,6 +133,60 @@ export async function enviarMensajeTelegram(texto: string): Promise<void> {
   await enviar(texto)
 }
 
+export type TelegramIncomingHandler = (texto: string, chatId: string) => Promise<void>
+
+export function iniciarTelegramListener(handler: TelegramIncomingHandler): () => void {
+  if (!process.env.TELEGRAM_BOT_TOKEN || CHAT_IDS.length === 0) {
+    console.warn('[Telegram] Variables no configuradas — listener desactivado.')
+    return () => {}
+  }
+
+  let offset = 0
+  let detenido = false
+
+  async function poll(): Promise<void> {
+    if (detenido) return
+    try {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 30_000)
+      const res = await fetch(`${API_BASE}/getUpdates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({ offset, timeout: 25, allowed_updates: ['message'] }),
+      })
+      clearTimeout(timeout)
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        console.warn(`[Telegram] getUpdates falló: ${res.status} ${JSON.stringify(err)}`)
+        return
+      }
+
+      const data = await res.json() as { result: any[] }
+      for (const update of data.result ?? []) {
+        offset = Math.max(offset, update.update_id + 1)
+        const chatId = String(update.message?.chat?.id ?? '')
+        const texto = String(update.message?.text ?? '').trim()
+        if (!chatId || !texto) continue
+        if (!CHAT_IDS.includes(chatId)) continue
+        void handler(texto, chatId).catch(err => console.warn(`[Telegram] Error en handler:`, err))
+      }
+    } catch (err) {
+      const error = err as Error & { code?: string; cause?: { code?: string } }
+      const codigo = error.cause?.code ?? error.code
+      console.warn(`[Telegram] Polling error: ${codigo ?? error.message}`)
+    } finally {
+      if (!detenido) setTimeout(poll, 500).unref?.()
+    }
+  }
+
+  setTimeout(poll, 1_000).unref?.()
+  console.log(`[Telegram] 👂 Listener activo — comandos del dueño vía Telegram habilitados`)
+
+  return () => { detenido = true }
+}
+
 export async function verificarConexionTelegram(): Promise<{ ok: boolean; detalle: string }> {
   if (!process.env.TELEGRAM_BOT_TOKEN) {
     return { ok: false, detalle: 'TELEGRAM_BOT_TOKEN no configurado' }

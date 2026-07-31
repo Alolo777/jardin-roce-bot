@@ -1,4 +1,4 @@
-import { EstadoPedido, PedidoActual, TransicionEstado, MetodoPago } from '../models/types'
+import { EstadoPedido, EstadoFlujo, PedidoActual, PedidoResumenDTO, TransicionEstado, MetodoPago } from '../models/types'
 import { eventBus } from '../events/event-bus'
 import { EventType, EventPayload } from '../events/types'
 import { guardarPedidos, cargarPedidos, sincronizarPedidosBot } from './pedido.repository'
@@ -132,7 +132,6 @@ function emitirEventoTransicion(pedido: PedidoActual, desde: EstadoPedido, hasta
     ...buildOrderPayload(pedido),
     descripcion: `Estado: ${desde} → ${hasta}`,
   }
-
   eventBus.emit(EventType.ORDER_UPDATED, payload)
 
   if (hasta === EstadoPedido.PRECIO_CONFIRMADO) {
@@ -189,6 +188,24 @@ function emitirEventoTransicion(pedido: PedidoActual, desde: EstadoPedido, hasta
   }
 }
 
+const TRANSICIONES_INVALIDAS_NOTIFICADAS = new Map<string, number>()
+
+function emitirEventoTransicionInvalida(pedido: PedidoActual, hasta: EstadoPedido, flujo: string, motivo?: string): void {
+  const clave = `${pedido.id}:${hasta}:${flujo}`
+  const ahora = Date.now()
+  const ultima = TRANSICIONES_INVALIDAS_NOTIFICADAS.get(clave) ?? 0
+  if (ahora - ultima < 30 * 60_000) return
+  TRANSICIONES_INVALIDAS_NOTIFICADAS.set(clave, ahora)
+
+  eventBus.emit(EventType.PROVIDER_FAILURE, {
+    telefono: pedido.telefono ?? '',
+    orderId: pedido.id,
+    cliente: pedido.nombre ?? '',
+    descripcion: `Transición inválida: ${pedido.estado} → ${hasta} (${flujo})${motivo ? ` — ${motivo}` : ''}`,
+    contexto: 'Máquina de estados (transitarDesdeFlujo)',
+  })
+}
+
 export function crearPedido(clienteId: string, telefono: string, datosIniciales?: Partial<PedidoActual>): PedidoActual {
   const pedido: PedidoActual = {
     id: generarId(),
@@ -221,9 +238,69 @@ export function obtenerPedidosActivos(clienteId: string): PedidoActual[] {
   return obtenerPedidosDeCliente(clienteId).filter(esPedidoActivo)
 }
 
+export function contarPedidosPorEstado(): Record<string, number> {
+  const conteo: Record<string, number> = { ACTIVOS: 0 }
+  for (const pedidos of PEDIDOS.values()) {
+    for (const pedido of pedidos) {
+      if (!esPedidoActivo(pedido)) continue
+      conteo.ACTIVOS++
+      const estado = pedido.estado ?? EstadoPedido.NUEVO
+      conteo[estado] = (conteo[estado] ?? 0) + 1
+    }
+  }
+  return conteo
+}
+
+export function listarPedidosActivosGlobales(): { clienteId: string; pedido: PedidoActual }[] {
+  const resultado: { clienteId: string; pedido: PedidoActual }[] = []
+  for (const [clienteId, pedidos] of PEDIDOS) {
+    for (const pedido of pedidos) {
+      if (!esPedidoActivo(pedido)) continue
+      resultado.push({ clienteId, pedido })
+    }
+  }
+  return resultado
+}
+
 export function obtenerPedido(clienteId: string): PedidoActual | null {
   const activos = obtenerPedidosActivos(clienteId)
   return activos[activos.length - 1] ?? null
+}
+
+export function obtenerPedidoPorId(id: string): { clienteId: string; pedido: PedidoActual } | null {
+  const porCliente = obtenerPedido(id)
+  if (porCliente) return { clienteId: id, pedido: porCliente }
+
+  for (const [clienteId, pedidos] of PEDIDOS) {
+    const pedido = pedidos.find(p => p.id === id && esPedidoActivo(p))
+    if (pedido) return { clienteId, pedido }
+  }
+  return null
+}
+
+export function serializarPedidoParaDashboard(clienteId: string, pedido: PedidoActual): PedidoResumenDTO {
+  return {
+    id: pedido.id ?? '',
+    clienteId,
+    telefono: pedido.telefono,
+    nombre: pedido.nombre,
+    estado: pedido.estado,
+    estadoFlujo: pedido.estadoFlujo,
+    producto: pedido.arreglo?.nombre ?? pedido.productoPersonalizado,
+    precio: pedido.precioPersonalizado ?? pedido.arreglo?.precio ?? null,
+    precioConfirmadoPor: pedido.precioConfirmadoPor,
+    sucursal: pedido.sucursal,
+    direccion: pedido.direccion,
+    fechaEntrega: pedido.fechaEntrega,
+    horaEntrega: pedido.horaEntrega,
+    metodoPago: pedido.metodoPago,
+    nota: pedido.nota,
+    extras: pedido.extras,
+    tieneFotoReferencia: !!pedido.fotoReferenciaBase64,
+    requiereAtencionEquipo: pedido.estadoFlujo === EstadoFlujo.ESPERANDO_PRECIO_EQUIPO,
+    creadoEn: pedido.creadoEn,
+    actualizadoEn: pedido.actualizadoEn,
+  }
 }
 
 export function syncLegacyToEngine(clienteId: string, telefono: string, legado: Record<string, unknown>): PedidoActual {
@@ -368,8 +445,14 @@ export function transitarDesdeFlujo(clienteId: string, flujo: string, motivo?: s
   const nuevo = mapping[flujo]
   if (!nuevo) return false
 
-  transitar(pedido, nuevo)
-  return true
+  if (pedido.estado === nuevo) return true
+
+  const resultado = transitar(pedido, nuevo)
+  if (!resultado) {
+    console.error(`[pedidos] ⚠️ transitarDesdeFlujo: ${pedido.estado} → ${nuevo} (${flujo}) INVALIDA para ${clienteId}`)
+    emitirEventoTransicionInvalida(pedido, nuevo, flujo, motivo)
+  }
+  return resultado
 }
 
 export function pedidoTieneDatosCompletos(pedido: PedidoActual): boolean {

@@ -1,4 +1,4 @@
-export { parseNombre, pareceNombreCliente } from './nombre.parser'
+export { parseNombre, pareceNombreCliente, esNombrePlausible } from './nombre.parser'
 export { parseFecha, extraerFecha } from './fecha.parser'
 export { parseHora, extraerHora } from './hora.parser'
 export { parseSucursal, extraerSucursal } from './sucursal.parser'

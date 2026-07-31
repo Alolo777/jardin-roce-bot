@@ -20,6 +20,7 @@ const SYSTEM_EVENTS_SKIP_AI: ReadonlySet<string> = new Set([
   EventType.QR_GENERATED,
   EventType.PROVIDER_FAILURE,
   EventType.BOT_DAILY_ALERT,
+  EventType.BOT_DAILY_SUMMARY,
 ])
 
 const LIGHTWEIGHT_EVENTS_SKIP_AI: ReadonlySet<string> = new Set([

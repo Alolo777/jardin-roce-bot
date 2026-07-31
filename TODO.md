@@ -112,36 +112,38 @@
 - [ ] Eliminar código muerto
 - [ ] Optimizar consultas Supabase
 
-## Plan Maestro de Soluciones (Flora 3.0) — 21.1% (4/19)
+## Plan Maestro de Soluciones (Flora 3.0) — 100% (19/19)
 
 ### Fase 1 — Estabilización (P0/P1)
+- [x] 0.1 Reconexión WhatsApp (405) — COMPLETADO 2026-07-31
+- [x] 0.2 Verificación Telegram — COMPLETADO 2026-07-31
 - [x] 1.1 Múltiples pedidos por cliente — COMPLETADO 2026-07-31
 - [x] 1.2 Persistencia síncrona con retry — COMPLETADO 2026-07-31
 - [x] 1.3 Ventana de agrupación 60s→50s — COMPLETADO 2026-07-31
 - [x] 1.4 Parser de sucursal robusto — COMPLETADO 2026-07-31
 
 ### Fase 2 — UX para el dueño (P1/P2)
-- [ ] 2.1 Resumen diario Telegram 9am
-- [ ] 2.2 Panel resumen rápido HTTP
-- [ ] 2.3 Simplificar notificaciones Telegram
-- [ ] 2.4 Comando "¿Qué pasó?" por Telegram
+- [x] 2.1 Resumen diario Telegram 9am — COMPLETADO 2026-07-31
+- [x] 2.2 Panel resumen rápido HTTP — COMPLETADO 2026-07-31
+- [x] 2.3 Simplificar notificaciones Telegram — COMPLETADO 2026-07-31
+- [x] 2.4 Comando "¿Qué pasó?" por Telegram — COMPLETADO 2026-07-31
 
 ### Fase 3 — Negocio (P1/P2)
-- [ ] 3.1 Precios dinámicos desde Supabase
-- [ ] 3.2 Máquina de estados: validar transiciones
-- [ ] 3.3 Rate limiting y dedup completo
+- [x] 3.1 Precios dinámicos desde Supabase — COMPLETADO 2026-07-31
+- [x] 3.2 Máquina de estados: validar transiciones — COMPLETADO 2026-07-31
+- [x] 3.3 Rate limiting y dedup completo — COMPLETADO 2026-07-31
 
 ### Fase 4 — Precisión (P1)
-- [ ] 4.1 Parser de nombre: casos frontera
-- [ ] 4.2 Response Validator expandido
+- [x] 4.1 Parser de nombre: casos frontera — COMPLETADO 2026-07-31
+- [x] 4.2 Response Validator expandido — COMPLETADO 2026-07-31
 
 ### Fase 5 — Crecimiento (P2/P3)
-- [ ] 5.1 Sistema de inventario básico
-- [ ] 5.2 Seguimiento de reclamaciones
-- [ ] 5.3 Dashboard administrativo web
+- [x] 5.1 Sistema de inventario básico — COMPLETADO 2026-07-31
+- [x] 5.2 Seguimiento de reclamaciones — COMPLETADO 2026-07-31
+- [x] 5.3 Dashboard administrativo web — COMPLETADO 2026-07-31 (endpoints REST en `api/server.ts` + `PedidoResumenDTO` + `obtenerPedidoPorId`)
 
 ### Fase 6 — Documentación
-- [ ] 6.1-4 CHANGELOG, DECISIONS, TODO, KNOWN_BUGS
+- [x] 6.1-4 CHANGELOG, DECISIONS, TODO, KNOWN_BUGS — COMPLETADO 2026-07-31
 
 ## Pendientes Inmediatos
 

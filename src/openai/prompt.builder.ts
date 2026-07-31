@@ -2,6 +2,8 @@ import { Decision } from '../decision/decision.engine'
 import { Caso, PedidoActual, EstadoPedido } from '../models/types'
 import { horarioHoyManana } from '../validators/horario.validator'
 import { obtenerTextoCuenta } from '../validators/pago.validator'
+import { obtenerHorarios, obtenerTextoPrecios } from '../config/configuracion.service'
+import { obtenerTextoDisponibilidad } from '../config/inventario.service'
 
 export interface ContextoPrompt {
   decision: Decision
@@ -59,15 +61,17 @@ export function buildPersonalitySection(): string {
 export function buildValidatedRulesSection(): string {
   const horario = horarioHoyManana()
   const cuenta = obtenerTextoCuenta()
+  const horarios = obtenerHorarios()
+  const productosDisponibles = obtenerTextoDisponibilidad()
 
-  return [
+  const partes = [
     `[REGLAS VALIDADAS POR EL BACKEND]`,
     ``,
     `## Horarios`,
     `- ${horario.hoy}`,
     `- ${horario.manana}`,
-    `- Lunes a viernes: 10:00 a 19:00`,
-    `- Sábado y domingo: 10:00 a 17:00`,
+    `- Lunes a viernes: ${horarios.apertura}:00 a ${horarios.cierreSemana}:00`,
+    `- Sábado y domingo: ${horarios.apertura}:00 a ${horarios.cierreFinSemana}:00`,
     ``,
     `## Pagos`,
     `- Transferencia BBVA: ${cuenta}`,
@@ -90,11 +94,17 @@ export function buildValidatedRulesSection(): string {
     `- Si el cliente envía imagen de referencia o comprobante, el sistema ya la recibió. No la pidas de nuevo.`,
     ``,
     `## Flores individuales (precios referenciales)`,
-    `- Rosa: $25 c/u | Hortensia: $40 c/u | Lishianthus: $35 c/u`,
-    `- Margarita: $20 c/u | Gerbera: $30 c/u | Lily: $35 c/u`,
-    `- Girasol: $35 c/u | Tulipán: $40 c/u | Clavel: $15 c/u`,
-    `- Desde $60 MXN se arma algo sencillo con 1 flor, follaje y papel.`,
-  ].join('\n')
+    obtenerTextoPrecios(),
+  ]
+
+  if (productosDisponibles) {
+    partes.push(``)
+    partes.push(`## Disponibilidad de productos (verificada por el backend)`)
+    partes.push(`- [PRODUCTOS DISPONIBLES] ${productosDisponibles}`)
+    partes.push(`- SOLO confirma que tienes un producto si aparece en esa lista. Si el cliente pide algo que NO está en la lista, di que lo verificas con el equipo y no lo des por hecho.`)
+  }
+
+  return partes.join('\n')
 }
 
 // ══════════════════════════════════════════════════════════════════

@@ -3,7 +3,7 @@ import { EventType } from '../events/types'
 import { supabaseAdmin } from '../../lib/supabase'
 import type { VentaCerrada } from '../../lib/types'
 import { obtenerHistorial, agregarAlHistorial, extraerTelefono, calcularHorasInactivo } from '../conversation/conversation.service'
-import { parseNombre, pareceNombreCliente, parseSucursal, parseDireccion, extraerFecha, extraerHora } from '../parser'
+import { parseNombre, pareceNombreCliente, esNombrePlausible, parseSucursal, parseDireccion, extraerFecha, extraerHora } from '../parser'
 import { getMensajeTexto, getMessageBody, getFechaActual, hasQuotedMsg, getQuotedText, ahoraCdmx } from './message-utils'
 import { notificarEmpleadosWhatsApp, enviarFotoEmpleadosWhatsApp } from './notification.service'
 import { obtenerNumeroReal } from './contact.service'
@@ -143,6 +143,26 @@ function extraerNombrePedido(texto: string): string | null {
   return parseNombre(texto)
 }
 
+const ESTADOS_BLOQUEADOS_FLUJO: ReadonlySet<EstadoPedido> = new Set([
+  EstadoPedido.APARTADO,
+  EstadoPedido.EN_PRODUCCION,
+  EstadoPedido.LISTO,
+  EstadoPedido.ENTREGADO,
+  EstadoPedido.ARCHIVADO,
+  EstadoPedido.CANCELADO,
+  EstadoPedido.QUEJA,
+  EstadoPedido.POSTVENTA,
+])
+
+function transitarDesdeFlujoSeguro(clienteId: string, flujo: string, pedidoActual?: PedidoActual): boolean {
+  const pedido = pedidoActual ?? obtenerPedido(clienteId)
+  if (pedido?.estado && ESTADOS_BLOQUEADOS_FLUJO.has(pedido.estado)) {
+    console.warn(`[message-handler] transitarDesdeFlujo bloqueada (${flujo}) para pedido en estado ${pedido.estado} — ${clienteId}`)
+    return false
+  }
+  return transitarDesdeFlujo(clienteId, flujo)
+}
+
 function aplicarDatosPedidoDesdeTexto(clienteId: string, texto: string, deps: Pick<MsgHandlerDeps, 'pedidoActual' | 'tieneArregloVerificado'>): void {
   if (!deps.tieneArregloVerificado(clienteId)) return
   const pedido = deps.pedidoActual(clienteId)
@@ -165,7 +185,7 @@ function aplicarDatosPedidoDesdeTexto(clienteId: string, texto: string, deps: Pi
   if (/\b(transferencia|transfer|comprobante|recibo|ticket|listo\s+ese\s+es\s+el\s+recibo|pago\s+con\s+transferencia)\b/i.test(texto)) {
     pedido.metodoPago = 'transferencia'
     pedido.estadoFlujo = 'esperando_pago'
-    if (pedido.estado !== EstadoPedido.APARTADO) transitarDesdeFlujo(clienteId, 'esperando_pago')
+    if (pedido.estado !== EstadoPedido.APARTADO) transitarDesdeFlujoSeguro(clienteId, 'esperando_pago')
   }
 
   if (pedido.nombre) {
@@ -224,7 +244,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
     if (!faltaFechaHoraParaCerrar(clienteId)) return false
     const pedido = deps.pedidoActual(clienteId)
     pedido.estadoFlujo = 'esperando_fecha_hora'
-    if (pedido.estado !== EstadoPedido.APARTADO) transitarDesdeFlujo(clienteId, 'esperando_fecha_hora')
+    if (pedido.estado !== EstadoPedido.APARTADO) transitarDesdeFlujoSeguro(clienteId, 'esperando_fecha_hora')
     await deps.persistirPedido(clienteId, telefono, 'apartado', 'Falta fecha/hora antes de cerrar')
     const pregunta = '¿Para qué fecha y hora lo necesitas? 🌷'
     await deps.responderMensaje(msg, pregunta)
@@ -295,7 +315,9 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           caption: media.caption,
         })
         enviarFotoEmpleadosWhatsApp(sock, media.base64, `📷 Foto de referencia de ${telefono}${media.caption ? `\n\nCliente dice: ${media.caption}` : ''}`, media.mimetype).catch(err => console.error('[bot] WhatsApp foto referencia:', err))
-        eventBus.emit(EventType.PHOTO_SENT, { telefono, descripcion: media.caption || 'Foto de referencia' })
+        if (debeEnviarAlertaDedup(clienteId, 'foto-sent', media.caption || 'Foto de referencia', 30 * 60_000)) {
+          eventBus.emit(EventType.PHOTO_SENT, { telefono, descripcion: media.caption || 'Foto de referencia' })
+        }
       } else {
         eventBus.emit(EventType.PHOTO_RECEIVED, {
           telefono,
@@ -311,7 +333,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       const pedido = deps.pedidoActual(clienteId)
       pedido.metodoPago = 'transferencia'
       pedido.estadoFlujo = 'pagado_transferencia'
-      transitarDesdeFlujo(clienteId, 'pagado_transferencia')
+      transitarDesdeFlujoSeguro(clienteId, 'pagado_transferencia')
       const venta = deps.ventaDesdeEstado(clienteId)
       if (venta && deps.ventaListaParaPagoTransferencia(clienteId)) {
         await deps.ventaCerradaHandler(clienteId, venta, telefono)
@@ -340,7 +362,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       const pedido = deps.pedidoActual(clienteId)
       pedido.productoPersonalizado ||= descripcion === 'Envió foto(s) de referencia' ? 'Ramo personalizado con foto de referencia' : descripcion
       pedido.estadoFlujo = 'esperando_precio_equipo'
-      transitarDesdeFlujo(clienteId, 'esperando_precio_equipo')
+      transitarDesdeFlujoSeguro(clienteId, 'esperando_precio_equipo')
       pedido.fotoReferenciaBase64 = mediaAcumulado[0]?.base64
       pedido.fotoReferenciaMimetype = mediaAcumulado[0]?.mimetype
       pedido.fotoReferenciaCaption = descripcion
@@ -357,7 +379,9 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       return 'referencia'
     }
 
-    eventBus.emit(EventType.HUMAN_REQUIRED, { telefono, cliente: pushName || '', descripcion: 'Envió imagen sin contexto claro', contexto: 'Imagen sin contexto' })
+    if (debeEnviarAlertaDedup(clienteId, 'imagen-sin-contexto', 'imagen sin contexto', 20 * 60_000)) {
+      eventBus.emit(EventType.HUMAN_REQUIRED, { telefono, cliente: pushName || '', descripcion: 'Envió imagen sin contexto claro', contexto: 'Imagen sin contexto' })
+    }
     return 'imagen'
   }
 
@@ -413,7 +437,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         esHorarioAnticipadoFlag = true
         const pedido = deps.pedidoActual(clienteId)
         pedido.estadoFlujo = 'esperando_fecha_hora'
-        if (pedido.estado !== EstadoPedido.APARTADO) transitarDesdeFlujo(clienteId, 'esperando_fecha_hora')
+        if (pedido.estado !== EstadoPedido.APARTADO) transitarDesdeFlujoSeguro(clienteId, 'esperando_fecha_hora')
         if (debeEnviarAlertaDedup(clienteId, 'horario-anticipado', fechaHoraDetectada.hora, 30 * 60_000)) {
           eventBus.emit(EventType.HUMAN_REQUIRED, {
             telefono: await numeroRealPromise,
@@ -527,7 +551,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         pedido.productoPersonalizado = 'Ramo elegido de fotos disponibles'
         pedido.detallesEspeciales = 'Cliente eligio un ramo de las fotos disponibles enviadas por el equipo'
         pedido.estadoFlujo = 'esperando_precio_equipo'
-        transitarDesdeFlujo(clienteId, 'esperando_precio_equipo')
+        transitarDesdeFlujoSeguro(clienteId, 'esperando_precio_equipo')
         contextoExtra +=
           `\n\n[CLIENTE ELIGIO UNA FOTO DISPONIBLE RECIENTE] ` +
           `Es un pedido nuevo basado en fotos que envio el equipo. NO uses precios de cotizaciones anteriores. ` +
@@ -623,11 +647,13 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       } else if (resultadoEnvio && 'ambiguo' in resultadoEnvio && resultadoEnvio.ambiguo) {
         const telefonoReal = await numeroRealPromise
         registrarZonaAmbigua(textoCliente, telefonoReal, resultadoEnvio.candidatos).catch(() => {})
-        eventBus.emit(EventType.ZONA_AMBIGUA, {
-          telefono: telefonoReal,
-          descripcion: textoCliente,
-          candidatos: resultadoEnvio.candidatos,
-        })
+        if (debeEnviarAlertaDedup(clienteId, 'zona-ambigua', textoCliente, 30 * 60_000)) {
+          eventBus.emit(EventType.ZONA_AMBIGUA, {
+            telefono: telefonoReal,
+            descripcion: textoCliente,
+            candidatos: resultadoEnvio.candidatos,
+          })
+        }
         if (puedeNotificarEnvio) {
           ENVIO_NOTIFICADO.set(clienteId, Date.now())
           notificarEmpleadosWhatsApp(sock,
@@ -803,10 +829,16 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       const notaMatch = textoCliente.match(/nota[:\s]*([\s\S]{1,500})/i)
       if (notaMatch && deps.tieneArregloVerificado(clienteId)) deps.pedidoActual(clienteId).nota = notaMatch[1].trim().slice(0, 500)
 
-      const nombreMatch = textoCliente.match(/(?:a qué nombre|a nombre de|nombre de|nombre|apartar a nombre de|para quien|para quién|ponerle|se lo aparto a nombre de)[:\s]*([a-záéíóúñ\s]+)/i)
+      const nombreMatch = textoCliente.match(/(?:a qué nombre|a nombre de|nombre de|nombre|apartar a nombre de|para quien|para quién|ponerle|se lo aparto a nombre de)[:\s]*([a-záéíóúñA-ZÁÉÍÓÚÑ\s']+)/i)
       if (nombreMatch && deps.tieneArregloVerificado(clienteId)) {
-        const nombre = extraerNombrePedido(textoCliente) ?? nombreMatch[1].trim().replace(/\s+/g, ' ').slice(0, 80)
-        if (!/^(ok|si|sí|vale|dale|va|de acuerdo|esta bien|está bien)$/i.test(nombre)) {
+        const extraido = extraerNombrePedido(textoCliente)
+        const fallback = nombreMatch[1].trim().replace(/\s+/g, ' ').slice(0, 80)
+        const nombre = extraido && esNombrePlausible(extraido)
+          ? extraido
+          : esNombrePlausible(fallback)
+            ? fallback
+            : null
+        if (nombre) {
           deps.pedidoActual(clienteId).nombre = nombre
         }
       }
@@ -829,7 +861,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       if (consultaPagoEnviado && deps.tieneArregloVerificado(clienteId)) {
         deps.pedidoActual(clienteId).metodoPago = 'transferencia'
         deps.pedidoActual(clienteId).estadoFlujo = 'esperando_pago'
-        if (deps.pedidoActual(clienteId).estado !== EstadoPedido.APARTADO) transitarDesdeFlujo(clienteId, 'esperando_pago')
+        if (deps.pedidoActual(clienteId).estado !== EstadoPedido.APARTADO) transitarDesdeFlujoSeguro(clienteId, 'esperando_pago')
         deps.persistirPedido(clienteId, await numeroRealPromise, 'apartado', textoCliente).catch(() => {})
       }
 
@@ -840,7 +872,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         if (!consultaPagoEnviado) {
           deps.pedidoActual(clienteId).metodoPago = /tarjeta/i.test(textoCliente) ? 'tarjeta_recoger' : 'efectivo_recoger'
           deps.pedidoActual(clienteId).estadoFlujo = 'esperando_fecha_hora'
-          if (deps.pedidoActual(clienteId).estado !== EstadoPedido.APARTADO) transitarDesdeFlujo(clienteId, 'esperando_fecha_hora')
+          if (deps.pedidoActual(clienteId).estado !== EstadoPedido.APARTADO) transitarDesdeFlujoSeguro(clienteId, 'esperando_fecha_hora')
         }
         contextoExtra +=
           `\n\n[CLIENTE RECOGE EN SUCURSAL] ` +
@@ -974,7 +1006,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           const pedido = deps.pedidoActual(clienteId)
           pedido.metodoPago = 'transferencia'
           pedido.estadoFlujo = 'esperando_pago'
-          if (pedido.estado !== EstadoPedido.APARTADO) transitarDesdeFlujo(clienteId, 'esperando_pago')
+          if (pedido.estado !== EstadoPedido.APARTADO) transitarDesdeFlujoSeguro(clienteId, 'esperando_pago')
           deps.persistirPedido(clienteId, await numeroRealPromise, 'apartado', 'Esperando comprobante de transferencia').catch(() => {})
         }
       }
@@ -1009,7 +1041,9 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
             caption: media.caption,
           })
           enviarFotoEmpleadosWhatsApp(sock, media.base64, `📷 Imagen pendiente de ${telefonoReal}${media.caption ? `\n\nCliente dice: ${media.caption}` : ''}`, media.mimetype).catch(err => console.error('[bot] WhatsApp imagen pendiente:', err))
-          eventBus.emit(EventType.PHOTO_SENT, { telefono: telefonoReal, descripcion: media.caption || 'Imagen pendiente' })
+          if (debeEnviarAlertaDedup(clienteId, 'foto-sent', media.caption || 'Imagen pendiente', 30 * 60_000)) {
+            eventBus.emit(EventType.PHOTO_SENT, { telefono: telefonoReal, descripcion: media.caption || 'Imagen pendiente' })
+          }
         }
       }
     }

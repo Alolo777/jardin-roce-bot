@@ -45,6 +45,291 @@
 
 ---
 
+### Módulo 2.1 — Resumen diario automático en Telegram a las 9am
+
+**Problema:** El dueño no tiene visibilidad del estado del negocio: no sabe cuántos clientes se atendieron hoy, cuántos pedidos están activos, cuántos esperan pago, cuántos requieren atención humana ni cuánto se vendió hoy.
+
+**Solución:** Nuevo evento `BOT_DAILY_SUMMARY`. Cada día a las 9am (hora CDMX) el bot compila y envía a Telegram un resumen con: clientes atendidos hoy (historial_chat), pedidos activos y esperando pago (`contarPedidosPorEstado()`), casos activos y casos que requieren atención humana (`contarCasosActivos()`/`contarCasosRequierenAtencionHumana()`), y ventas hoy (reporte_ventas). La alerta de desconexión de las 8am se conserva (ahora `!BOT_READY && hora === 8`).
+
+**Archivos modificados:**
+- `bot.ts` — `enviarResumenDiario()` + schedule a las 9am; alerta 8am condicionada a `!BOT_READY`
+- `src/pedidos/pedido.service.ts` — nueva función `contarPedidosPorEstado()`
+- `src/casos/caso.service.ts` — nuevas funciones `contarCasosActivos()` y `contarCasosRequierenAtencionHumana()`
+- `src/events/types.ts` — nuevo evento `BOT_DAILY_SUMMARY`
+- `src/events/telegram.subscriber.ts` — suscripción de `BOT_DAILY_SUMMARY`
+- `src/notification-engine/notification.engine.ts` — `BOT_DAILY_SUMMARY` en `SYSTEM_EVENTS_SKIP_AI`
+- `src/notification-engine/template.builder.ts` — template para `BOT_DAILY_SUMMARY`
+
+**Impacto:** Compatible. Compilación 0 errores.
+
+**Rollback:** Revertir los archivos modificados; eliminar el evento `BOT_DAILY_SUMMARY`.
+
+**Verificado:** `npx tsc --noEmit` → 0 errores. Criterio de éxito: cada día a las 9am el dueño recibe un resumen en Telegram.
+
+---
+
+### Módulo 0.2 — Verificación de conexión Telegram
+
+**Problema:** No había verificación periódica de que Telegram estuviera realmente enviando mensajes. Si el token era inválido o el chat ID cambiaba, el bot no lo detectaba hasta fallar en un envío.
+
+**Solución:** Verificación diaria de Telegram a las 10am CDMX (`verificarTelegramDiario()`). Si la conexión es correcta, se registra `[Telegram] ✅ Conectado`. Si falla, se notifica a los empleados por WhatsApp con el detalle del error para corregir `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`.
+
+**Archivos modificados:**
+- `bot.ts` — función `verificarTelegramDiario()` + schedule a las 10am
+
+**Impacto:** Compatible. Compilación 0 errores.
+
+**Rollback:** Revertir `verificarTelegramDiario()` y su schedule.
+
+---
+
+### Módulo 2.2 — Panel de resumen rápido "¿Qué pasó mientras no vi?"
+
+**Problema:** El dueño solo podía ver el estado de un chat a la vez. No había forma de obtener todos los chats que necesitan atención en un momento dado.
+
+**Solución:** Nuevo endpoint `GET /api/resumen` que devuelve `requierenAtencion` (casos QUEJA o prioridad alta/crítica), `esperandoPago` (pedidos en estado `ESPERANDO_PAGO`), `pedidosHoy` y `ventasHoy`.
+
+**Archivos modificados:**
+- `src/api/server.ts` — interfaz `ResumenOperativo`, campo `obtenerResumenOperativo` en `BotContext`, endpoint `GET /api/resumen`
+- `src/pedidos/pedido.service.ts` — nueva función `listarPedidosActivosGlobales()`
+- `src/casos/caso.service.ts` — nueva función `listarCasosRequierenAtencion()` (y `contarCasosRequierenAtencionHumana()` ahora la reutiliza, sin duplicar lógica)
+- `bot.ts` — `obtenerResumenOperativo()` + `haceTexto()`
+
+**Impacto:** Compatible. Compilación 0 errores.
+
+**Rollback:** Revertir los archivos modificados y eliminar el endpoint `/api/resumen`.
+
+**Verificado:** `npx tsc --noEmit` → 0 errores. Criterio de éxito: `curl http://localhost:10000/api/resumen` devuelve el resumen completo.
+
+---
+
+### Módulo 2.3 — Simplificar notificaciones de Telegram (anti-spam)
+
+**Problema:** Un solo pedido podía generar 6+ notificaciones en cadena (`ORDER_CREATED` → `ORDER_UPDATED` → `PRICE_CONFIRMED` → `PAYMENT_PENDING` → `PAYMENT_RECEIVED` → `ORDER_READY`), saturando al dueño y ocultando lo importante.
+
+**Solución:** Nuevo `src/events/notification-aggregator.ts` con clasificación de prioridad:
+- 🔴 **Críticos** (llegan inmediato): HUMAN_REQUIRED, CUSTOMER_ANGRY, CUSTOMER_WAITING, PAYMENT_CONFIRMED, CANCELACION_REQUESTED, PROVIDER_FAILURE, BOT_* 
+- 🟡 **Importantes** (agrupados 2 min por pedido/cliente): ORDER_CREATED, ORDER_READY, ORDER_DELIVERED, PAYMENT_RECEIVED, PAYMENT_PENDING, DELIVERY_COMPLETED, COTIZACION_REQUESTED, ENVIO_REQUESTED, PHOTO_REQUESTED, CASE_CREATED, ZONA_AMBIGUA
+- 🔵 **Informativos** (solo resumen diario): ORDER_UPDATED, PRICE_CONFIRMED, PHOTO_SENT, CASE_ARCHIVED
+
+`telegram.subscriber.ts` ahora enruta todos los eventos a `routeNotification()` (excepto PHOTO_RECEIVED que mantiene `withPipelinePhoto`). El buffer de 2 minutos se resetea con cada evento del mismo pedido; al expirar, se ejecuta el pipeline con el último evento de ese pedido.
+
+**Archivos modificados:**
+- `src/events/notification-aggregator.ts` (nuevo)
+- `src/events/telegram.subscriber.ts`
+
+**Impacto:** Compatible. Compilación 0 errores.
+
+**Rollback:** Revertir los archivos; restaurar `withPipeline` directo en `telegram.subscriber.ts`.
+
+**Verificado:** `npx tsc --noEmit` → 0 errores. Criterio de éxito: el dueño recibe 1 notificación por pedido cada 2 min (no 6+).
+
+---
+
+### Módulo 2.4 — Comando "¿Qué pasó?" por Telegram
+
+**Problema:** El dueño no podía preguntarle al bot "oye, ¿qué está pasando con todos los chats?". Solo existía el endpoint HTTP `GET /api/resumen` (módulo 2.2), que requería abrir el navegador. No había forma de consultar el estado global desde Telegram.
+
+**Solución:** Nuevo `iniciarTelegramListener()` en `lib/telegram.ts` — polling `getUpdates` con long-poll de 25s que solo procesa mensajes de texto de los chat IDs autorizados (`TELEGRAM_CHAT_ID`), marcando cada `update_id` como procesado vía `offset` (sin reprocesos). En `bot.ts`, `manejarComandoTelegram()` reconoce `/resumen`, `resumen`, `qué pasó`, `que paso`, `qué pasa`, `estado`, `/estado` y responde con `generarResumenEjecutivo()`, que reutiliza `contarPedidosPorEstado()`, `contarCasosRequierenAtencionHumana()` y `obtenerVentasHoy()` (sin duplicar lógica con 2.2).
+
+**Archivos modificados:**
+- `lib/telegram.ts` — nuevo `iniciarTelegramListener()` (polling getUpdates + filtro de chat autorizado)
+- `bot.ts` — `generarResumenEjecutivo()`, `manejarComandoTelegram()`, arranque del listener
+
+**Impacto:** Compatible. Compilación 0 errores. El polling usa `.unref()`, no bloquea el shutdown graceful.
+
+**Rollback:** Revertir los archivos; eliminar la llamada `iniciarTelegramListener()`.
+
+**Verificado:** `npx tsc --noEmit` → 0 errores. Criterio de éxito: el dueño escribe "qué pasó" en Telegram y recibe el resumen (prueba end-to-end pendiente de red local).
+
+---
+
+### Módulo 3.1 — Precios dinámicos desde Supabase (P1)
+
+**Problema:** Los precios de flores ($25 la rosa, $40 la hortensia, etc.) y los horarios (10:00-19:00 / 10:00-17:00) estaban hardcodeados en `buildValidatedRulesSection()`, `horario.validator.ts`, `message-utils.ts` y `response.validator.ts`. Cambiar un precio o un horario requería modificar código y redeployar.
+
+**Solución:** Nuevo `src/config/configuracion.service.ts` con `refrescarConfiguracion()` que lee las tablas `configuracion_precios` y `configuracion_horarios` de Supabase con caché TTL de 5 min y fallback a `PRECIOS_DEFAULT`/`HORARIOS_DEFAULT`. `prompt.builder.ts`, `horario.validator.ts`, `message-utils.ts` (`estaEnHorario`) y `response.validator.ts` leen ahora de `obtenerPrecios()`/`obtenerHorarios()`/`obtenerTextoPrecios()`/`obtenerPreciosReferencia()`. bot.ts refresca al arrancar y cada 5 min.
+
+**Archivos modificados:**
+- `src/config/configuracion.service.ts` (nuevo)
+- `src/openai/prompt.builder.ts`
+- `src/validators/horario.validator.ts`
+- `src/whatsapp/message-utils.ts`
+- `src/validators/response.validator.ts`
+- `bot.ts`
+
+**Pendiente (Supabase, manual):** crear las tablas `configuracion_precios` y `configuracion_horarios` e insertar los valores vigentes; mientras no existan, se usan los valores por defecto.
+
+**Impacto:** Compatible. Compilación 0 errores.
+
+**Rollback:** Revertir los archivos; eliminar el service de configuración.
+
+---
+
+### Módulo 3.2 — Máquina de estados: validar transiciones desde flujo (P1)
+
+**Problema:** `transitarDesdeFlujo()` forzaba transiciones sin verificar el resultado de `transitar()` y retornaba siempre `true`, ocultando errores de integridad (p. ej., un pedido pagado podía "regresar" a cotizando sin notificar).
+
+**Solución:** `transitarDesdeFlujo()` ahora retorna el resultado real de `transitar()`, es idempotente (estado destino = actual → `true` sin evento) y emite `PROVIDER_FAILURE` con dedup de 30 min cuando la transición es inválida. En `message-handler.ts` se agregó `transitarDesdeFlujoSeguro()` que bloquea transiciones desde estados pagados/terminales (APARTADO, EN_PRODUCCION, LISTO, ENTREGADO, ARCHIVADO, CANCELADO, QUEJA, POSTVENTA); todas las llamadas del handler usan ahora el helper.
+
+**Archivos modificados:**
+- `src/pedidos/pedido.service.ts`
+- `src/whatsapp/message-handler.ts`
+
+**Impacto:** Compatible. Compilación 0 errores.
+
+**Rollback:** Revertir los archivos; restaurar el `transitarDesdeFlujo` original.
+
+---
+
+### Módulo 3.3 — Rate limiting y dedup de notificaciones (P1)
+
+**Problema:** Algunos eventos se emitían sin pasar por `debeEnviarAlertaDedup()` ni cooldown, arriesgando notificaciones repetidas (PHOTO_SENT por cada foto, HUMAN_REQUIRED de imagen sin contexto por cada imagen, ZONA_AMBIGUA por cada zona ambigua).
+
+**Solución:** Se auditaron todas las emisiones de `message-handler.ts`. `debeNotificarReclamacion()` ahora usa 30 min para quejas (CUSTOMER_ANGRY) y 20 min para cancelaciones. Se agregó dedup donde faltaba: `PHOTO_SENT` (30 min, referencia y pendiente), `HUMAN_REQUIRED` de imagen sin contexto (20 min) y `ZONA_AMBIGUA` (30 min).
+
+**Archivos modificados:**
+- `src/whatsapp/bot-state.ts`
+- `src/whatsapp/message-handler.ts`
+
+**Impacto:** Compatible. Compilación 0 errores.
+
+**Rollback:** Revertir los archivos; restaurar los cooldowns previos.
+
+---
+
+### Módulo 4.1 — Parser de nombre: casos frontera (P1)
+
+**Problema:** El parser aceptaba nombres contaminados: números, emojis, URLs, palabras de relleno ("gracias", "listo", "después") y frases completas tras la coma (caso Lizet, AGENTS.md ERROR #1). El fallback de `message-handler.ts:832` y las funciones `tieneNombreValido`/`nombreParaAlerta` de bot.ts podían almacenar nombres que el parser debía rechazar.
+
+**Solución:** `nombre.parser.ts` endurecido con STOP_WORDS ampliados, `MAX_WORDS = 5`, `MIN_LENGTH = 2` y nueva `esNombrePlausible()` que rechaza números, emojis, URLs, caracteres especiales y frases no válidas ("por favor", "está bien", "de acuerdo", "muy bien"). `cortarEnStop()` ahora trunca también en palabras de URL. Se conectó `esNombrePlausible` en bot.ts y en el fallback de `message-handler.ts`. Nuevo test `tests/nombre.test.mts`.
+
+**Archivos modificados:**
+- `src/parser/nombre.parser.ts`
+- `src/parser/index.ts`
+- `src/whatsapp/message-handler.ts`
+- `bot.ts`
+- `package.json` (script `test:nombre`)
+- `tests/nombre.test.mts` (nuevo)
+
+**Verificado:** `npx tsc --noEmit` → 0 errores. `npm run test:nombre` → ok. `npm run test:flows` → ok.
+
+**Impacto:** Compatible.
+
+**Rollback:** Revertir los archivos del parser y bot.ts.
+
+---
+
+### Módulo 4.2 — Response Validator expandido (P1)
+
+**Problema:** El response validator solo cubría algunos casos de alucinación. Podían pasar desapercibidos: precios inventados no presentes en el contexto, confirmaciones de horario fuera del rango, promesas de stock sin respaldo, confirmaciones de entrega/fecha sin registro, y sucursales inexistentes.
+
+**Solución:** `response.validator.ts` expandido con 5 validaciones: (1) `validarPreciosRespuesta()` — precios deben estar en el set autorizado (contexto ∪ precios referenciales ∪ `precioMinimo`) o ser suma derivada; precios ≤ `PRECIO_INVENTADO_MIN = 100` se ignoran; (2) horas mencionadas se validan contra `obtenerHorarios()` dinámicos (`apertura`/`cierreSemana`/`cierreFinSemana`, día según `ahoraCdmx()`) solo si hay frase de confirmación; (3) `FRASES_CONFIRMACION_INVENTARIO` rechaza prometer stock; (4) `FRASES_CONFIRMACION_ENTREGA` + `validarEntregaFecha()` (la fecha debe existir literalmente en contexto); (5) `validarSucursalRespuesta()` rechaza "sucursal [Nombre]" no listado en `SUCURSALES_INFO`. Las frases de confirmación toleran coma tras "sí" ("Sí, tenemos..."). Se corrigió bug latente de `extraerPrecios()` con regex global compartido (`lastIndex`); ahora crea instancia por llamada. Se eliminó import sin uso `validarHorario`.
+
+**Archivos modificados:**
+- `src/validators/response.validator.ts`
+- `tests/response-validator.test.mts` (nuevo)
+- `package.json` (scripts `test:*` con `--env-file=.env.test`; nuevo `test:validator`)
+- `.env.test` (se añadió `SUPABASE_SERVICE_ROLE_KEY=testkey`; se removió BOM que rompía `node --env-file`)
+
+**Verificado:** `npx tsc --noEmit` → 0 errores. `npm run test:validator` → ok. `npm run test:nombre` → ok. `npm run test:horario` → ok (este test fallaba desde el módulo 3.1 por falta de env). `npm run test:flows` → ok. `test:wire` sigue fallando (aserto `ORDER_UPDATED` pre-existente, ajeno al módulo).
+
+**Impacto:** Compatible.
+
+**Rollback:** Revertir `response.validator.ts`; restaurar scripts previos de package.json.
+
+---
+
+### Módulo 5.1 — Sistema de inventario básico (P2)
+
+**Problema:** El bot podía prometer arreglos que no existen. No había verificación de inventario en ningún lado.
+
+**Solución:** Nuevo `src/config/inventario.service.ts` (patrón idéntico a `configuracion.service`): `refrescarInventario()` lee la tabla `inventario` de Supabase con caché TTL 5 min; `obtenerInventarioDisponible()` devuelve solo productos con `disponible=true` y `existencias>0`; `verificarDisponibilidad(producto)` y `obtenerTextoDisponibilidad()` (lista formateada para el prompt, null si no hay datos). `prompt.builder.ts` inyecta `[PRODUCTOS DISPONIBLES]` en `buildValidatedRulesSection()` solo cuando hay datos, indicando al LLM que confirme stock únicamente para productos de esa lista. `bot.ts` refresca inventario al arranque y cada 5 min. `response.validator.ts` ya no rechaza *todas* las confirmaciones de stock: `esProductoMencionado()` (normalización con `normalizarTexto` + singularización de plurales) permite confirmar solo si la respuesta menciona un producto real del inventario disponible; sin inventario cargado conserva el comportamiento del módulo 4.2 (rechaza).
+
+**Archivos modificados:**
+- `src/config/inventario.service.ts` (nuevo)
+- `src/openai/prompt.builder.ts`
+- `src/validators/response.validator.ts`
+- `bot.ts`
+- `package.json` (script `test:inventario`)
+- `tests/inventario.test.mts` (nuevo)
+
+**Verificado:** `npx tsc --noEmit` → 0 errores. `npm run test:inventario`, `test:validator`, `test:nombre`, `test:horario`, `test:flows` → ok.
+
+**Impacto:** Compatible.
+
+**Rollback:** Revertir los archivos; eliminar `inventario.service.ts` y su llamada en bot.ts.
+
+**Pendiente (Supabase, manual):** crear la tabla `inventario` e insertar productos; mientras no exista, el bot se comporta como antes.
+
+---
+
+### Módulo 5.2 — Seguimiento de reclamaciones (P2)
+
+**Problema:** Las reclamaciones, cancelaciones y quejas se registraban en Supabase (tabla `reclamaciones`) pero nunca se les daba seguimiento. Quedaban en estado "pendiente" para siempre y el dueño no tenía forma de verlas ni cerrarlas.
+
+**Solución:** Nuevo `src/reclamaciones/reclamacion.service.ts`: `listarReclamaciones(estado?)` consulta las últimas 50 por `creado_en` desc; `marcarReclamacionResuelta(id)` actualiza estado a `resuelto`; `formatearReclamaciones()` produce el formato Telegram (id corto, tipo mapeado a emoji, teléfono, descripción, arreglo de referencia y fecha). `bot.ts` `manejarComandoTelegram()` (que ya procesaba `/resumen`, `/reclamaciones` parcial, etc.) ahora soporta:
+- `/reclamaciones` — lista reclamaciones pendientes en Telegram.
+- `/marcar_resuelto <id>` — cierra una reclamación por uuid corto (primeros 7 caracteres, suficiente por cardinalidad).
+
+**Archivos modificados:**
+- `src/reclamaciones/reclamacion.service.ts` (nuevo)
+- `bot.ts` (comandos `/reclamaciones` y `/marcar_resuelto`)
+- `package.json` (script `test:reclamaciones`)
+- `tests/reclamaciones.test.mts` (nuevo)
+
+**Verificado:** `npx tsc --noEmit` → 0 errores. `npm run test:reclamaciones` → ok. Regresión: `test:inventario`, `test:validator`, `test:nombre`, `test:horario`, `test:flows` → ok.
+
+**Impacto:** Compatible.
+
+**Rollback:** Revertir los archivos; eliminar `reclamacion.service.ts` y sus comandos en bot.ts.
+
+---
+
+### Prompt system — alineación con la arquitectura actual (configuracion_bot)
+
+**Problema:** El `system_prompt` en `configuracion_bot` (15,189 caracteres, subido 2026-07-17) estaba desalineado con el sistema actual: nombraba anotaciones que el código ya no emite (`[PEDIDO EN CURSO VERIFICADO POR SISTEMA]`, `[CLIENTE RESPONDIO A LA FOTO DE...]`, `[CLIENTE MENCIONO UNA ZONA...]`, `[CLASIFICACION_JSON]`, `[Fecha actual]`), no mencionaba las anotaciones reales (`[REGLAS VALIDADAS POR EL BACKEND]`, `[PRODUCTOS DISPONIBLES]`, `[DECISION]`, `[CASO]`, `[PEDIDO]`, `[ATENCION HUMANA REQUERIDA]`, `[CLIENTE QUIERE CANCELAR UN PEDIDO]`, `[CLIENTE TIENE UNA QUEJA O RECLAMO]`), hardcodeaba horarios y precios de flores que ahora vienen de la configuración dinámica (módulo 3.1), no incluía la regla de inventario del módulo 5.1, no incluía el anticipo mínimo del 50% y trataba `[VENTA_CERRADA:...]` como mecanismo principal de cierre cuando debe ser respaldo opcional (ERROR #4 de AGENTS.md).
+
+**Solución:** Nuevo `src/prompts/system-prompt.corregido.ts` con `SYSTEM_PROMPT_CORREGIDO` (11,860 caracteres): delega horarios, pagos, sucursales y precios a la sección `[REGLAS VALIDADAS POR EL BACKEND]` que el backend inyecta siempre; documenta todas las anotaciones reales; añade la regla `[PRODUCTOS DISPONIBLES]` (módulo 5.1); convierte `[VENTA_CERRADA:...]` en token de respaldo opcional; conserva tono, flujo de pedido, fotos, envíos, quejas y eventos especiales. `scripts/subir-prompt-corregido.ts` sube el nuevo prompt a `configuracion_bot`.
+
+**Archivos modificados:**
+- `src/prompts/system-prompt.corregido.ts` (nuevo)
+- `scripts/subir-prompt-corregido.ts` (nuevo)
+- Supabase `configuracion_bot.system_prompt` — actualizado 2026-07-31
+
+**Verificado:** `npx tsc --noEmit` → 0 errores. Confirmado en Supabase: el prompt nuevo contiene `[REGLAS VALIDADAS POR EL BACKEND]`, `[PRODUCTOS DISPONIBLES]`, `[DECISION]` y ya no contiene `[CLASIFICACION_JSON]` ni `[PEDIDO EN CURSO VERIFICADO POR SISTEMA]`.
+
+**Impacto:** Compatible (prompt se carga con caché TTL de 60s en `lib/ai.ts`).
+
+**Rollback:** Re-subir el prompt anterior (disponible en `scripts/update-system-prompt.ts` git history) o pegar la versión anterior desde la página del cerebro de Flora.
+
+---
+
+### Módulo 5.3 — Dashboard administrativo web (P3)
+
+**Problema:** El servidor HTTP del bot (`startServer()`) solo exponía `/status`, `/qr`, `/diag/:chatId`, `/api/pedidos/sync` y `/api/resumen`. El dueño no podía consultar ni modificar pedidos activos desde el navegador.
+
+**Solución:** Se amplió la API REST del bot para el panel operativo:
+- `GET /api/pedidos` — lista todos los pedidos activos (DTO `PedidoResumenDTO`, nunca expone `fotoReferenciaBase64`, solo `tieneFotoReferencia`).
+- `GET /api/pedidos/:id` — detalle de un pedido, resuelto por `id` de pedido o por `clienteId` (404 si no existe).
+- `POST /api/pedidos/:id/precio` — el equipo fija el precio: setea `precioPersonalizado`, `precioConfirmadoPor=EQUIPO`, `estadoFlujo=precio_confirmado` y transita a `PRECIO_CONFIRMADO` si el estado es NUEVO/COTIZANDO (400 si precio inválido).
+- `POST /api/pedidos/:id/estado` — cambio manual de estado validado por la máquina de estados (`cambiarEstado`, sin saltos; 400 si el estado no es oficial o la transición es inválida).
+- Ambos POST persisten con `persistirPedidosEngine()` y emiten eventos de transición (Telegram se entera automáticamente).
+
+**Archivos modificados:**
+- `src/models/types.ts` — nuevo `PedidoResumenDTO`
+- `src/pedidos/pedido.service.ts` — nuevos `obtenerPedidoPorId(id)` y `serializarPedidoParaDashboard(clienteId, pedido)`
+- `src/api/server.ts` — `BotContext` ampliado + 4 endpoints nuevos
+- `bot.ts` — `actualizarPrecioDesdeDashboard()` y `cambiarEstadoDesdeDashboard()` cableadas en el `BotContext`
+
+**Verificado:** `npx tsc --noEmit` → 0 errores. Regresión: `test:reclamaciones`, `test:inventario`, `test:validator`, `test:nombre`, `test:horario`, `test:flows` → ok. Smoke test HTTP con `BotContext` simulado: 200/404/400 correctos.
+
+**Impacto:** Compatible.
+
+**Rollback:** Revertir los 4 archivos; quitar los métodos nuevos del `BotContext`.
+
+---
+
 ## 2026-07-29
 
 ### Fase 10 — 4 correcciones críticas: fotos, response validator, código duplicado, parser

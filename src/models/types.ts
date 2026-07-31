@@ -166,6 +166,29 @@ export interface PedidoActual {
   actualizadoEn?: string
 }
 
+export interface PedidoResumenDTO {
+  id: string
+  clienteId: string
+  telefono?: string
+  nombre?: string
+  estado?: string
+  estadoFlujo?: string
+  producto?: string
+  precio?: number | null
+  precioConfirmadoPor?: string
+  sucursal?: string
+  direccion?: string
+  fechaEntrega?: string
+  horaEntrega?: string
+  metodoPago?: string
+  nota?: string
+  extras?: PedidoExtra[]
+  tieneFotoReferencia: boolean
+  requiereAtencionEquipo?: boolean
+  creadoEn?: string
+  actualizadoEn?: string
+}
+
 export interface Caso {
   id: string
   clienteId: string
