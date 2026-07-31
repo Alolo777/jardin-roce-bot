@@ -6,10 +6,10 @@ import { detectarCambioTema, calcularHorasInactivo, INACTIVIDAD_CAMBIO_TEMA_HR, 
 import { analizarIntencion } from '../decision/decision.engine'
 
 const CASOS_ACTIVOS = new Map<string, Caso>()
-let casoCounter = 0
 
 function generateCasoId(): string {
-  return `caso_${Date.now()}_${++casoCounter}`
+  // UUID v4 para compatibilidad con columna UUID de Supabase
+  return crypto.randomUUID()
 }
 
 export async function cargarCasosDesdeBD(): Promise<void> {

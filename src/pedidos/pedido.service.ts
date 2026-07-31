@@ -447,12 +447,46 @@ export function transitarDesdeFlujo(clienteId: string, flujo: string, motivo?: s
 
   if (pedido.estado === nuevo) return true
 
-  const resultado = transitar(pedido, nuevo)
-  if (!resultado) {
-    console.error(`[pedidos] ⚠️ transitarDesdeFlujo: ${pedido.estado} → ${nuevo} (${flujo}) INVALIDA para ${clienteId}`)
+  // Caminar la máquina de estados paso a paso (no saltar estados)
+  const camino = encontrarCaminoEstados(pedido.estado, nuevo)
+  if (!camino || camino.length === 0) {
+    console.error(`[pedidos] ⚠️ transitarDesdeFlujo: sin camino válido ${pedido.estado} → ${nuevo} (${flujo}) para ${clienteId}`)
     emitirEventoTransicionInvalida(pedido, nuevo, flujo, motivo)
+    return false
   }
-  return resultado
+
+  let ok = true
+  for (const estadoIntermedio of camino) {
+    const resultado = transitar(pedido, estadoIntermedio)
+    if (!resultado) {
+      ok = false
+      console.error(`[pedidos] ⚠️ transitarDesdeFlujo: fallo en paso ${pedido.estado} → ${estadoIntermedio} (${flujo}) para ${clienteId}`)
+      emitirEventoTransicionInvalida(pedido, estadoIntermedio, flujo, motivo)
+      break
+    }
+  }
+  return ok
+}
+
+function encontrarCaminoEstados(desde: EstadoPedido, hasta: EstadoPedido): EstadoPedido[] {
+  if (desde === hasta) return []
+  const visitados = new Set<EstadoPedido>()
+  const cola: { estado: EstadoPedido; camino: EstadoPedido[] }[] = [{ estado: desde, camino: [] }]
+
+  while (cola.length > 0) {
+    const { estado, camino } = cola.shift()!
+    if (estado === hasta) return camino
+    if (visitados.has(estado)) continue
+    visitados.add(estado)
+
+    const siguientes = TRANSICIONES_VALIDAS[estado] ?? []
+    for (const sig of siguientes) {
+      if (!visitados.has(sig)) {
+        cola.push({ estado: sig, camino: [...camino, sig] })
+      }
+    }
+  }
+  return []
 }
 
 export function pedidoTieneDatosCompletos(pedido: PedidoActual): boolean {
