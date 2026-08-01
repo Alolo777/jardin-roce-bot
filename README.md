@@ -4,6 +4,45 @@
 
 > No es un chatbot. Es una empleada digital cuyo backend toma todas las decisiones críticas. El LLM (OpenAI/GitHub Models) únicamente redacta respuestas con base en información validada por el sistema.
 
+> **¿Vas a adaptar este sistema a otro giro de negocio?** Ve directo a la sección [Adaptar a Otro Giro de Negocio](#adaptar-a-otro-giro-de-negocio).
+
+---
+
+## Estado del Proyecto (Fase de Soluciones)
+
+El **Plan Maestro** (19 módulos) está **completado al 100%**. Esta fase concluyó la refactorización de la arquitectura anterior a un sistema de motores especializados y resolvió los errores críticos de producción.
+
+### Qué quedó resuelto en esta fase
+
+| # | Problema detectado en producción | Solución implementada |
+|---|---|---|
+| 1 | Parser de nombre consumía frases completas ("Lizet Cervantes Vargas, cree que podría…") | Parser especializado que se detiene en coma, punto, salto de línea y conectores |
+| 2 | Sucursal por defecto inventada ("Apizaco (sucursal)") | Si no hay suficiente información, el valor permanece vacío — el backend nunca inventa sucursal |
+| 3 | El LLM confirmaba horarios que no correspondían | Validación de horarios 100% en backend (`horario.validator.ts`), el LLM solo informa |
+| 4 | Pedidos dependían del token `[VENTA_CERRADA]` (pedidos perdidos) | Los pedidos viven en la BD (`pedido.service.ts`) independientemente del LLM |
+| 5 | Conversación y pedido eran la misma entidad (dato viejo reutilizado semanas después) | Separación total: Conversación → Casos → Pedidos |
+| 6 | Telegram dependía del texto generado por OpenAI | Telegram depende exclusivamente del EventBus |
+| 7 | Reglas de negocio dentro del prompt | Las reglas viven en TypeScript (`src/validators/`, `src/pedidos/`) |
+
+### Hitos de la fase
+
+- **Conversation Engine** — historial, deduplicación, caché de clientes, detección de cambio de tema.
+- **Case Engine** — ciclo de vida completo del caso (crear, archivar, tipos, prioridades).
+- **Order Engine** — máquina de estados validada con transiciones permitidas (BFS).
+- **Decision Engine** — 20 intenciones, prioridades, detectores (compra, cancelación, queja, humano).
+- **Event Engine** — EventBus con tipado fuerte, retry y suscriptores por tipo.
+- **Prompt Builder** — contexto dinámico; el prompt ya no contiene reglas de negocio.
+- **Response Validator** — detecta respuestas que inventen horarios, precios, sucursales o pagos.
+- **Fallback de IA** — GitHub Models → Gemini si falla el proveedor principal.
+- **Dashboard web (módulo 5.3)** — endpoints REST para consultar y modificar pedidos desde un panel.
+
+### Versión y documentación de referencia
+
+- Versión actual: `2.1.0` (ver [CHANGELOG.md](CHANGELOG.md))
+- Historial de decisiones técnicas: [DECISIONS.md](DECISIONS.md)
+- Pendientes e ideas futuras: [TODO.md](TODO.md)
+- Errores conocidos y resueltos: [KNOWN_BUGS.md](KNOWN_BUGS.md)
+
 ---
 
 ## Stack Tecnológico
@@ -333,6 +372,7 @@ GET https://<vercel>/api/bot/diag/<chatId>
 | Pedido no se registra | Order Engine no sincronizado | Verificar `SUPABASE_SERVICE_ROLE_KEY` |
 | Telegram no notifica | EventBus no suscrito | Verificar `TELEGRAM_BOT_TOKEN` |
 | Error de memoria en e2-micro | RSS alto | Usar `NODE_OPTIONS=--max-old-space-size=380` |
+| Conexión cerrada 403/404/405 | Sesión marcada por WhatsApp o IP bloqueada | Cambiar IP de la VM **y/o** borrar `~/.baileys_auth` + re-escanear QR (`/qr` en Telegram) |
 
 ---
 
@@ -347,6 +387,115 @@ Las reglas críticas viven en TypeScript, **no en el prompt**:
 - `src/validators/cancelacion.validator.ts` — Política de cancelaciones
 - `src/validators/queja.validator.ts` — Protocolo de quejas
 - `src/pedidos/pedido.service.ts` — Máquina de estados y transiciones válidas
+
+---
+
+## Adaptar a Otro Giro de Negocio
+
+Flora fue construida para una florería (Jardín RoCe), pero su arquitectura es **vertical-agnóstica**: todo lo específico del negocio está aislado en archivos de configuración y validadores. Adaptarla a otro giro (papelería, pastelería, tienda de regalos, farmacia, etc.) requiere **modificar datos y reglas de negocio, no la arquitectura**.
+
+### Qué NO tienes que tocar
+
+La infraestructura y los motores funcionan igual en cualquier giro:
+
+- `bot.ts` (orquestador), `src/orchestrator.ts`, `src/events/`, `src/decision/`
+- `src/conversation/`, `src/casos/`, `src/pedidos/` (los estados son genéricos)
+- `src/notification-engine/`, `src/api/server.ts`, Telegram, WhatsApp
+- `src/models/types.ts` (los enums ya son lo bastante genéricos: PEDIDO, COTIZACION, ENVIO, PAGO…)
+
+### Checklist de adaptación (en orden)
+
+#### 1. Configuración de negocio — `src/config/configuracion.service.ts`
+
+Define tu **catálogo de productos** y **horarios**:
+
+```ts
+export interface ConfigPrecios {
+  // reemplaza rosa, hortensia, etc. por TUS productos
+  productoA: number
+  productoB: number
+  precioMinimo: number
+}
+
+export const HORARIOS_DEFAULT: ConfigHorarios = {
+  apertura: 10,          // 10:00
+  cierreSemana: 19,      // L-V 19:00
+  cierreFinSemana: 17,   // S-D 17:00
+}
+```
+
+> Los valores se pueden editar en vivo desde las tablas `configuracion_precios` y `configuracion_horarios` de Supabase (con caché de 5 min), sin redeploy. `obtenerTextoPrecios()` y `obtenerPreciosReferencia()` alimentan el prompt con los precios oficiales — el LLM nunca los inventa.
+
+#### 2. Sucursales — `src/validators/sucursal.validator.ts`
+
+Reemplaza el mapa `SUCURSALES_INFO` con tus sucursales (nombre, dirección, horario):
+
+```ts
+export const SUCURSALES_INFO: Record<string, SucursalInfo> = {
+  'Centro': { sucursal: 'Centro', confianza: 'alta', direccion: 'Calle 1 #123', horario: 'Lun-Sáb 9:00-20:00' },
+}
+```
+
+#### 3. Envíos — `src/validators/envio.validator.ts`
+
+La lógica es genérica y lee de las tablas Supabase `municipios_envio` y `zonas_envio` (colonia → zona → precio). Solo carga tus datos de cobertura y costos; no necesitas tocar el código.
+
+#### 4. Pagos — `src/validators/pago.validator.ts`
+
+Reemplaza `CUENTA_BBVA` con tu cuenta y actualiza `REGEX_COMPROBANTE` y `REGEX_CUENTA_COMPARTIDA` con los términos de TU método de pago (banco, nombre del titular, dígitos):
+
+```ts
+export const CUENTA_BBVA: CuentaBancaria = {
+  banco: 'TU_BANCO',
+  numero: 'TUCUENTA',
+  titular: 'TU_NOMBRE',
+}
+```
+
+#### 5. Intenciones y palabras clave — `src/decision/`
+
+`src/decision/intent-detector.ts` usa **listas de palabras clave** (ej: `KW_CANCELACION`, `KW_QUEJA`). Ajusta las palabras a tu giro:
+
+```ts
+const KW_QUEJA = [
+  'queja', 'reclamo', 'producto dañado', 'llegó mal',
+  // agrega términos propios de tu negocio, ej: 'el pastel llegó derretido'
+]
+```
+
+El enum `Intencion` (`src/models/types.ts`) ya cubre saludos, precios, catálogo, envío, pago, cancelación, queja, humano, etc. — cubre el 95% de cualquier negocio sin cambios.
+
+#### 6. Prompt del sistema — tabla `configuracion_bot`
+
+El system prompt (en Supabase, tabla `configuracion_bot`) contiene el nombre y tono del asistente. Actualízalo con:
+
+- Nombre de tu asistente
+- Giro del negocio
+- Políticas de atención (envío, cancelaciones, pagos)
+
+```bash
+npx tsx --env-file=.env.local scripts/update-system-prompt.ts
+```
+
+Las **reglas críticas** (horarios, precios, sucursales, envío) se inyectan desde los validators como anotaciones de sistema — no deben copiarse al prompt.
+
+#### 7. Panel de Telegram y notificaciones
+
+Los eventos del sistema (nuevo pedido, pago pendiente, pedido listo, humano requerido) llegan a tu chat de Telegram configurado con `TELEGRAM_CHAT_ID`. No dependen del giro del negocio. Ajusta las plantillas en `src/notification-engine/` si quieres otro formato.
+
+#### 8. Catálogo visual — tabla `inventario`
+
+`src/config/inventario.service.ts` lee la tabla `inventario` (nombre, precio, categoría, existencias, imagen, temporada). Carga tus productos ahí y el bot confirmará disponibilidad **solo** con base en esa tabla — nunca inventa stock.
+
+#### 9. Pruebas
+
+Regenera los casos de prueba con tu giro en `tests/`. Los tests existentes (`test:flows`, `test:horario`, `test:wire`) validan el flujo de conversación y validadores; ajústalos a tus productos y horarios.
+
+### Errores que esta arquitectura te ahorra
+
+- El LLM **no puede** confirmar horarios, precios, stock, envíos ni pagos — eso es responsabilidad del backend.
+- Si el cliente cambia de tema, se crea un **caso nuevo**; jamás se reutiliza información antigua.
+- El bot se reconecta a WhatsApp con backoff normal (sin cooldown prolongado por bloqueo de IP).
 
 ---
 
