@@ -912,7 +912,6 @@ let RECONNECT_TIMER: NodeJS.Timeout | null = null
 let RECONNECT_ATTEMPT = 0
 let ULTIMO_BOT_DISCONNECTED_EMIT = 0
 
-const BLOQUEO_IP_COOLDOWN_MS = 30 * 60_000
 
 function actualizarEstadoBot(estado: typeof BOT_ESTADO, detalle: string): void {
   BOT_ESTADO = estado
@@ -1134,10 +1133,10 @@ async function iniciarBaileys(): Promise<void> {
       }
 
       if (esBloqueoIp) {
-        console.warn(`🚫 Posible bloqueo de IP por WhatsApp (${reason}). Reintento en ${BLOQUEO_IP_COOLDOWN_MS / 60_000} min para no mantener el bloqueo.`)
-        actualizarEstadoBot('error', `IP posiblemente bloqueada por WhatsApp (${reason}). Reintento en 30 min.`)
+        console.warn(`🚫 Posible bloqueo de IP por WhatsApp (${reason}). Reintentando con backoff normal.`)
+        actualizarEstadoBot('reconectando', `IP posiblemente bloqueada (${reason}), reintentando`)
         publicarEstadoBot().catch(() => {})
-        programarReinicioBaileys('Posible bloqueo de IP, esperando cooldown largo', BLOQUEO_IP_COOLDOWN_MS)
+        programarReinicioBaileys(`Reconectando tras bloqueo de IP (${reason})`)
         return
       }
 
