@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## 2026-08-01
+
+### Hotfix: conexión WhatsApp 405 (versión de protocolo obsoleta)
+
+**Problema:** El bot no conectaba a WhatsApp. Conexión cerrada con 405 (Method Not Allowed) en bucle, sin llegar a generar QR, incluso tras cambiar IP de la VM y borrar la sesión.
+
+**Causa raíz:** WhatsApp dejó de aceptar la versión de protocolo de WhatsApp Web hardcodeada en Baileys 7.0.0-rc13. `makeWASocket()` se llamaba sin `version`, por lo que Baileys usaba su valor por defecto (obsoleto) y WhatsApp respondía 405 durante el handshake del WebSocket, antes del flujo de registro/QR.
+
+**Solución (código):** `bot.ts` ahora obtiene la versión actual vía `fetchLatestBaileysVersion()` con fallback a `fetchLatestWaWebVersion()` y un valor de respaldo fijo `[2, 3000, 1037641644]`, y se la pasa a `makeWASocket({ version })`. La versión se cachea (`WA_VERSION_CACHE`) para evitar fetches repetidos.
+
+**Archivos modificados:**
+- `bot.ts` — import de `fetchLatestWaWebVersion`, función `obtenerVersionWhatsApp()`, `version` en `makeWASocket`
+
+**Impacto:** Compatible. Compilación 0 errores. Requiere reinicio del servicio en la VM (`sudo systemctl restart floreria-bot`).
+
+**Rollback:** SÍ — revertir el commit.
+
+---
+
 ## 2026-07-31
 
 ### Módulo 0.1 — Reconexión WhatsApp: detección de bloqueo por IP (código)

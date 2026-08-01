@@ -9,6 +9,7 @@ import {
   getContentType,
   downloadContentFromMessage,
   fetchLatestBaileysVersion,
+  fetchLatestWaWebVersion,
   isJidGroup,
 } from '@whiskeysockets/baileys'
 import type { Boom } from '@hapi/boom'
@@ -1026,6 +1027,29 @@ function programarReinicioBaileys(motivo: string, delayMs?: number): void {
 // INICIALIZACIÓN BAILEYS
 // ════════════════════════════════════════════════════════════════
 
+const WA_VERSION_FALLBACK: [number, number, number] = [2, 3000, 1037641644]
+let WA_VERSION_CACHE: [number, number, number] | null = null
+
+async function obtenerVersionWhatsApp(): Promise<[number, number, number]> {
+  if (WA_VERSION_CACHE) return WA_VERSION_CACHE
+  try {
+    const { version } = await fetchLatestBaileysVersion()
+    if (version) {
+      WA_VERSION_CACHE = version
+      return version
+    }
+  } catch {}
+  try {
+    const { version } = await fetchLatestWaWebVersion()
+    if (version) {
+      WA_VERSION_CACHE = version
+      return version
+    }
+  } catch {}
+  console.warn(`[bot] ⚠️ No se pudo obtener versión de WhatsApp — usando fallback ${WA_VERSION_FALLBACK.join('.')}`)
+  return WA_VERSION_FALLBACK
+}
+
 async function iniciarBaileys(): Promise<void> {
   BOT_CONNECTION = 'connecting'
   actualizarEstadoBot(BOT_RECONNECTING ? 'reconectando' : 'iniciando', BOT_RECONNECTING ? 'Reconectando WhatsApp' : 'Arrancando bot')
@@ -1038,8 +1062,12 @@ async function iniciarBaileys(): Promise<void> {
   // Verificar versión más reciente de Baileys para alerta de API
   verificarVersionBaileys().catch(() => {})
 
+  const waVersion = await obtenerVersionWhatsApp()
+  console.log(`[bot] Usando versión WhatsApp ${waVersion.join('.')}`)
+
   sock = makeWASocket({
     auth: state,
+    version: waVersion,
     logger: pino({ level: 'silent' }),
     printQRInTerminal: false,
     browser: Browsers.windows('Jardin RoCe'),

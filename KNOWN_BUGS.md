@@ -72,3 +72,12 @@
   2. `limpiarDireccionCliente` (message-handler) ahora conserva el link Maps.
   3. En el flujo de envío, si la dirección es link Maps, se inyecta instrucción al LLM para GUARDAR el link y PEDIR confirmación de calle/número en texto (no repetir el link como calle).
 - **Versión donde se corrigió:** 3.0.5
+
+## BUG-008: Conexión WhatsApp 405 (versión de protocolo obsoleta)
+- **Prioridad:** Crítica
+- **Estado:** Resuelto (2026-08-01)
+- **Reportado:** 2026-07-31
+- **Síntomas:** El bot no conectaba a WhatsApp. Conexión cerrada: 405 en bucle, sin generar QR nunca, incluso tras cambiar IP de la VM y borrar la sesión.
+- **Causa raíz:** WhatsApp dejó de aceptar la versión de protocolo de WhatsApp Web hardcodeada en Baileys 7.0.0-rc13. makeWASocket() se llamaba sin ersion, usando la obsoleta por defecto → 405 en el handshake WebSocket, antes del registro/QR.
+- **Corrección:** obtenerVersionWhatsApp() en ot.ts obtiene la versión actual vía etchLatestBaileysVersion() → fallback etchLatestWaWebVersion() → fallback fijo [2, 3000, 1037641644], y se pasa ersion a makeWASocket. Versión cacheada.
+- **Versión donde se corrigió:** 2.1.1
