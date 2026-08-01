@@ -3,6 +3,8 @@ import type { DatosVerificados } from './types'
 import type { PipelineResult } from './notification.engine'
 
 function esc(text: string | number | null | undefined): string {
+  // Escapar para MarkdownV2 (Telegram Bot API)
+  // Caracteres especiales: _ * [ ] ( ) ~ ` > # + - = | { } . !
   return String(text ?? '').replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&')
 }
 
@@ -239,7 +241,7 @@ function getTemplate(
       ].join('\n')
 
     case 'BOT_DAILY_SUMMARY':
-      return descripcion ?? '📊 *Resumen diario*'
+      return esc(descripcion ?? '📊 *Resumen diario*')
 
     default:
       return [
