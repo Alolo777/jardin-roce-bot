@@ -46,7 +46,13 @@ export async function obtenerNumeroReal(msg: any): Promise<string> {
     } catch (err) {
       console.warn(`[contact] No se pudo resolver LID (${jid}):`, err)
     }
-    return jid
+    // BUG-011: nunca devolver el jid crudo (@lid / :dispositivo). Se normaliza
+    // con jidANumero para que alertas, pedidos Supabase y eventos usen el mismo
+    // identificador que el historial. La detección de LID sigue funcionando por
+    // longitud (>13 dígitos) en esLid/formatearNumero.
+    const numeroLid = jidANumero(jid)
+    CACHE_NUMEROS.set(jid, numeroLid)
+    return numeroLid
   }
 
   const numero = jidANumero(jid)

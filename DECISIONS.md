@@ -1510,5 +1510,25 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-071: Normalizar teléfono LID — nunca guardar el jid crudo (@lid) (BUG-011)
+
+**Fecha:** 2026-08-04
+**Estado:** Aceptada
+
+**Motivo:** Los contactos que usan cuenta vinculada (`@lid`) no siempre resuelven su número real contra el mapeo de Baileys. `obtenerNumeroReal` devolvía el jid crudo (`5212345...@lid` o `...@lid:15`) en ese caso, y ese valor se persistía en pedidos Supabase, alertas WhatsApp y eventos Telegram. Además `jidToTelefono` no limpiaba el sufijo `:dispositivo` (a diferencia de `jidANumero`), por lo que el mismo cliente aparecía con dos identificadores distintos entre el historial y las alertas.
+
+**Alternativas consideradas:**
+1. Resolver siempre el LID contra el mapeo (rechazada: el mapeo no siempre existe en `BAILEYS_KEYS`, el propio `@lid` es un identificador de privacidad de WhatsApp)
+2. Devolver el jid crudo tal cual (rechazada: es lo que producía el bug)
+3. **Normalizar con `jidANumero` (elegida):** quitar `@lid` y `:dispositivo`, dejando solo el identificador numérico. La detección de LID en `esLid`/`formatearNumero` sigue funcionando por longitud (>13 dígitos)
+
+**Resultado:** `obtenerNumeroReal` (contact.service.ts) normaliza el LID no resoluble con `jidANumero` en lugar de devolver el jid crudo. `jidToTelefono` (conversation.service.ts) ahora también elimina el sufijo `:dispositivo`, quedando alineado con `jidANumero`. Nuevo test `tests/telefono.test.mts` (`npm run test:telefono`).
+
+**Ventajas:** Identificador único y consistente para cada cliente en historial, alertas, pedidos y eventos; sin dependencia del mapeo LID de Baileys; sin cambios de esquema.
+
+**Desventajas:** Un LID sin resolver ya no expone la marca `@lid` explícita en el dato crudo (mitigado: `esLid` lo detecta por longitud y el formato de alerta lo muestra como "Cuenta vinculada").
+
+---
+
 
 

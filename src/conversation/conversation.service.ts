@@ -44,7 +44,10 @@ export function variantesTelefono(numero: string): string[] {
 }
 
 export function jidToTelefono(jid: string): string {
-  const limpio = (jid || '').replace(/@[^\s]*/g, '').trim()
+  const limpio = (jid || '')
+    .replace(/@[^\s]*/g, '')
+    .replace(/:\d+$/, '')
+    .trim()
   return limpio.startsWith('52') ? `+${limpio}` : limpio
 }
 

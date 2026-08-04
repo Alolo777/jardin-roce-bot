@@ -14,6 +14,7 @@
     "test:validator": "tsx --env-file=.env.test tests/response-validator.test.mts",
     "test:inventario": "tsx --env-file=.env.test tests/inventario.test.mts",
     "test:reclamaciones": "tsx --env-file=.env.test tests/reclamaciones.test.mts",
+    "test:telefono": "tsx --env-file=.env.test tests/telefono.test.mts",
     "start": "next start",
     "bot": "tsx --env-file=.env.local bot.ts",
     "bot:prod": "NODE_OPTIONS='--max-old-space-size=512' tsx --env-file=.env.local bot.ts",

@@ -102,3 +102,13 @@
 - **Pruebas:** `npx tsc --noEmit` 0 errores; tests `test:flows`, `test:nombre`, `test:validator`, `test:horario`, `test:inventario`, `test:reclamaciones` OK.
 - **Pendiente:** Agregar al menos una API key de fallback (OpenRouter/Groq/Cerebras) en `.env.local` de la VM.
 - **Versión donde se corrigió:** 2.1.3
+
+## BUG-011: Teléfono LID sin normalizar — alertas/pedidos guardaban el jid crudo (`@lid`)
+- **Prioridad:** Alta
+- **Estado:** Resuelto (2026-08-04, DEC-071)
+- **Reportado:** 2026-08-04 (diagnóstico de sesión)
+- **Síntomas:** Cuando un cliente usa cuenta vinculada (`@lid`), el número real no siempre se resuelve contra el mapeo de Baileys. Las alertas WhatsApp, los pedidos en Supabase y los eventos Telegram guardaban el jid crudo (`5212345...@lid` o `...@lid:15`) en lugar de un número normalizado. Además, el mismo remitente podía aparecer con formatos distintos en el historial vs. las alertas.
+- **Causa raíz:** (1) `obtenerNumeroReal` (contact.service.ts) devolvía `jid` sin normalizar cuando el LID no se resolvía. (2) `jidToTelefono` (conversation.service.ts) no limpiaba el sufijo `:dispositivo`, a diferencia de `jidANumero` (message-utils.ts), generando dos identificadores distintos para el mismo cliente.
+- **Corrección (DEC-071):** `obtenerNumeroReal` normaliza el LID no resoluble con `jidANumero` (quita `@lid` y `:device`); `jidToTelefono` ahora también elimina el sufijo `:dispositivo`. La detección de LID sigue funcionando por longitud (>13 dígitos) en `esLid`/`formatearNumero`.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; `tests/telefono.test.mts` (nuevo, `npm run test:telefono`) cubre LID no resoluble, LID con `:device`, jidToTelefono, esLid y variantesTelefono. Suite completa OK.
+- **Versión donde se corrigió:** 2.1.4

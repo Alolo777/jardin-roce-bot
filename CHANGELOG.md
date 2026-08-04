@@ -25,6 +25,27 @@
 
 ---
 
+## 2026-08-04
+
+### BUG-011: Normalización de teléfono LID (v2.1.4)
+
+**Problema:** Los contactos con `@lid` (cuenta vinculada) no siempre resuelven su número real contra el mapeo de Baileys. Al no resolverse, `obtenerNumeroReal` devolvía el jid crudo (`5212345...@lid` o `...@lid:15`), que se guardaba en pedidos Supabase, alertas WhatsApp y eventos Telegram. Además, `jidToTelefono` no limpiaba el sufijo `:dispositivo` (sí lo hacía `jidANumero`), generando dos identificadores distintos para el mismo cliente.
+
+**Solución (código):**
+- `src/whatsapp/contact.service.ts`: `obtenerNumeroReal` normaliza el LID no resoluble con `jidANumero` (quita `@lid` y `:dispositivo`) en lugar de devolver el jid crudo.
+- `src/conversation/conversation.service.ts`: `jidToTelefono` también elimina el sufijo `:dispositivo`, quedando alineado con `jidANumero`.
+- `tests/telefono.test.mts` (nuevo): cubre LID no resoluble, LID con `:device`, `jidToTelefono`, `esLid` y `variantesTelefono`.
+
+**Archivos modificados:** `src/whatsapp/contact.service.ts`, `src/conversation/conversation.service.ts`, `package.json`, `tests/telefono.test.mts`
+
+**Pruebas:** `npm run test:telefono` OK; resto de suite (`test:flows`, `test:nombre`, `test:validator`, `test:horario`, `test:inventario`, `test:reclamaciones`) OK; `npx tsc --noEmit` 0 errores.
+
+**Impacto:** Compatible. Sin cambios de esquema ni de contrato de eventos.
+
+**Rollback:** Sí — revertir el commit.
+
+---
+
 ## 2026-08-03
 
 ### Migración IA a Gemini — GitHub Models retirado (v2.1.2)
