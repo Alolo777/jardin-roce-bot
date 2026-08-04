@@ -1530,5 +1530,24 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-072: Mostrar fecha/hora de entrega en las notificaciones operativas de Telegram (BUG-012)
+
+**Fecha:** 2026-08-04
+**Estado:** Aceptada
+
+**Motivo:** Los templates operativos de Telegram (VENTA CERRADA, PEDIDO APARTADO, PAGO PENDIENTE) omitían la fecha/hora de entrega del pedido, aunque `verified.fecha`/`verified.hora` ya llegaban desde el timeline (`fecha_entrega`/`hora_entrega` en Supabase). El equipo debía consultar el dashboard para saber cuándo preparar/entregar, con riesgo de demoras en pedidos confirmados.
+
+**Alternativas consideradas:**
+1. Agregar fecha/hora al payload de cada evento (`PAYMENT_RECEIVED`, `ORDER_CREATED`, etc.) (rechazada: duplica datos que ya viven en Supabase y contradice el Principio 2 del AGENTS.md — un mismo dato en dos lugares)
+2. **Leer fecha/hora desde el timeline en el template (elegida):** el pipeline ya las resuelve en `verified`; el template solo debe renderizarlas cuando existan
+
+**Resultado:** En `template.builder.ts` se agregó `getFechaHora(verified)` y la línea `📅 <fecha> <hora>` en los templates `ORDER_CREATED`/`PAYMENT_RECEIVED`/`PAYMENT_CONFIRMED`, `ORDER_UPDATED` y `PAYMENT_PENDING`. Sin fecha/hora la línea se omite. Nuevo test `tests/template-payment.test.mts` (`npm run test:template`).
+
+**Ventajas:** El equipo ve la fecha de entrega sin abrir el dashboard; sin cambios de contrato de eventos ni de esquema; la fecha sigue teniendo una única fuente de verdad (Supabase).
+
+**Desventajas:** Si el pedido aún no tiene fecha/hora registradas, la línea no aparece (correcto: no inventar datos). Los caracteres de fecha requieren escape MarkdownV2 (`-` → `\-`), ya manejado por `esc`.
+
+---
+
 
 

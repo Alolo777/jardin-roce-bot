@@ -112,3 +112,13 @@
 - **Corrección (DEC-071):** `obtenerNumeroReal` normaliza el LID no resoluble con `jidANumero` (quita `@lid` y `:device`); `jidToTelefono` ahora también elimina el sufijo `:dispositivo`. La detección de LID sigue funcionando por longitud (>13 dígitos) en `esLid`/`formatearNumero`.
 - **Pruebas:** `npx tsc --noEmit` 0 errores; `tests/telefono.test.mts` (nuevo, `npm run test:telefono`) cubre LID no resoluble, LID con `:device`, jidToTelefono, esLid y variantesTelefono. Suite completa OK.
 - **Versión donde se corrigió:** 2.1.4
+
+## BUG-012: Precio/fecha no arrastrados a los eventos operativos — Telegram perdía fecha de entrega
+- **Prioridad:** Alta
+- **Estado:** Resuelto (2026-08-04)
+- **Reportado:** 2026-08-04 (diagnóstico de sesión)
+- **Síntomas:** Las notificaciones operativas a Telegram (`PAYMENT_RECEIVED`, `PAYMENT_CONFIRMED`, `ORDER_CREATED`, `ORDER_UPDATED`, `PAYMENT_PENDING`) no mostraban la fecha ni la hora de entrega del pedido. El equipo solo veía producto, precio y sucursal, teniendo que abrir el dashboard para conocer cuándo entregar/preparar el arreglo.
+- **Causa raíz:** Los templates de `template.builder.ts` para "VENTA CERRADA", "PEDIDO APARTADO" y "PAGO PENDIENTE" no renderizaban `verified.fecha`/`verified.hora`, aunque el pipeline ya los proveía desde el timeline (`fecha_entrega`/`hora_entrega` del pedido en Supabase).
+- **Corrección:** Se agregó `getFechaHora(verified)` en `template.builder.ts` y se insertó la línea `📅 <fecha> <hora>` en los templates `ORDER_CREATED`/`PAYMENT_RECEIVED`/`PAYMENT_CONFIRMED`, `ORDER_UPDATED` y `PAYMENT_PENDING`. Si no hay fecha/hora, la línea no se renderiza.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; `tests/template-payment.test.mts` (nuevo, `npm run test:template`) cubre que VENTA CERRADA y PAGO PENDIENTE muestren fecha/hora cuando existen y que no se renderice línea vacía cuando no. Suite completa OK.
+- **Versión donde se corrigió:** 2.1.5

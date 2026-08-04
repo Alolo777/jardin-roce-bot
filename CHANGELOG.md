@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## 2026-08-04
+
+### BUG-012: Precio/fecha no arrastrados a los eventos operativos (v2.1.5)
+
+**Problema:** Las notificaciones operativas de Telegram (`PAYMENT_RECEIVED`, `PAYMENT_CONFIRMED`, `ORDER_CREATED`, `ORDER_UPDATED`, `PAYMENT_PENDING`) mostraban producto, precio y sucursal pero nunca la **fecha/hora de entrega** del pedido. El equipo debía abrir el dashboard para saber cuándo preparar/entregar el arreglo, con riesgo de demoras en pedidos confirmados.
+
+**Causa raíz:** Los templates de `template.builder.ts` no renderizaban `verified.fecha`/`verified.hora`, aunque el pipeline (`notification.engine.ts`) ya los proveía desde el timeline (`fecha_entrega`/`hora_entrega` del pedido en Supabase).
+
+**Solución (código):**
+- `src/notification-engine/template.builder.ts`: nuevo helper `getFechaHora(verified)`; línea `📅 <fecha> <hora>` agregada a los templates `ORDER_CREATED`/`PAYMENT_RECEIVED`/`PAYMENT_CONFIRMED` (VENTA CERRADA), `ORDER_UPDATED` (PEDIDO APARTADO) y `PAYMENT_PENDING` (PAGO PENDIENTE). Si no hay fecha/hora, la línea no se renderiza.
+- `tests/template-payment.test.mts` (nuevo): verifica que VENTA CERRADA y PAGO PENDIENTE muestren fecha/hora cuando existen (con escape MarkdownV2 de `-`) y que no aparezca línea vacía cuando faltan.
+
+**Archivos modificados:** `src/notification-engine/template.builder.ts`, `package.json`, `tests/template-payment.test.mts`
+
+**Pruebas:** `npm run test:template` OK; suite existente (`test:telefono`, `test:horario`, `test:nombre`) OK; `npx tsc --noEmit` 0 errores.
+
+**Impacto:** Compatible. Sin cambios de esquema ni de contrato de eventos (la fecha/hora ya viajaba en `verified`).
+
+**Rollback:** Sí — revertir el commit.
+
+---
+
 ## 2026-08-03
 
 ### Módulo 1: IA multi-proveedor — cuota free tier de gemini-2.5-flash era solo 20/día

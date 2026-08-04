@@ -82,6 +82,13 @@ function getDescripcion(payload: EventPayload): string | null {
   return (payload.descripcion as string | undefined) ?? null
 }
 
+function getFechaHora(verified: DatosVerificados): string | null {
+  if (verified.fecha && verified.hora) return `${verified.fecha} ${verified.hora}`
+  if (verified.fecha) return verified.fecha
+  if (verified.hora) return verified.hora
+  return null
+}
+
 function clienteLine(nombre: string | null, telefono: string): string {
   return nombre ? `${esc(nombre)} — ${formatearNumero(telefono)}` : formatearNumero(telefono)
 }
@@ -98,6 +105,7 @@ function getTemplate(
   const sucursal = getSucursal(verified, payload)
   const metodoPago = getMetodoPago(verified, payload)
   const descripcion = getDescripcion(payload)
+  const fechaHora = getFechaHora(verified)
 
   const header = () => `📱 ${clienteLine(nombre, telefono)}`
 
@@ -110,6 +118,7 @@ function getTemplate(
         header(),
         ...(producto ? [esc(producto)] : []),
         ...(precio ? [`💰 ${esc(precio)}`] : []),
+        ...(fechaHora ? [`📅 ${esc(fechaHora)}`] : []),
         ...(sucursal ? [`📍 ${esc(sucursal)}`] : []),
         ...(metodoPago ? [`💳 ${esc(metodoPago)}`] : []),
         ...(descripcion ? [esc(descripcion)] : []),
@@ -121,6 +130,7 @@ function getTemplate(
         header(),
         ...(producto ? [esc(producto)] : []),
         ...(precio ? [`💰 ${esc(precio)}`] : []),
+        ...(fechaHora ? [`📅 ${esc(fechaHora)}`] : []),
         ...(sucursal ? [`📍 ${esc(sucursal)}`] : []),
         ...(metodoPago ? [`💳 ${esc(metodoPago)}`] : []),
       ].join('\n')
@@ -145,6 +155,7 @@ function getTemplate(
         header(),
         ...(producto ? [esc(producto)] : []),
         ...(precio ? [`💰 ${esc(precio)}`] : []),
+        ...(fechaHora ? [`📅 ${esc(fechaHora)}`] : []),
         ...(sucursal ? [`📍 ${esc(sucursal)}`] : []),
       ].join('\n')
 

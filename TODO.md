@@ -49,6 +49,7 @@
 | #16 — Nombre parser rechaza nombres con "tiene", "listo", "ramo" | ✅ Resuelto: STOP_WORDS y NO_ES_NOMBRE_REGEX corregidos |
 | #17 — IA cae por cuota free tier de gemini-2.5-flash (20/día) y respuestas cortadas | ✅ Resuelto (DEC-070): default gemini-2.5-flash-lite + cadena OpenRouter/Groq/Cerebras + maxOutputTokens 2048/1024 |
 | #18 — Teléfono LID sin normalizar (alerta/pedidos guardaban jid @lid crudo) | ✅ Resuelto (DEC-071): obtenerNumeroReal normaliza con jidANumero + jidToTelefono limpia :dispositivo |
+| #19 — Precio/fecha no arrastrados a eventos operativos de Telegram (sin fecha de entrega) | ✅ Resuelto (DEC-072): template.builder renderiza 📅 fecha/hora en VENTA CERRADA, PEDIDO APARTADO y PAGO PENDIENTE |
 
 ## Fases de Migración (Parte 4.1)
 
