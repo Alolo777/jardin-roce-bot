@@ -2,6 +2,31 @@
 
 ## 2026-08-04
 
+### BUG-014: Proveedor primario Gemini roto — gemini-2.5-flash-lite deprecado (v2.1.7)
+
+**Problema:** Al verificar todas las APIs con el nuevo `npm run check:apis`, Gemini devolvía `404 NOT_FOUND: This model models/gemini-2.5-flash-lite is no longer available to new users`. El proveedor primario del bot (que recibe la mayor carga de respuestas) estaba caído sin que se notara porque el fallback a OpenRouter/Groq cubría las peticiones.
+
+**Causa raíz:** Google deprecó la familia Gemini 2.5 (shutdown 2026-10-16). `gemini-2.5-flash-lite` ya no está disponible para cuentas nuevas. El reemplazo vigente es `gemini-3.1-flash-lite` (verificado OK).
+
+**Solución (código):**
+- `scripts/check-apis.mts` (nuevo): verifica cada API configurada con llamadas mínimas reales — Gemini, OpenRouter, Groq, Cerebras, IA1/IA2 (GitHub Models), Telegram y Supabase. Nuevo script `npm run check:apis`.
+- `lib/ai.ts`: default de `GEMINI_MODEL` → `gemini-3.1-flash-lite`.
+- `.env.local` y `.env.example`: `GEMINI_MODEL=gemini-3.1-flash-lite`.
+
+**Resultado de la verificación (2026-08-04):** ✅ Gemini, OpenRouter, Groq, Telegram, Supabase. ❌ Cerebras (402 = requiere créditos/billing, ya conocido). ❌ IA1/IA2 (404 = GitHub Models retirado; módulos legacy sin uso activo).
+
+**Archivos modificados:** `scripts/check-apis.mts`, `package.json`, `lib/ai.ts`, `.env.local`, `.env.example`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `npm run check:apis` → Gemini ahora responde `OK`.
+
+**Impacto:** Compatible. Restaura el proveedor primario. Requiere actualizar `.env.local` en la VM.
+
+**Rollback:** Sí — revertir el commit (volver a gemini-2.5-flash-lite no funcionará, quedará el bot en fallback).
+
+---
+
+## 2026-08-04
+
 ### BUG-013: ORDER_CREATED con payload incompleto (v2.1.6)
 
 **Problema:** Los eventos `ORDER_CREATED` llegaban sin el payload completo según el punto de emisión: `crearPedido` sin `sucursal`/`metodoPago`, el alerta "comprobante-pendiente" sin `orderId`, y el cotizador web sin `orderId` real ni `metodoPago` (emitía un evento huérfano sin respaldo en DB). Esto privaba al Notification Engine de campos para el Decision Extractor, el Conflict Detector y el Business Rules Validator.

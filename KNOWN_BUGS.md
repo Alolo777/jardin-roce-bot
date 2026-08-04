@@ -132,3 +132,13 @@
 - **Corrección:** (1) `crearPedido` ahora emite con `...buildOrderPayload(pedido)`. (2) `buildOrderPayload` respeta `pedido.descripcion` si existe. (3) El alerta "comprobante-pendiente" incluye `orderId: pedido.id`. (4) El cotizador web crea el pedido con `crearPedido(...)` (producto, total, sucursal, metodoPago transferencia, descripcion), y `crearPedido` emite el evento completo. Sin pedido real no se emite `ORDER_CREATED` huérfano.
 - **Pruebas:** `npx tsc --noEmit` 0 errores; suite aplicable (`test:template`, `test:telefono`, `test:validator`) OK. `test:wire` falla pre-existente (asume contrato antiguo ORDER_UPDATED), no relacionado.
 - **Versión donde se corrigió:** 2.1.6
+
+## BUG-014: Proveedor primario Gemini roto — gemini-2.5-flash-lite deprecado (404)
+- **Prioridad:** Crítica
+- **Estado:** Resuelto (2026-08-04)
+- **Reportado:** 2026-08-04 (verificación `npm run check:apis`)
+- **Síntomas:** El proveedor primario de IA devolvía `404 NOT_FOUND: models/gemini-2.5-flash-lite is no longer available to new users`. Las respuestas dependían del fallback OpenRouter/Groq.
+- **Causa raíz:** Google deprecó la familia Gemini 2.5 (shutdown 2026-10-16). El modelo configurado quedó sin acceso para cuentas nuevas.
+- **Corrección:** `GEMINI_MODEL` por defecto y en `.env*` → `gemini-3.1-flash-lite` (reemplazo oficial, verificado OK). Se creó `scripts/check-apis.mts` (`npm run check:apis`) para verificar todas las APIs de un vistazo.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; `npm run check:apis` → Gemini `OK`.
+- **Versión donde se corrigió:** 2.1.7

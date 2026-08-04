@@ -42,9 +42,10 @@ const geminiClient = process.env.GEMINI_API_KEY
   ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
   : null
 
-// gemini-2.5-flash tiene free tier de ~20 RPD (recortado dic-2025). La opción
-// gratuita con mejor cuota hoy es gemini-2.5-flash-lite (~15 RPM / ~1,000 RPD).
-const GEMINI_MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash-lite'
+// gemini-2.5-flash tiene free tier de ~20 RPD (recortado dic-2025).
+// gemini-2.5-flash-lite quedó DEPRECADO (404, ya no disponible). El modelo
+// gratuito vigente (verificado 2026-08-04) es gemini-3.1-flash-lite.
+const GEMINI_MODEL = process.env.GEMINI_MODEL ?? 'gemini-3.1-flash-lite'
 const GITHUB_MODEL = process.env.GITHUB_MODEL ?? 'gpt-4o-mini'
 
 // Cadena de proveedores OpenAI-compatibles (solo se incluyen los configurados).

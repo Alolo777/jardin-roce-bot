@@ -51,6 +51,7 @@
 | #18 — Teléfono LID sin normalizar (alerta/pedidos guardaban jid @lid crudo) | ✅ Resuelto (DEC-071): obtenerNumeroReal normaliza con jidANumero + jidToTelefono limpia :dispositivo |
 | #19 — Precio/fecha no arrastrados a eventos operativos de Telegram (sin fecha de entrega) | ✅ Resuelto (DEC-072): template.builder renderiza 📅 fecha/hora en VENTA CERRADA, PEDIDO APARTADO y PAGO PENDIENTE |
 | #20 — ORDER_CREATED con payload incompleto (faltaba orderId/sucursal/metodoPago) | ✅ Resuelto (DEC-073): crearPedido usa buildOrderPayload; comprobante-pendiente incluye orderId; cotizador web crea pedido real |
+| #21 — Proveedor primario Gemini roto (gemini-2.5-flash-lite deprecado 404) | ✅ Resuelto (DEC-074): GEMINI_MODEL → gemini-3.1-flash-lite + script npm run check:apis |
 
 ## Fases de Migración (Parte 4.1)
 

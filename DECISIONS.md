@@ -1568,5 +1568,25 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-074: Migrar a gemini-3.1-flash-lite + script `npm run check:apis` (BUG-014)
+
+**Fecha:** 2026-08-04
+**Estado:** Aceptada
+
+**Motivo:** Al verificar todas las APIs, el proveedor primario `gemini-2.5-flash-lite` devolvía 404 (familia Gemini 2.5 deprecada por Google, shutdown 2026-10-16). El bot dependía en silencio del fallback OpenRouter/Groq.
+
+**Alternativas consideradas:**
+1. Dejar el fallback como única vía (rechazada: pierde el proveedor gratuito principal y su cuota)
+2. **Migrar al reemplazo oficial `gemini-3.1-flash-lite` (elegida):** verificado con llamada real (HTTP 200). Es el modelo GA vigente, multimodald y gratuito.
+3. Crear un script `scripts/check-apis.mts` accesible como `npm run check:apis` para detectar caídas de proveedores sin esperar a que falle un caso real (adoptado — observabilidad, regla del AGENTS.md "todo cambio importante genera log/verificación").
+
+**Resultado:** `lib/ai.ts` default → `gemini-3.1-flash-lite`; `.env.local`/`.env.example` actualizados; nuevo script de verificación que prueba Gemini, OpenRouter, Groq, Cerebras, IA1/IA2 y Telegram/Supabase.
+
+**Ventajas:** Proveedor primario restaurado; verificación reproducibles de todas las APIs en un comando; CI-friendly (salida 0/1).
+
+**Desventajas:** Si Google vuelve a cambiar la familia de modelos, hay que revisar `GEMINI_MODEL` de nuevo (mitigado: ahora hay un comando de verificación que lo detecta).
+
+---
+
 
 
