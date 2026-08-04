@@ -1549,5 +1549,24 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-073: ORDER_CREATED siempre con payload completo — un único punto de emisión (BUG-013)
+
+**Fecha:** 2026-08-04
+**Estado:** Aceptada
+
+**Motivo:** Cada emisor de `ORDER_CREATED` armaba su payload manualmente y omitía campos: `crearPedido` sin `sucursal`/`metodoPago`, el alerta "comprobante-pendiente" sin `orderId`, y el cotizador web emitía un evento huérfano sin `orderId` ni respaldo en DB. El Notification Engine (Decision Extractor, Conflict Detector, Business Rules Validator, RR003/RR006) dependía de esos campos para verificar contra la DB.
+
+**Alternativas consideradas:**
+1. Seguir armando payloads inline en cada emisor (rechazada: es lo que producía el bug; duplica lógica)
+2. **Unificar detrás de `buildOrderPayload` y crear el pedido real antes de emitir (elegida):** `crearPedido` emite con `...buildOrderPayload(pedido)`; el alerta incluye `orderId: pedido.id`; el flujo web crea el pedido en el engine con `crearPedido(...)` y deja que ese único punto emita el evento completo. Sin pedido real no se emite `ORDER_CREATED` huérfano.
+
+**Resultado:** `pedido.service.ts` (crearPedido usa buildOrderPayload, buildOrderPayload respeta `pedido.descripcion`), `message-handler.ts` (orderId en comprobante-pendiente), `bot.ts` (cotizador web usa crearPedido), `src/models/types.ts` (`PedidoActual.descripcion?: string` opcional).
+
+**Ventajas:** Un solo punto que arma el payload correcto; cada evento tiene `orderId` con respaldo en DB; el pipeline recibe sucursal/metodoPago para verificar (RR003/RR006); se elimina `ORDER_CREATED` huérfano del flujo web.
+
+**Desventajas:** `PedidoActual` gana un campo opcional `descripcion` (compatible; sin cambios de esquema de DB). El flujo web ahora crea el pedido en el engine, lo que agrega persistencia temprana (deseado: el pedido existe desde el inicio).
+
+---
+
 
 

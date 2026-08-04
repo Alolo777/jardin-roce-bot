@@ -103,7 +103,7 @@ function buildOrderPayload(pedido: PedidoActual): EventPayload {
     total: typeof total === 'number' ? total : 0,
     sucursal: entrega,
     metodoPago: pedido.metodoPago ?? '',
-    descripcion: 'Pedido creado',
+    descripcion: pedido.descripcion ?? 'Pedido creado',
   }
 }
 
@@ -223,11 +223,7 @@ export function crearPedido(clienteId: string, telefono: string, datosIniciales?
   persistir()
 
   eventBus.emit(EventType.ORDER_CREATED, {
-    orderId: pedido.id,
-    telefono: pedido.telefono ?? '',
-    cliente: pedido.nombre ?? '',
-    producto: pedido.productoPersonalizado ?? pedido.arreglo?.nombre ?? 'Por definir',
-    total: pedido.precioPersonalizado ?? pedido.arreglo?.precio ?? 0,
+    ...buildOrderPayload(pedido),
     descripcion: 'Pedido creado',
   })
 

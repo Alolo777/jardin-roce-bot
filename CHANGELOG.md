@@ -2,6 +2,28 @@
 
 ## 2026-08-04
 
+### BUG-013: ORDER_CREATED con payload incompleto (v2.1.6)
+
+**Problema:** Los eventos `ORDER_CREATED` llegaban sin el payload completo según el punto de emisión: `crearPedido` sin `sucursal`/`metodoPago`, el alerta "comprobante-pendiente" sin `orderId`, y el cotizador web sin `orderId` real ni `metodoPago` (emitía un evento huérfano sin respaldo en DB). Esto privaba al Notification Engine de campos para el Decision Extractor, el Conflict Detector y el Business Rules Validator.
+
+**Solución (código):**
+- `src/pedidos/pedido.service.ts`: `crearPedido` emite `ORDER_CREATED` con `...buildOrderPayload(pedido)` (orderId, telefono, cliente, producto, total, sucursal, metodoPago); `buildOrderPayload` usa `pedido.descripcion` si existe.
+- `src/whatsapp/message-handler.ts`: el alerta "comprobante-pendiente" ahora incluye `orderId: pedido.id`.
+- `bot.ts`: el cotizador web crea el pedido real con `crearPedido(...)` (producto, totalWeb, sucursal, metodoPago transferencia, descripcion) en lugar de emitir `ORDER_CREATED` inline huérfano.
+- `src/models/types.ts`: `PedidoActual.descripcion?: string` (campo opcional, compatible).
+
+**Archivos modificados:** `src/pedidos/pedido.service.ts`, `src/whatsapp/message-handler.ts`, `bot.ts`, `src/models/types.ts`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; suite aplicable (`test:template`, `test:telefono`, `test:validator`) OK. `test:wire` falla pre-existente (asume contrato antiguo ORDER_UPDATED), no relacionado.
+
+**Impacto:** Compatible. `PedidoActual.descripcion` es opcional; sin cambios de esquema de DB. Elimina `ORDER_CREATED` huérfano del flujo web.
+
+**Rollback:** Sí — revertir el commit.
+
+---
+
+## 2026-08-04
+
 ### BUG-012: Precio/fecha no arrastrados a los eventos operativos (v2.1.5)
 
 **Problema:** Las notificaciones operativas de Telegram (`PAYMENT_RECEIVED`, `PAYMENT_CONFIRMED`, `ORDER_CREATED`, `ORDER_UPDATED`, `PAYMENT_PENDING`) mostraban producto, precio y sucursal pero nunca la **fecha/hora de entrega** del pedido. El equipo debía abrir el dashboard para saber cuándo preparar/entregar el arreglo, con riesgo de demoras en pedidos confirmados.

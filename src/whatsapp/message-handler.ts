@@ -342,6 +342,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         if (debeEnviarAlertaDedup(clienteId, 'comprobante-pendiente', textoTurno || 'comprobante', 30 * 60_000)) {
           const pedido = deps.pedidoActual(clienteId)
           eventBus.emit(EventType.ORDER_CREATED, {
+            orderId: pedido.id,
             telefono,
             cliente: pedido.nombre ?? 'Verificar en chat',
             producto: pedido.productoPersonalizado ?? 'Verificar en conversación',

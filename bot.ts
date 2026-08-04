@@ -770,9 +770,13 @@ async function procesarPedidoWeb(msg: any): Promise<void> {
 
   const numeroReal = await numeroRealPromise
   console.log(`[bot] 🛒 Pedido cotizador web de ${numeroReal}`)
-  eventBus.emit(EventType.ORDER_CREATED, {
-    telefono: numeroReal, producto: pedido.flores, total: parseFloat(pedido.total.replace(/[^0-9.]/g, '')) || 0,
-    sucursal: pedido.entrega, descripcion: `Pedido web: ${pedido.tamano}, ${pedido.envoltura}${pedido.nota ? ` | Nota: ${pedido.nota}` : ''}`,
+  const totalWeb = parseFloat(pedido.total.replace(/[^0-9.]/g, '')) || 0
+  const pedidoEngine = crearPedido(clienteId, numeroReal, {
+    productoPersonalizado: pedido.flores,
+    precioPersonalizado: totalWeb,
+    sucursal: pedido.entrega,
+    metodoPago: 'transferencia',
+    descripcion: `Pedido web: ${pedido.tamano}, ${pedido.envoltura}${pedido.nota ? ` | Nota: ${pedido.nota}` : ''}`,
   })
 }
 

@@ -122,3 +122,13 @@
 - **Corrección:** Se agregó `getFechaHora(verified)` en `template.builder.ts` y se insertó la línea `📅 <fecha> <hora>` en los templates `ORDER_CREATED`/`PAYMENT_RECEIVED`/`PAYMENT_CONFIRMED`, `ORDER_UPDATED` y `PAYMENT_PENDING`. Si no hay fecha/hora, la línea no se renderiza.
 - **Pruebas:** `npx tsc --noEmit` 0 errores; `tests/template-payment.test.mts` (nuevo, `npm run test:template`) cubre que VENTA CERRADA y PAGO PENDIENTE muestren fecha/hora cuando existen y que no se renderice línea vacía cuando no. Suite completa OK.
 - **Versión donde se corrigió:** 2.1.5
+
+## BUG-013: ORDER_CREATED con payload incompleto — faltaba orderId/sucursal/metodoPago
+- **Prioridad:** Alta
+- **Estado:** Resuelto (2026-08-04)
+- **Reportado:** 2026-08-04 (diagnóstico de sesión)
+- **Síntomas:** Los eventos `ORDER_CREATED` emitidos desde distintos puntos no traían el payload completo. `crearPedido` (pedido.service.ts) emitía un payload inline sin `sucursal` ni `metodoPago`; el alerta "comprobante-pendiente" de `message-handler.ts` no incluía `orderId`; y el pedido del cotizador web (bot.ts) se emitía sin crear el pedido en el engine, por lo que no tenía `orderId` real ni `metodoPago`. Al llegar al Notification Engine, faltaban campos para el Decision Extractor, el Conflict Detector y el Business Rules Validator (RR003/RR006).
+- **Causa raíz:** (1) `crearPedido` no usaba `buildOrderPayload` (que sí arma sucursal + metodoPago). (2) El handler de comprobante-pendiente armaba el payload manual sin `orderId`. (3) El flujo web emitía `ORDER_CREATED` directamente sin crear el pedido, inventando un evento sin respaldo en DB y sin `orderId`/`metodoPago`.
+- **Corrección:** (1) `crearPedido` ahora emite con `...buildOrderPayload(pedido)`. (2) `buildOrderPayload` respeta `pedido.descripcion` si existe. (3) El alerta "comprobante-pendiente" incluye `orderId: pedido.id`. (4) El cotizador web crea el pedido con `crearPedido(...)` (producto, total, sucursal, metodoPago transferencia, descripcion), y `crearPedido` emite el evento completo. Sin pedido real no se emite `ORDER_CREATED` huérfano.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; suite aplicable (`test:template`, `test:telefono`, `test:validator`) OK. `test:wire` falla pre-existente (asume contrato antiguo ORDER_UPDATED), no relacionado.
+- **Versión donde se corrigió:** 2.1.6

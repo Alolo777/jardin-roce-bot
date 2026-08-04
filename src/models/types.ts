@@ -153,6 +153,7 @@ export interface PedidoActual {
   metodoPago?: MetodoPago | string
   nota?: string
   detallesEspeciales?: string
+  descripcion?: string
   fotoReferenciaBase64?: string
   fotoReferenciaMimetype?: string
   fotoReferenciaCaption?: string
