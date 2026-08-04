@@ -70,7 +70,7 @@ const OPENAI_COMPAT_PROVIDERS: OpenAICompatProvider[] = [
     'Cerebras',
     'https://api.cerebras.ai/v1',
     process.env.CEREBRAS_API_KEY,
-    process.env.CEREBRAS_MODEL ?? 'llama-3.3-70b',
+    process.env.CEREBRAS_MODEL ?? 'gpt-oss-120b',
     false
   ),
   crearProviderOpenAI(
