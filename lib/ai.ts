@@ -21,7 +21,8 @@ const geminiClient = process.env.GEMINI_API_KEY
   : null
 
 const GITHUB_MODEL = process.env.GITHUB_MODEL ?? 'gpt-4o-mini'
-const GEMINI_MODEL = process.env.GEMINI_MODEL ?? 'gemini-1.5-flash'
+// Gemini es el proveedor primario. gemini-2.5-flash: free tier ~10 RPM / ~1500 RPD.
+const GEMINI_MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash'
 const REVIEW_MODEL = process.env.GITHUB_REVIEW_MODEL ?? GITHUB_MODEL
 
 // ─── Semáforo global: máximo 3 llamadas concurrentes a la API ───────────────
@@ -76,30 +77,26 @@ export async function withLimit<T>(fn: () => Promise<T>): Promise<T> {
 
 // callWithFallback eliminado — solo usamos GitHub Models
 
-// ─── Wrapper con fallback a Gemini ────────────────────────────────────────────
+// ─── Wrapper con fallback a GitHub Models ────────────────────────────────────
+// GitHub Models fue retirado el 2026-07-30 (endpoints 404/410). Gemini es el
+// proveedor primario; GitHub queda como respaldo por si se reactiva un proveedor.
 async function callWithFallback<T>(
-  githubCall: () => Promise<T>,
   geminiCall: () => Promise<T>,
+  githubCall: () => Promise<T>,
   operacion: string
 ): Promise<T> {
   try {
-    return await githubCall()
+    return await geminiCall()
   } catch (error) {
-    const isAuthError = error instanceof Error && (
-      error.message.includes('401') ||
-      error.message.includes('unauthorized') ||
-      error.message.includes('AuthenticationError')
-    )
-    if (isAuthError && geminiClient) {
-      console.warn(`[ai.ts] ⚠️ GitHub Models 401 en ${operacion} — fallback a Gemini`)
-      try {
-        return await geminiCall()
-      } catch (geminiError) {
-        console.error(`[ai.ts] ❌ Gemini también falló en ${operacion}:`, geminiError)
-        throw error // lanzar error original de GitHub
-      }
+    console.warn(`[ai.ts] ⚠️ Gemini falló en ${operacion} — intentando GitHub Models:`,
+      error instanceof Error ? error.message : error)
+    try {
+      return await githubCall()
+    } catch (githubError) {
+      console.error(`[ai.ts] ❌ GitHub Models también falló en ${operacion}:`,
+        githubError instanceof Error ? githubError.message : githubError)
+      throw error // lanzar el error original de Gemini
     }
-    throw error
   }
 }
 
@@ -475,47 +472,76 @@ export async function clasificarImagenVenta(
     console.time('[ai.ts] Vision classify')
 
     const rawTexto = await (async () => {
-        const body = JSON.stringify({
-          model: REVIEW_MODEL,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: prompt },
-                ...imagenes.slice(0, 2).map(img => ({
-                  type: 'image_url',
-                  image_url: { url: `data:${img.mimetype || 'image/jpeg'};base64,${img.base64}` },
-                })),
-              ],
-            },
-          ],
-          max_tokens: 120,
-          temperature: 0,
-        })
-        const raw = await conRetry(async () => {
-          const controller = new AbortController()
-          const timeoutId = setTimeout(() => controller.abort(), 25_000)
-          try {
-            const res = await fetch('https://models.inference.ai.azure.com/chat/completions', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'api-key': process.env.GITHUB_VISION_TOKEN || process.env.GITHUB_TOKEN! },
-              body,
-              signal: controller.signal,
-            })
-            if (!res.ok) {
-              const errText = await res.text().catch(() => '')
-              throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`)
+        // Gemini primario: soporta imágenes inline (base64) en una sola llamada.
+        const llamarGemini = async (): Promise<string> => {
+          if (!geminiClient) throw new Error('Gemini no configurado')
+          const model = geminiClient.getGenerativeModel({ model: GEMINI_MODEL })
+          const result = await model.generateContent({
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  { text: prompt },
+                  ...imagenes.slice(0, 2).map(img => ({
+                    inlineData: { mimeType: img.mimetype || 'image/jpeg', data: img.base64 },
+                  })),
+                ],
+              },
+            ],
+            generationConfig: { maxOutputTokens: 400, temperature: 0 },
+          })
+          return result.response.text() || ''
+        }
+
+        const llamarGithub = async (): Promise<string> => {
+          const body = JSON.stringify({
+            model: REVIEW_MODEL,
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: prompt },
+                  ...imagenes.slice(0, 2).map(img => ({
+                    type: 'image_url',
+                    image_url: { url: `data:${img.mimetype || 'image/jpeg'};base64,${img.base64}` },
+                  })),
+                ],
+              },
+            ],
+            max_tokens: 120,
+            temperature: 0,
+          })
+          const raw = await conRetry(async () => {
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 25_000)
+            try {
+              const res = await fetch('https://models.inference.ai.azure.com/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'api-key': process.env.GITHUB_VISION_TOKEN || process.env.GITHUB_TOKEN! },
+                body,
+                signal: controller.signal,
+              })
+              if (!res.ok) {
+                const errText = await res.text().catch(() => '')
+                throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`)
+              }
+              return (await res.json()) as { choices: { message: { content: string } }[] }
+            } finally {
+              clearTimeout(timeoutId)
             }
-            return (await res.json()) as { choices: { message: { content: string } }[] }
-          } finally {
-            clearTimeout(timeoutId)
-          }
-        }, 2)
-        return raw.choices?.[0]?.message?.content?.trim() || ''
+          }, 2)
+          return raw.choices?.[0]?.message?.content?.trim() || ''
+        }
+
+        return await callWithFallback(
+          () => conRetry(llamarGemini, 3),
+          llamarGithub,
+          'clasificarImagenVenta'
+        )
       })()
     console.timeEnd('[ai.ts] Vision classify')
 
-    const parsed = JSON.parse(rawTexto) as { tipo?: string; razon?: string }
+    const parsed = JSON.parse(extraerJsonObjeto(rawTexto)) as { tipo?: string; razon?: string }
     const tipo = parsed.tipo === 'comprobante' || parsed.tipo === 'referencia' || parsed.tipo === 'otra' || parsed.tipo === 'incierto'
       ? parsed.tipo
       : 'incierto'
@@ -554,6 +580,12 @@ export async function clasificarConversacion(
   try {
     const rawJson = await callWithFallback(
       async () => {
+        if (!geminiClient) throw new Error('Gemini no configurado')
+        const model = geminiClient.getGenerativeModel({ model: GEMINI_MODEL })
+        const result = await conRetry(() => model.generateContent(prompt), 3)
+        return result.response.text() || ''
+      },
+      async () => {
         const completion = await conRetry(async () => {
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 10_000)
@@ -572,12 +604,6 @@ export async function clasificarConversacion(
           }
         }, 2)
         return completion.choices[0]?.message?.content || ''
-      },
-      async () => {
-        if (!geminiClient) throw new Error('Gemini no configurado')
-        const model = geminiClient.getGenerativeModel({ model: GEMINI_MODEL })
-        const result = await model.generateContent(prompt)
-        return result.response.text() || ''
       },
       'clasificarConversacion'
     )
@@ -634,6 +660,12 @@ export async function revisarRespuestaFlora(
   try {
     const rawJson = await callWithFallback(
       async () => {
+        if (!geminiClient) throw new Error('Gemini no configurado')
+        const model = geminiClient.getGenerativeModel({ model: GEMINI_MODEL })
+        const result = await conRetry(() => model.generateContent(prompt), 3)
+        return result.response.text() || ''
+      },
+      async () => {
         const completion = await conRetry(async () => {
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 12_000)
@@ -652,12 +684,6 @@ export async function revisarRespuestaFlora(
           }
         }, 2)
         return completion.choices[0]?.message?.content || ''
-      },
-      async () => {
-        if (!geminiClient) throw new Error('Gemini no configurado')
-        const model = geminiClient.getGenerativeModel({ model: GEMINI_MODEL })
-        const result = await model.generateContent(prompt)
-        return result.response.text() || ''
       },
       'revisarRespuestaFlora'
     )
@@ -696,6 +722,27 @@ export async function getAIResponse(
     const inicioIA = Date.now()
     const respuestaRaw = await callWithFallback(
       async () => {
+        if (!geminiClient) throw new Error('Gemini no configurado')
+        const model = geminiClient.getGenerativeModel({ model: GEMINI_MODEL })
+        const historyParts: { role: 'user' | 'model'; parts: { text: string }[] }[] =
+          historial.map(m => ({
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: m.content }],
+          }))
+        // generateContent requiere al menos un turno de usuario; si no hay historial,
+        // enviamos un saludo vacío para que el system prompt responda.
+        const contents = historyParts.length > 0
+          ? historyParts
+          : [{ role: 'user' as const, parts: [{ text: 'Hola' }] }]
+        const resultContent = await conRetry(() => model.generateContent({
+          systemInstruction: systemPromptFinal,
+          contents,
+          generationConfig: { maxOutputTokens: 800, temperature: 0.7 },
+        }), 3)
+        const texto = resultContent.response.text() || ''
+        return texto.trim().length > 0 ? texto : 'Lo siento, no pude procesar tu mensaje. ¿Puedes repetirlo? 🌸'
+      },
+      async () => {
         const completion = await conRetry(async () => {
           const controller = new AbortController()
           const timeoutId  = setTimeout(() => controller.abort(), 15_000)
@@ -720,21 +767,6 @@ export async function getAIResponse(
         return contenido && contenido.length > 0
           ? contenido
           : 'Lo siento, no pude procesar tu mensaje. ¿Puedes repetirlo? 🌸'
-      },
-      async () => {
-        if (!geminiClient) throw new Error('Gemini no configurado')
-        const model = geminiClient.getGenerativeModel({ model: GEMINI_MODEL })
-        // Gemini usa formato diferente: system prompt + history como contenido
-        const chat = model.startChat({
-          history: historial.map(m => ({
-            role: m.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: m.content }]
-          })),
-          generationConfig: { maxOutputTokens: 800, temperature: 0.7 },
-        })
-        // System prompt como primer mensaje de usuario (Gemini no tiene system role)
-        const result = await chat.sendMessage(`${systemPromptFinal}\n\n---\n${historial[historial.length - 1]?.content || ''}`)
-        return result.response.text() || 'Lo siento, no pude procesar tu mensaje. ¿Puedes repetirlo? 🌸'
       },
       'getAIResponse'
     )

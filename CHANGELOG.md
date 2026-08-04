@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## 2026-08-03
+
+### Migración IA a Gemini — GitHub Models retirado (v2.1.2)
+
+**Problema:** Toda la IA del bot estaba caída. GitHub Models fue retirado el 2026-07-30; los endpoints daban 404/410. Los tokens seguían válidos en `api.github.com` pero ninguna llamada a modelo funcionaba.
+
+**Solución (código):**
+- `lib/ai.ts`: `callWithFallback` invertido — **Gemini es primario**, GitHub queda solo como respaldo. Antes solo caía a Gemini en errores 401, por lo que 404/410 dejaban el sistema sin IA.
+- Modelo por defecto: `GEMINI_MODEL = gemini-2.5-flash` (antes `gemini-1.5-flash`, que ya no existe).
+- Visión (`clasificarImagenVenta`): migrada de `models.inference.ai.azure.com` a `generateContent` con imágenes inline base64; `maxOutputTokens` subido a 400 (120 truncaba el JSON con Gemini 2.5); parseo usa `extraerJsonObjeto`.
+- `getAIResponse`: el branch Gemini usa `generateContent` + `systemInstruction` (antes `startChat` duplicaba el último mensaje).
+- Todas las llamadas primarias a Gemini envueltas en `conRetry` (3 intentos) para tolerar 503/429 temporales.
+
+**Archivos modificados:** `lib/ai.ts`, `.env.example`
+
+**Impacto:** Compatible. `tsc --noEmit` 0 errores. Pruebas live con key real: clasificación, respuesta y visión OK. Requiere `git pull` en la VM + `sudo systemctl restart floreria-bot`.
+
+**Rollback:** Sí — revertir el commit.
+
+---
+
 ## 2026-08-01
 
 ### Hotfix: conexión WhatsApp 405 (versión de protocolo obsoleta)

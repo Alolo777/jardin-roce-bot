@@ -81,3 +81,13 @@
 - **Causa raíz:** WhatsApp dejó de aceptar la versión de protocolo de WhatsApp Web hardcodeada en Baileys 7.0.0-rc13. makeWASocket() se llamaba sin ersion, usando la obsoleta por defecto → 405 en el handshake WebSocket, antes del registro/QR.
 - **Corrección:** obtenerVersionWhatsApp() en ot.ts obtiene la versión actual vía etchLatestBaileysVersion() → fallback etchLatestWaWebVersion() → fallback fijo [2, 3000, 1037641644], y se pasa ersion a makeWASocket. Versión cacheada.
 - **Versión donde se corrigió:** 2.1.1
+
+## BUG-009: IA no funciona — GitHub Models retirado (404/410)
+- **Prioridad:** Crítica
+- **Estado:** Resuelto (2026-08-03)
+- **Reportado:** 2026-08-01
+- **Síntomas:** Todos los mensajes de clientes fallaban en el motor de IA (sin respuesta o fallback). Los 4 tokens (1 `ghp_`, 3 `github_pat_`) eran válidos en `api.github.com` (HTTP 200) pero las llamadas a modelos daban 404 (`models.inference.ai.azure.com/chat/completions`) o 410 (`models.github.ai/inference/chat/completions`).
+- **Causa raíz:** GitHub Models fue retirado oficialmente el 2026-07-30 (docs: "GitHub Models has been fully retired... inference API... no longer available"). El endpoint Azure se deprecó 2025-07-17 y se retiró 2025-10-17. `lib/ai.ts`, `order.reconstructor.ts` y `order.auditor.ts` apuntaban todos al servicio muerto. NO era problema de tokens, concurrencia ni límites.
+- **Corrección (DEC-049):** Gemini pasa a ser el proveedor primario en `lib/ai.ts` (`callWithFallback` invertido: Gemini primero, GitHub como respaldo). Modelo por defecto `gemini-2.5-flash` (free tier ~10 RPM / ~1500 RPD). Visión (`clasificarImagenVenta`) migrada a `generateContent` con imágenes inline base64 + `conRetry` (3 intentos) para tolerar 503/429. `getAIResponse` usa `generateContent` con `systemInstruction` (ya no duplica el último mensaje). Todas las llamadas Gemini primarias envueltas en `conRetry`.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; tests `test:validator`, `test:horario`, `test:nombre`, `test:inventario`, `test:reclamaciones`, `test:flows` OK (`test:wire` falla pre-existente, no relacionado); pruebas live con la key real: clasificación, respuesta al cliente y visión (comprobante) exitosas.
+- **Versión donde se corrigió:** 2.1.2

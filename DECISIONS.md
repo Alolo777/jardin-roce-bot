@@ -1469,3 +1469,23 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-069: Migración del proveedor de IA a Gemini (GitHub Models retirado)
+
+**Fecha:** 2026-08-03
+**Estado:** Aceptada
+
+**Motivo:** Toda la IA del bot dejó de funcionar. GitHub Models fue retirado oficialmente el 2026-07-30 (docs: "GitHub Models has been fully retired... inference API... no longer available"). Los endpoints daban 404 (`models.inference.ai.azure.com/chat/completions`) o 410 (`models.github.ai/inference/chat/completions`). Los 4 tokens seguían válidos en `api.github.com` (login `cantedavid00-afk`) pero ninguna llamada a modelo funcionaba. `lib/ai.ts` intentaba GitHub primero y solo caía a Gemini en errores 401, por lo que 404/410 dejaban el sistema sin IA.
+
+**Alternativas consideradas:**
+1. Reactivar GitHub Models (rechazada: el servicio está retirado, no es un problema de tokens/concurrencia/límites)
+2. Cambiar `IA1_BASE_URL`/`IA2_BASE_URL` a otro proveedor compatible con OpenAI SDK (rechazada: agrega dependencias y cuentas nuevas; Gemini ya tiene key válida)
+3. **Gemini primario, GitHub como respaldo (elegida):** invertir `callWithFallback`, migrar visión y chat a `generateContent` con imágenes inline, dejar GitHub únicamente como fallback por si algún proveedor vuelve
+
+**Resultado:** `callWithFallback` invertido (Gemini primero, GitHub respaldo). Modelo por defecto `gemini-2.5-flash` (free tier ~10 RPM / ~1,500 RPD / 250K TPM — suficiente para ~5 clientes concurrentes cada 10 min). Visión migrada con `maxOutputTokens: 400` (120 truncaba el JSON de Gemini 2.5) y parseo con `extraerJsonObjeto`. `getAIResponse` usa `generateContent` + `systemInstruction` (elimina la duplicación del último mensaje de `startChat`). Todas las llamadas primarias de Gemini envueltas en `conRetry` (3 intentos, backoff) para tolerar 503/429. `.env.example` actualizado: Gemini como principal, GitHub y IA1/IA2 comentados como retirados.
+
+**Ventajas:** Sin dependencias nuevas (usa `@google/generative-ai` ya instalado); key de Gemini validada (HTTP 200 en `listModels` y `generateContent`); tráfico del negocio muy por debajo de los límites free tier; fallback conservado por compatibilidad futura.
+
+**Desventajas:** Free tier de Google puede usar los prompts para entrenamiento (términos de Gemini); el semáforo `MAX_CONCURRENT=3` limita la concurrencia (mitigado: suficiente para el volumen actual); `order.reconstructor.ts` y `order.auditor.ts` siguen apuntando a GitHub Models pero son código muerto (no se importan).
+
+---
+
