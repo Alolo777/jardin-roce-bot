@@ -47,6 +47,7 @@
 | #14 — No existe Response Validator para LLM | ✅ Resuelto (DEC-050): response.validator.ts creado e integrado |
 | #15 — Código de envío duplicado en message-handler.ts y envio.validator.ts | ✅ Resuelto: Eliminadas duplicaciones, ahora usa imports |
 | #16 — Nombre parser rechaza nombres con "tiene", "listo", "ramo" | ✅ Resuelto: STOP_WORDS y NO_ES_NOMBRE_REGEX corregidos |
+| #17 — IA cae por cuota free tier de gemini-2.5-flash (20/día) y respuestas cortadas | ✅ Resuelto (DEC-070): default gemini-2.5-flash-lite + cadena OpenRouter/Groq/Cerebras + maxOutputTokens 2048/1024 |
 
 ## Fases de Migración (Parte 4.1)
 

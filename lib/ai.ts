@@ -2,6 +2,7 @@
 // Motor de IA con prompt dinámico, detección de venta y parseo de token
 
 import OpenAI from 'openai'
+import type { ChatCompletionContentPart } from 'openai/resources/chat/completions'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { supabaseAdmin } from './supabase'
 import { eventBus } from '../src/events/event-bus'
@@ -9,21 +10,77 @@ import { EventType } from '../src/events/types'
 import { metrics } from './metrics.service'
 import type { AIResponse, VentaCerrada } from './types'
 
-// ─── Cliente GitHub Models (primario) ─────────────────────────────────────────
-const githubClient = new OpenAI({
-  baseURL: 'https://models.inference.ai.azure.com',
-  apiKey: process.env.GITHUB_TOKEN,
-})
+// ─── Proveedores OpenAI-compatibles (fallback en cadena) ────────────────────
+// Cada proveedor tiene SU PROPIA cuota diaria independiente. Al repartir las
+// tareas de IA entre varios proveedores/modelos, se multiplica la capacidad
+// total del sistema (las cuotas de Gemini se aplican por modelo + proyecto).
+// Orden de fallback: Gemini (primario) → OpenRouter → Groq → Cerebras → GitHub.
+interface OpenAICompatProvider {
+  name: string
+  client: OpenAI | null
+  model: string
+  soportaVision: boolean
+}
 
-// ─── Cliente Gemini (fallback) ────────────────────────────────────────────────
+function crearProviderOpenAI(
+  name: string,
+  baseURL: string,
+  apiKey: string | undefined,
+  model: string,
+  soportaVision: boolean
+): OpenAICompatProvider {
+  return {
+    name,
+    client: apiKey ? new OpenAI({ baseURL, apiKey }) : null,
+    model,
+    soportaVision,
+  }
+}
+
+// ─── Cliente Gemini (primario) ───────────────────────────────────────────────
 const geminiClient = process.env.GEMINI_API_KEY
   ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
   : null
 
+// gemini-2.5-flash tiene free tier de ~20 RPD (recortado dic-2025). La opción
+// gratuita con mejor cuota hoy es gemini-2.5-flash-lite (~15 RPM / ~1,000 RPD).
+const GEMINI_MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash-lite'
 const GITHUB_MODEL = process.env.GITHUB_MODEL ?? 'gpt-4o-mini'
-// Gemini es el proveedor primario. gemini-2.5-flash: free tier ~10 RPM / ~1500 RPD.
-const GEMINI_MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash'
-const REVIEW_MODEL = process.env.GITHUB_REVIEW_MODEL ?? GITHUB_MODEL
+
+// Cadena de proveedores OpenAI-compatibles (solo se incluyen los configurados).
+// OpenRouter: 20 RPM / 50 RPD free (1000 RPD con $10 de créditos).
+// Groq: 30 RPM / 1,000 RPD free (llama-3.3-70b). Cerebras: ~1M tokens/día free.
+// GitHub Models: retirado desde 2026-07-30, se conserva como último respaldo.
+const OPENAI_COMPAT_PROVIDERS: OpenAICompatProvider[] = [
+  crearProviderOpenAI(
+    'OpenRouter',
+    'https://openrouter.ai/api/v1',
+    process.env.OPENROUTER_API_KEY,
+    process.env.OPENROUTER_MODEL ?? 'openrouter/free',
+    true
+  ),
+  crearProviderOpenAI(
+    'Groq',
+    'https://api.groq.com/openai/v1',
+    process.env.GROQ_API_KEY,
+    process.env.GROQ_MODEL ?? 'llama-3.3-70b-versatile',
+    false
+  ),
+  crearProviderOpenAI(
+    'Cerebras',
+    'https://api.cerebras.ai/v1',
+    process.env.CEREBRAS_API_KEY,
+    process.env.CEREBRAS_MODEL ?? 'llama-3.3-70b',
+    false
+  ),
+  crearProviderOpenAI(
+    'GitHub Models',
+    'https://models.inference.ai.azure.com',
+    process.env.GITHUB_TOKEN,
+    process.env.GITHUB_MODEL ?? 'gpt-4o-mini',
+    false
+  ),
+]
 
 // ─── Semáforo global: máximo 3 llamadas concurrentes a la API ───────────────
 // GitHub Models/Azure permite ~3 por cuenta; 3 evita colas cuando NotifEngine + bot actúan juntos
@@ -75,28 +132,35 @@ export async function withLimit<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-// callWithFallback eliminado — solo usamos GitHub Models
+// ─── Wrapper con cadena de proveedores OpenAI-compatibles ────────────────────
+// Gemini es el proveedor primario. Si falla (429 por cuota, 5xx, timeout), se
+// recorre la cadena de proveedores OpenAI-compatibles configurados en orden
+// (OpenRouter → Groq → Cerebras → GitHub). Cada proveedor tiene su propia cuota
+// diaria, por lo que repartir las tareas entre varios multiplica la capacidad.
+type LlamadaOpenAICompat<T> = (provider: OpenAICompatProvider) => Promise<T>
 
-// ─── Wrapper con fallback a GitHub Models ────────────────────────────────────
-// GitHub Models fue retirado el 2026-07-30 (endpoints 404/410). Gemini es el
-// proveedor primario; GitHub queda como respaldo por si se reactiva un proveedor.
 async function callWithFallback<T>(
   geminiCall: () => Promise<T>,
-  githubCall: () => Promise<T>,
-  operacion: string
+  openAICall: LlamadaOpenAICompat<T>,
+  operacion: string,
+  requiereVision: boolean = false
 ): Promise<T> {
   try {
     return await geminiCall()
   } catch (error) {
-    console.warn(`[ai.ts] ⚠️ Gemini falló en ${operacion} — intentando GitHub Models:`,
+    console.warn(`[ai.ts] ⚠️ Gemini falló en ${operacion} — intentando proveedores OpenAI-compatibles:`,
       error instanceof Error ? error.message : error)
-    try {
-      return await githubCall()
-    } catch (githubError) {
-      console.error(`[ai.ts] ❌ GitHub Models también falló en ${operacion}:`,
-        githubError instanceof Error ? githubError.message : githubError)
-      throw error // lanzar el error original de Gemini
+    for (const provider of OPENAI_COMPAT_PROVIDERS) {
+      if (!provider.client) continue
+      if (requiereVision && !provider.soportaVision) continue
+      try {
+        return await openAICall(provider)
+      } catch (provError) {
+        console.warn(`[ai.ts] ❌ ${provider.name} falló en ${operacion}:`,
+          provError instanceof Error ? provError.message : provError)
+      }
     }
+    throw error // lanzar el error original de Gemini
   }
 }
 
@@ -488,55 +552,47 @@ export async function clasificarImagenVenta(
                 ],
               },
             ],
-            generationConfig: { maxOutputTokens: 400, temperature: 0 },
+            generationConfig: { maxOutputTokens: 1024, temperature: 0 },
           })
           return result.response.text() || ''
         }
 
-        const llamarGithub = async (): Promise<string> => {
-          const body = JSON.stringify({
-            model: REVIEW_MODEL,
-            messages: [
-              {
-                role: 'user',
-                content: [
-                  { type: 'text', text: prompt },
-                  ...imagenes.slice(0, 2).map(img => ({
-                    type: 'image_url',
-                    image_url: { url: `data:${img.mimetype || 'image/jpeg'};base64,${img.base64}` },
-                  })),
-                ],
-              },
-            ],
-            max_tokens: 120,
-            temperature: 0,
-          })
-          const raw = await conRetry(async () => {
+        // Proveedores OpenAI-compatibles (OpenRouter soporta visión).
+        const llamarOpenAICompat = async (provider: OpenAICompatProvider): Promise<string> => {
+          if (!provider.client) throw new Error(`${provider.name} no configurado`)
+          const content: ChatCompletionContentPart[] = [
+            { type: 'text', text: prompt },
+            ...imagenes.slice(0, 2).map(img => ({
+              type: 'image_url' as const,
+              image_url: { url: `data:${img.mimetype || 'image/jpeg'};base64,${img.base64}` },
+            })),
+          ]
+          const completion = await conRetry(async () => {
             const controller = new AbortController()
             const timeoutId = setTimeout(() => controller.abort(), 25_000)
             try {
-              const res = await fetch('https://models.inference.ai.azure.com/chat/completions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'api-key': process.env.GITHUB_VISION_TOKEN || process.env.GITHUB_TOKEN! },
-                body,
-                signal: controller.signal,
-              })
-              if (!res.ok) {
-                const errText = await res.text().catch(() => '')
-                throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`)
-              }
-              return (await res.json()) as { choices: { message: { content: string } }[] }
+              const res = await provider.client!.chat.completions.create(
+                {
+                  model: provider.model,
+                  messages: [{ role: 'user', content }],
+                  max_tokens: 1024,
+                  temperature: 0,
+                },
+                { signal: controller.signal }
+              )
+              return res.choices[0]?.message?.content?.trim() || ''
             } finally {
               clearTimeout(timeoutId)
             }
           }, 2)
-          return raw.choices?.[0]?.message?.content?.trim() || ''
+          return completion
         }
 
         return await callWithFallback(
           () => conRetry(llamarGemini, 3),
-          llamarGithub,
-          'clasificarImagenVenta'
+          llamarOpenAICompat,
+          'clasificarImagenVenta',
+          true
         )
       })()
     console.timeEnd('[ai.ts] Vision classify')
@@ -585,16 +641,17 @@ export async function clasificarConversacion(
         const result = await conRetry(() => model.generateContent(prompt), 3)
         return result.response.text() || ''
       },
-      async () => {
+      async (provider: OpenAICompatProvider) => {
+        if (!provider.client) throw new Error(`${provider.name} no configurado`)
         const completion = await conRetry(async () => {
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 10_000)
           try {
-            return await githubClient.chat.completions.create(
+            return await provider.client!.chat.completions.create(
               {
-                model: REVIEW_MODEL,
+                model: provider.model,
                 messages: [{ role: 'user', content: prompt }],
-                max_tokens: 220,
+                max_tokens: 1024,
                 temperature: 0,
               },
               { signal: controller.signal }
@@ -665,16 +722,17 @@ export async function revisarRespuestaFlora(
         const result = await conRetry(() => model.generateContent(prompt), 3)
         return result.response.text() || ''
       },
-      async () => {
+      async (provider: OpenAICompatProvider) => {
+        if (!provider.client) throw new Error(`${provider.name} no configurado`)
         const completion = await conRetry(async () => {
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 12_000)
           try {
-            return await githubClient.chat.completions.create(
+            return await provider.client!.chat.completions.create(
               {
-                model: REVIEW_MODEL,
+                model: provider.model,
                 messages: [{ role: 'user', content: prompt }],
-                max_tokens: 350,
+                max_tokens: 1024,
                 temperature: 0,
               },
               { signal: controller.signal }
@@ -737,24 +795,25 @@ export async function getAIResponse(
         const resultContent = await conRetry(() => model.generateContent({
           systemInstruction: systemPromptFinal,
           contents,
-          generationConfig: { maxOutputTokens: 800, temperature: 0.7 },
+          generationConfig: { maxOutputTokens: 2048, temperature: 0.7 },
         }), 3)
         const texto = resultContent.response.text() || ''
         return texto.trim().length > 0 ? texto : 'Lo siento, no pude procesar tu mensaje. ¿Puedes repetirlo? 🌸'
       },
-      async () => {
+      async (provider: OpenAICompatProvider) => {
+        if (!provider.client) throw new Error(`${provider.name} no configurado`)
         const completion = await conRetry(async () => {
           const controller = new AbortController()
           const timeoutId  = setTimeout(() => controller.abort(), 15_000)
           try {
-            return await githubClient.chat.completions.create(
+            return await provider.client!.chat.completions.create(
               {
-                model: REVIEW_MODEL,
+                model: provider.model,
                 messages: [
                   { role: 'system', content: systemPromptFinal },
                   ...historial,
                 ],
-                max_tokens: 800,
+                max_tokens: 2048,
                 temperature: 0.7,
               },
               { signal: controller.signal }

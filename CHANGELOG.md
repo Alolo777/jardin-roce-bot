@@ -2,6 +2,31 @@
 
 ## 2026-08-03
 
+### Módulo 1: IA multi-proveedor — cuota free tier de gemini-2.5-flash era solo 20/día
+
+**Problema:** El bot volvió a caer el 2026-08-04 (04:13–04:51). Gemini respondió `429 Quota exceeded — generate_content_free_tier_requests, limit: 20, model: gemini-2.5-flash`. El free tier de `gemini-2.5-flash` fue recortado por Google a ~20 peticiones/día (dic-2025), no ~1500 como asumía el `.env.example`. El fallback a GitHub Models devolvió 401 (tokens retirados). Adicionalmente, `maxOutputTokens: 800` truncaba respuestas largas del cliente ("El pago es…").
+
+**Verificación (2026-08-03):** `gemini-2.0-flash` está descontinuado (1-jun-2026). Opciones gratuitas vigentes: `gemini-2.5-flash-lite` (~15 RPM / ~1,000 RPD), OpenRouter (20 RPM / 50 RPD, 1,000 con $10), Groq (30 RPM / 1,000 RPD), Cerebras (~1M tokens/día). Las cuotas de Gemini son por modelo + proyecto; repartir tareas entre proveedores distintos multiplica la capacidad diaria.
+
+**Solución (código):**
+- `lib/ai.ts`: proveedor primario por defecto `gemini-2.5-flash` → `gemini-2.5-flash-lite` (configurable con `GEMINI_MODEL`).
+- Nueva cadena de proveedores OpenAI-compatibles como fallback en orden: **OpenRouter → Groq → Cerebras → GitHub Models** (retirado, último respaldo). Cada uno con su propia cuota diaria independiente. Solo se usan los proveedores con API key configurada.
+- `callWithFallback` reescrito para recorrer la cadena en lugar de un único fallback a GitHub.
+- `clasificarImagenVenta` (visión): usa la cadena de proveedores; solo OpenRouter participa (soporta visión); `maxOutputTokens` 400 → 1024 (evita JSON truncado).
+- `getAIResponse`: `maxOutputTokens` 800 → 2048 (corrige respuestas cortadas); usa cadena de proveedores.
+- `clasificarConversacion` / `revisarRespuestaFlora`: usan cadena de proveedores (sin lógica específica de GitHub).
+- Eliminado código muerto: `githubClient`, `REVIEW_MODEL`, fetch manual de GitHub vision.
+
+**Archivos modificados:** `lib/ai.ts`, `.env.example`
+
+**Impacto:** Compatible. `tsc --noEmit` 0 errores. Tests locales OK (flows, nombre, validator, horario, inventario, reclamaciones). Requiere agregar al menos una API key de fallback en `.env.local` (OpenRouter/Groq/Cerebras) en la VM + `sudo systemctl restart floreria-bot`.
+
+**Rollback:** Sí — revertir el commit.
+
+---
+
+## 2026-08-03
+
 ### Migración IA a Gemini — GitHub Models retirado (v2.1.2)
 
 **Problema:** Toda la IA del bot estaba caída. GitHub Models fue retirado el 2026-07-30; los endpoints daban 404/410. Los tokens seguían válidos en `api.github.com` pero ninguna llamada a modelo funcionaba.

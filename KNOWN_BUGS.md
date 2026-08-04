@@ -91,3 +91,14 @@
 - **Corrección (DEC-049):** Gemini pasa a ser el proveedor primario en `lib/ai.ts` (`callWithFallback` invertido: Gemini primero, GitHub como respaldo). Modelo por defecto `gemini-2.5-flash` (free tier ~10 RPM / ~1500 RPD). Visión (`clasificarImagenVenta`) migrada a `generateContent` con imágenes inline base64 + `conRetry` (3 intentos) para tolerar 503/429. `getAIResponse` usa `generateContent` con `systemInstruction` (ya no duplica el último mensaje). Todas las llamadas Gemini primarias envueltas en `conRetry`.
 - **Pruebas:** `npx tsc --noEmit` 0 errores; tests `test:validator`, `test:horario`, `test:nombre`, `test:inventario`, `test:reclamaciones`, `test:flows` OK (`test:wire` falla pre-existente, no relacionado); pruebas live con la key real: clasificación, respuesta al cliente y visión (comprobante) exitosas.
 - **Versión donde se corrigió:** 2.1.2
+
+## BUG-010: IA cae por cuota free tier de gemini-2.5-flash (solo 20 peticiones/día)
+- **Prioridad:** Crítica
+- **Estado:** Resuelto (2026-08-03, DEC-070)
+- **Reportado:** 2026-08-04 (log de producción 04:13–04:51)
+- **Síntomas:** El bot dejó de responder con IA a mitad de una conversación. Log: `429 Too Many Requests — Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-2.5-flash` + `retryDelay: 21s`. El fallback a GitHub Models devolvió 401. Se emitieron `PROVIDER_FAILURE` y `HUMAN_REQUIRED [TIMEOUT IA]`. Además, las respuestas del cliente llegaban cortadas ("Para envíos a domicilio, el pago es…").
+- **Causa raíz:** El free tier de `gemini-2.5-flash` fue recortado por Google a ~20 peticiones/día (dic-2025), no ~1500 como asumía DEC-069/.env. Cada mensaje dispara varias llamadas IA (`getAIResponse` + visión + clasificación), por lo que 20 se agotan en minutos. `maxOutputTokens: 800` en `getAIResponse` no alcanzaba porque 2.5-flash consume tokens de razonamiento contra el mismo tope → respuesta visible truncada. El fix de visión (`maxOutputTokens: 400`) no llegó a producción (no se commiteó).
+- **Corrección (DEC-070):** proveedor primario por defecto `gemini-2.5-flash-lite` (~15 RPM / ~1,000 RPD); cadena de fallback OpenAI-compatible OpenRouter → Groq → Cerebras → GitHub con cuotas independientes; `maxOutputTokens`: chat 800 → 2048, visión 400 → 1024; eliminado `githubClient`/`REVIEW_MODEL` muertos.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; tests `test:flows`, `test:nombre`, `test:validator`, `test:horario`, `test:inventario`, `test:reclamaciones` OK.
+- **Pendiente:** Agregar al menos una API key de fallback (OpenRouter/Groq/Cerebras) en `.env.local` de la VM.
+- **Versión donde se corrigió:** 2.1.3

@@ -1489,3 +1489,26 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-070: IA multi-proveedor con cuotas independientes (fallback en cadena)
+
+**Fecha:** 2026-08-03
+**Estado:** Aceptada
+
+**Motivo:** La suposición de DEC-069 era incorrecta: el free tier de `gemini-2.5-flash` **no es** ~10 RPM / ~1,500 RPD. Google lo recortó a ~20 peticiones/día (dic-2025). El 2026-08-04 el bot agotó la cuota en ~40 minutos (`429 generate_content_free_tier_requests, limit: 20, model: gemini-2.5-flash`) y el fallback a GitHub Models devolvió 401. Además `maxOutputTokens: 800` truncaba respuestas largas del cliente.
+
+**Alternativas consideradas:**
+1. Mantener solo Gemini 2.5-flash (rechazada: 20 RPD no cubre una sola conversación real de ~15 mensajes con 3 llamadas IA c/u)
+2. Migrar a `gemini-2.0-flash` (rechazada: descontinuado el 1-jun-2026)
+3. **Multi-proveedor en cadena (elegida):** Gemini primario con `gemini-2.5-flash-lite` (~15 RPM / ~1,000 RPD) + fallback a proveedores OpenAI-compatibles (OpenRouter → Groq → Cerebras → GitHub), cada uno con cuota diaria propia
+4. Activar billing de Google (rechazada por ahora: el usuario prefiere free tier con varios proveedores)
+
+**Resultado:** `lib/ai.ts` define la cadena `OPENAI_COMPAT_PROVIDERS` (solo los proveedores con API key configurada). `callWithFallback` recorre la cadena en orden si Gemini falla. `GEMINI_MODEL` por defecto `gemini-2.5-flash-lite`. `maxOutputTokens`: chat 800 → 2048, visión 400 → 1024. Eliminado `githubClient`, `REVIEW_MODEL` y el fetch manual de visión de GitHub. `.env.example` documenta `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY` como opcionales.
+
+**Ventajas:** Cuota diaria total = suma de cuotas de cada proveedor configurado; tolera 429/5xx de cualquiera de ellos; OpenRouter agrega visión (Gemini Flash free); cero costo y sin tarjeta.
+
+**Desventajas:** Requiere crear cuentas en los proveedores de fallback y configurar las keys en `.env.local`; modelos de fallback (Llama 3.3 70B) pueden tener tono menos afinado que Gemini para venta floral.
+
+---
+
+
+
