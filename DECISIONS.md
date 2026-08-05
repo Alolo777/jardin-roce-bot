@@ -1608,5 +1608,25 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-076: El historial enviado al LLM incluye fecha y hora por mensaje (v2.1.9)
+
+**Fecha:** 2026-08-04
+**Estado:** Aceptada
+
+**Motivo:** El historial enviado a `getAIResponse` descartaba el timestamp (`creado_en`) de cada mensaje. El LLM leía frases relativas ("mañana", "a las 9") sin saber cuándo se escribieron. Caso real: un cliente pidió entrega "mañana a las 9" (día anterior) y el día de la entrega pidió "mejor a las 6"; el bot respondió confirmando "entregar mañana" porque no sabía que ese mensaje era de un día antes.
+
+**Alternativas consideradas:**
+1. Dejar el historial sin fechas (rechazada: es la causa raíz del error).
+2. **Llevar `creado_en` hasta el LLM (elegida):** `obtenerHistorial` expone `creadoEn?: string` (campo opcional en `MensajeChat`, compatible con todos los llamadores); `getAIResponse` lo formatea como prefijo `[dd/mm/aaaa hh:mm]` (hora CDMX) en cada mensaje antes de enviarlo a Gemini o a los proveedores OpenAI-compatibles. Se agrega `[NOTA DE TIEMPO]` en `construirContextoPrompt` para instruir al LLM a interpretar palabras relativas según la fecha de cada mensaje y a dar prioridad al cambio de fecha/hora más reciente.
+3. Reescribir el historial en texto plano completo (rechazada: duplica lógica y rompe el formato de roles del chat).
+
+**Resultado:** `conversation.service.ts` (creadoEn en obtenerHistorial), `lib/ai.ts` (MensajeChat.creadoEn + formatearHistorialConFechas en getAIResponse), `message-utils.ts` (formatearFechaHoraMensaje en CDMX), `prompt.builder.ts` ([NOTA DE TIEMPO]).
+
+**Ventajas:** El LLM distingue fechas relativas por mensaje; el cambio más reciente gana; sin romper el formato de roles del chat (el prefijo va dentro de `content`); un solo punto de transformación en `getAIResponse` beneficia a todos los llamadores.
+
+**Desventajas:** El prefijo de fecha agrega caracteres al prompt (despreciable: ~17 chars por mensaje). Los mensajes sin `creado_en` (historial legacy) simplemente no llevan prefijo.
+
+---
+
 
 

@@ -204,6 +204,8 @@
 ## Próximo: Pruebas en producción
 Tras el commit/push, probar flujo completo en producción. Luego continuar extracción de bot.ts.
 
+- [x] v2.1.9 — Historial con fecha/hora por mensaje al LLM (creadoEn + prefijo [dd/mm/aaaa hh:mm] CDMX + [NOTA DE TIEMPO])
+
 ## Bloqueados
 
 - [ ] `supabase_migration_bot_cache.sql` — pendiente de ejecutar en Supabase SQL Editor antes del próximo deploy

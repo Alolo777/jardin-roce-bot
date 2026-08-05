@@ -137,6 +137,7 @@ export function construirContextoPrompt(ctx: ContextoPrompt): string {
 
   partes.push(`[FECHA ACTUAL: ${ctx.fechaActual}]`)
   partes.push(`[HORA ACTUAL: ${ctx.horaActual}]`)
+  partes.push(`[NOTA DE TIEMPO] Cada mensaje del historial lleva un prefijo [dd/mm/aaaa hh:mm] con la fecha y hora exactas en que se escribió (hora de México). Interpreta palabras relativas como "hoy", "mañana", "ayer", "el día de la entrega" o "a las 9" según CUÁNDO se escribió cada mensaje, no según el mensaje actual. Si el cliente cambió una fecha u hora después, el cambio más reciente gana. Nunca confirmes una entrega para "mañana" si el mensaje donde se pidió "mañana" es de un día anterior y la entrega ya es hoy.`)>
 
   partes.push(`[CASO: ${formatearCaso(ctx.caso)}]`)
   partes.push(`[PEDIDO: ${formatearPedido(ctx.pedido)}]`)

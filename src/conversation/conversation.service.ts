@@ -95,7 +95,7 @@ export async function obtenerHistorial(telefono: string): Promise<MensajeChat[]>
 
   try {
     const { data } = await supabaseAdmin
-      .from('historial_chat').select('rol, contenido')
+      .from('historial_chat').select('rol, contenido, creado_en')
       .eq('cliente_id', clienteId)
       .order('creado_en', { ascending: false })
       .limit(MAX_TURNOS_HISTORIAL * 2)
@@ -103,6 +103,7 @@ export async function obtenerHistorial(telefono: string): Promise<MensajeChat[]>
     return (data ?? []).reverse().map(m => ({
       role: m.rol as 'user' | 'assistant',
       content: m.contenido,
+      creadoEn: m.creado_en ?? undefined,
     }))
   } catch (err) {
     console.error('[conversation] Error leyendo historial:', err)

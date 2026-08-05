@@ -2,6 +2,28 @@
 
 ## 2026-08-04
 
+### El historial que ve el LLM ahora incluye fecha y hora de cada mensaje (v2.1.9)
+
+**Problema:** El historial enviado a `getAIResponse` se construía con `obtenerHistorial`, que seleccionaba únicamente `rol, contenido` y descartaba el timestamp (`creado_en`). El LLM leía frases relativas ("mañana", "a las 9") sin saber cuándo fueron escritas. Caso real: un cliente pidió entrega "mañana a las 9", y el día de la entrega escribió "mejor a las 6"; el bot respondió confirmando "entregar mañana" porque no sabía que ese mensaje era del día anterior.
+
+**Solución (código):**
+- `src/conversation/conversation.service.ts`: `obtenerHistorial` ahora selecciona `creado_en` y lo expone como `creadoEn?: string` en `MensajeChat` (campo opcional, compatible con todos los llamadores existentes).
+- `lib/ai.ts`: `MensajeChat` gana el campo opcional `creadoEn`; `getAIResponse` formatea cada mensaje con prefijo `[dd/mm/aaaa hh:mm]` (hora CDMX) antes de enviarlo al LLM (Gemini y proveedores OpenAI-compatibles).
+- `src/whatsapp/message-utils.ts`: nuevo helper `formatearFechaHoraMensaje(creadoEn)` en zona `America/Mexico_City`.
+- `src/openai/prompt.builder.ts`: `construirContextoPrompt` inyecta `[NOTA DE TIEMPO]` explicando que el prefijo del historial indica cuándo se escribió cada mensaje y que el cambio más reciente de fecha/hora gana.
+
+**Archivos modificados:** `src/conversation/conversation.service.ts`, `lib/ai.ts`, `src/whatsapp/message-utils.ts`, `src/openai/prompt.builder.ts`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `npm run test:template`, `test:telefono`, `test:validator` OK.
+
+**Impacto:** Compatible (campo opcional). El LLM ahora puede distinguir fechas relativas por mensaje y respeta el cambio de fecha/hora más reciente del cliente.
+
+**Rollback:** Sí — revertir el commit.
+
+---
+
+## 2026-08-04
+
 ### Silencio del bot ante cualquier respuesta del equipo durante la agrupación (v2.1.8)
 
 **Problema:** La condición que callaba al bot cuando un empleado contestaba al cliente durante la ventana de agrupación (`AGRUPAR_MENSAJES_MS = 50s`) era demasiado restrictiva: exigía que la respuesta del empleado **contuviera un precio** (`intervencion.precio`) **y** que el mensaje del cliente fuera de cotización/referencia (`esTextoReferenciaOCotizacion`). Si el empleado respondía sin precio (ej. "Te paso las fotos en un momento"), Flora respondía igual y duplicaba al empleado.

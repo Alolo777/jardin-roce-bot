@@ -9,6 +9,7 @@ import { eventBus } from '../src/events/event-bus'
 import { EventType } from '../src/events/types'
 import { metrics } from './metrics.service'
 import type { AIResponse, VentaCerrada } from './types'
+import { formatearFechaHoraMensaje } from '../src/whatsapp/message-utils'
 
 // ─── Proveedores OpenAI-compatibles (fallback en cadena) ────────────────────
 // Cada proveedor tiene SU PROPIA cuota diaria independiente. Al repartir las
@@ -440,6 +441,7 @@ async function conRetry<T>(fn: () => Promise<T>, maxIntentos = 3): Promise<T> {
 export interface MensajeChat {
   role: 'user' | 'assistant'
   content: string
+  creadoEn?: string
 }
 
 export type IntencionConversacion =
@@ -764,6 +766,13 @@ export async function revisarRespuestaFlora(
 }
 
 // ─── Función principal del agente ────────────────────────────────────────────
+function formatearHistorialConFechas(historial: MensajeChat[]): MensajeChat[] {
+  return historial.map(m => {
+    const marca = m.creadoEn ? formatearFechaHoraMensaje(m.creadoEn) : ''
+    return marca ? { ...m, content: `[${marca}] ${m.content}` } : m
+  })
+}
+
 export async function getAIResponse(
   historial: MensajeChat[],
   contextoExtra?: string
@@ -777,6 +786,8 @@ export async function getAIResponse(
       systemPromptFinal += `\n\n--- CONTEXTO EXTRA ---\n${contextoExtra}\n--- FIN DEL CONTEXTO EXTRA ---`
     }
 
+    const historialConFechas = formatearHistorialConFechas(historial)
+
     console.time('[ai.ts] LLM call')
     const inicioIA = Date.now()
     const respuestaRaw = await callWithFallback(
@@ -784,7 +795,7 @@ export async function getAIResponse(
         if (!geminiClient) throw new Error('Gemini no configurado')
         const model = geminiClient.getGenerativeModel({ model: GEMINI_MODEL })
         const historyParts: { role: 'user' | 'model'; parts: { text: string }[] }[] =
-          historial.map(m => ({
+          historialConFechas.map(m => ({
             role: m.role === 'assistant' ? 'model' : 'user',
             parts: [{ text: m.content }],
           }))
@@ -812,7 +823,7 @@ export async function getAIResponse(
                 model: provider.model,
                 messages: [
                   { role: 'system', content: systemPromptFinal },
-                  ...historial,
+                  ...historialConFechas,
                 ],
                 max_tokens: 2048,
                 temperature: 0.7,

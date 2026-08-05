@@ -123,6 +123,16 @@ export function getFechaActual(): string {
   return new Date().toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 }
 
+export function formatearFechaHoraMensaje(creadoEn: string): string {
+  const fecha = new Date(creadoEn)
+  if (Number.isNaN(fecha.getTime())) return ''
+  return new Intl.DateTimeFormat('es-MX', {
+    timeZone: 'America/Mexico_City',
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(fecha)
+}
+
 export function getContextoHorario(): string {
   const ahora = ahoraCdmx()
   const horarios = obtenerHorarios()
