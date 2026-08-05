@@ -205,6 +205,7 @@
 Tras el commit/push, probar flujo completo en producción. Luego continuar extracción de bot.ts.
 
 - [x] v2.1.9 — Historial con fecha/hora por mensaje al LLM (creadoEn + prefijo [dd/mm/aaaa hh:mm] CDMX + [NOTA DE TIEMPO])
+- [x] v2.2.0 — Prompt sin cotizador web, fuera-de-horario recoge referencias, no insistente + IA revisora activa (subido a Supabase)
 
 ## Bloqueados
 

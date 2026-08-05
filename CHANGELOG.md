@@ -2,6 +2,29 @@
 
 ## 2026-08-04
 
+### System prompt actualizado: sin cotizador web, mejor fuera-de-horario, no insistente + IA revisora activa (v2.2.0)
+
+**Problema:** El prompt enviaba a los clientes al cotizador web (`floreria-app-mauve.vercel.app`) que no se usa, Flora era insistente haciendo varias preguntas y no detectaba cuándo no debía responder, y la IA revisora (`revisarRespuestaFlora`) estaba definida pero NO conectada al flujo activo.
+
+**Solución (código + prompt):**
+- **Cotizador web eliminado** en los 4 puntos donde vivía: `system-prompt.corregido.ts`, `prompt.builder.ts` (reglas validadas), `lib/ai.ts` (fallback) y `message-handler.ts` (intención 'cotizador' ahora pide foto de referencia). Se conserva el catálogo Drive.
+- **Fuera de horario mejorado** (`horario.validator.ts` + `message-utils.ts` + prompt): cuando ya cerraron, Flora ofrece recibir la foto de referencia, presupuesto y fecha para que el equipo lo cotice a primera hora. Ya no obliga a enviar link.
+- **No insistente** (prompt): máxima 1 pregunta por mensaje, no repetir preguntas ya hechas, no perseguir al cliente tras un agradecimiento, no confirmar precios no verificados.
+- **IA revisora activada**: `message-handler.ts` llama `revisarRespuestaFlora` tras generar cada respuesta; si desaprueba, usa la corrección o emite `HUMAN_REQUIRED`/omite. Su prompt detecta precios inventados y respuestas innecesarias.
+- Prompt subido a producción vía `scripts/subir-prompt-corregido.ts` (verificado en Supabase: sin `floreria-app-mauve`, con nuevas reglas).
+
+**Archivos modificados:** `src/prompts/system-prompt.corregido.ts`, `src/openai/prompt.builder.ts`, `lib/ai.ts`, `src/whatsapp/message-utils.ts`, `src/whatsapp/message-handler.ts`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `test:template`, `test:validator` OK; verificación directa del prompt en Supabase.
+
+**Impacto:** El bot ya no menciona el cotizador web. Fuera de horario recoge referencias. Respuestas menos insistentes y precios no verificados son corregidos por la IA revisora (costo: +1 llamada de IA por mensaje).
+
+**Rollback:** Sí — revertir el commit y subir el prompt anterior a Supabase.
+
+---
+
+## 2026-08-04
+
 ### El historial que ve el LLM ahora incluye fecha y hora de cada mensaje (v2.1.9)
 
 **Problema:** El historial enviado a `getAIResponse` se construía con `obtenerHistorial`, que seleccionaba únicamente `rol, contenido` y descartaba el timestamp (`creado_en`). El LLM leía frases relativas ("mañana", "a las 9") sin saber cuándo fueron escritas. Caso real: un cliente pidió entrega "mañana a las 9", y el día de la entrega escribió "mejor a las 6"; el bot respondió confirmando "entregar mañana" porque no sabía que ese mensaje era del día anterior.

@@ -85,7 +85,6 @@ export function buildValidatedRulesSection(): string {
     `- Norte: https://maps.app.goo.gl/DeQdJJ3wp1zfhRU98`,
     ``,
     `## Cotizador y catálogo`,
-    `- Cotizador web: https://floreria-app-mauve.vercel.app/`,
     `- Catálogo Drive: https://drive.google.com/drive/folders/1s7Hs5JKBSezcqVznKwl6TT866UqRCB4N`,
     ``,
     `## Fotos`,

@@ -32,7 +32,7 @@ import { buscarEnvio, pareceConsultaEnvio, detectarLinkMaps, formatearZonasParaP
 import { validarRespuestaIA, sanitizarRespuestaIA } from '../validators/response.validator'
 import { evaluarCancelacion } from '../validators/cancelacion.validator'
 import { evaluarQueja } from '../validators/queja.validator'
-import { getAIResponse, clasificarImagenVenta } from '../../lib/ai'
+import { getAIResponse, clasificarImagenVenta, revisarRespuestaFlora } from '../../lib/ai'
 import { logger } from '../../lib/logger.service'
 import { PedidoActual, EstadoPedido } from '../models/types'
 
@@ -602,8 +602,8 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
 
       if (intencion === 'cotizador') {
         contextoExtra +=
-          `\n\nINSTRUCCION: Envía DIRECTAMENTE el cotizador: ` +
-          `https://floreria-app-mauve.vercel.app/ Menciona que puede subir foto de referencia. Máximo 3 líneas.`
+          `\n\nINSTRUCCION: El cliente quiere cotizar un arreglo. Pídele amablemente una FOTO de referencia o que describa qué busca (flores, tamaño, ocasión). ` +
+          `El sistema recibe la foto y el equipo la cotiza. Si describe con flores sueltas y hay precios referenciales en las reglas, puedes orientar el costo; si no, di que el equipo confirma el precio exacto. Máximo 3 líneas.`
       }
 
       const pareceEnvio = pareceConsultaEnvio(textoCliente)
@@ -980,6 +980,31 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           })
         }
 
+        let mensajeFinal = mensajeParaEnviar
+        const revision = await revisarRespuestaFlora(
+          historialCompleto,
+          textoCliente,
+          mensajeParaEnviar,
+          contextoExtra
+        )
+        if (!revision.approved) {
+          if (revision.mensaje) {
+            mensajeFinal = sanitizarRespuestaIA(limpiarRespuestaIA(revision.mensaje))
+            console.log(`[bot] 🔎 Revisora IA corrigió respuesta para ${telefono}: ${revision.razon}`)
+          } else {
+            console.warn(`[bot] 🔎 Revisora IA desaprobó respuesta para ${telefono}: ${revision.razon}`)
+            eventBus.emit(EventType.HUMAN_REQUIRED, {
+              telefono: await numeroRealPromise,
+              cliente: msg.pushName || '',
+              prioridad: 'alta',
+              descripcion: `[REVISORA IA] El LLM propuso una respuesta no aprobada: ${revision.razon}. Se requiere atención humana. Mensaje original: ${textoCliente.substring(0, 200)}`,
+              contexto: 'Revisora IA reject',
+            })
+            await agregarAlHistorial(telefono, 'assistant', `[Flora omitió respuesta — revisora: "${revision.razon.slice(0, 150)}"]`)
+            return
+          }
+        }
+
         const ventaEstado = deps.ventaDesdeEstado(clienteId)
         if (!deps.pedidoEstaCerrado(clienteId) && ventaEstado && deps.ventaListaParaCerrar(clienteId) && (
           confirmaCorto || /lo[sv]? quiero|me gusta|adelante|procedo|hagamoslo|hag[aá]moslo|d[aá]le|adelante|apartalo|aparta lo|si? (por favor|gracias)/i.test(textoCliente)
@@ -1001,9 +1026,9 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           return
         }
 
-        await deps.responderMensaje(msg, mensajeParaEnviar)
-        await agregarAlHistorial(telefono, 'assistant', mensajeParaEnviar)
-        if (respuestaPideComprobante(mensajeParaEnviar) && deps.tieneArregloVerificado(clienteId)) {
+        await deps.responderMensaje(msg, mensajeFinal)
+        await agregarAlHistorial(telefono, 'assistant', mensajeFinal)
+        if (respuestaPideComprobante(mensajeFinal) && deps.tieneArregloVerificado(clienteId)) {
           const pedido = deps.pedidoActual(clienteId)
           pedido.metodoPago = 'transferencia'
           pedido.estadoFlujo = 'esperando_pago'

@@ -280,7 +280,6 @@ Sucursales:
 - Norte: https://maps.app.goo.gl/DeQdJJ3wp1zfhRU98
 
 Pedidos personalizados:
-- Cotizador web: https://floreria-app-mauve.vercel.app/
 - Catálogo Drive: https://drive.google.com/drive/folders/1s7Hs5JKBSezcqVznKwl6TT866UqRCB4N
 
 Precio general:
@@ -341,8 +340,7 @@ Si pide resumen, incluye solo datos confirmados: arreglo, precio del ramo, enví
 
 ## Cotizador y pedidos personalizados
 
-Si quiere personalizado: comparte el cotizador web. Si manda foto de referencia, no inventes precio; di que ya la recibiste y el equipo la revisará.
-Si manda resumen del cotizador web, el sistema lo procesa; tú solo confirma cálido y comparte BBVA si corresponde.
+Si quiere personalizado: pídele foto de referencia o que describa qué busca. Si manda foto, no inventes precio; di que ya la recibiste y el equipo la revisará.
 
 ## Ubicación
 
@@ -704,9 +702,12 @@ export async function revisarRespuestaFlora(
   const prompt = [
     'Eres revisor de calidad de Flora, asistente de una floreria.',
     'Evalua si la respuesta propuesta es la mejor para el ultimo mensaje considerando el historial reciente. Ignora historial viejo que no aplique al pedido actual.',
-    'No apruebes respuestas que inventen precios, disponibilidad, envio, pagos, promesas, compensaciones o que ignoren una cotizacion humana reciente.',
+    'REGLA DE PRECIOS: Si la respuesta propuesta contiene un PRECIO (simbolo $ o cifras monetarias) que NO aparece en el contexto operativo ni en una cotizacion del equipo en el historial, DESAPRUEBALA (approved:false, riesgo:alto) y en "mensaje" escribe una respuesta corregida que diga "Déjame verificarlo con mi equipo" sin cifras. Flora nunca debe inventar precios.',
+    'REGLA DE NO INSISTIR: Si el ultimo mensaje del cliente es solo un agradecimiento, "ok", "gracias", "listo", un saludo ya respondido, o no requiere accion de Flora, y la respuesta propuesta vuelve a preguntar algo ya resuelto o insiste en vender, DESAPRUEBALA (approved:false, riesgo:bajo) y en "mensaje" escribe una respuesta corta (max 1 linea) o deja "mensaje" vacio para no responder.',
+    'Si la respuesta propuesta es buena y no inventa datos, APRUEBALA (approved:true) y deja "mensaje" vacio.',
+    'No apruebes respuestas que inventen disponibilidad, envio, pagos, promesas, compensaciones o que ignoren una cotizacion humana reciente.',
     'Si hay un precio dado por el equipo en el historial reciente, la respuesta debe usarlo o reconocerlo; no debe pedir confirmarlo otra vez salvo que falten datos.',
-    'Responde SOLO JSON valido: {"approved":true,"mensaje":"respuesta corregida opcional","razon":"max 160 caracteres","riesgo":"bajo|medio|alto","debeAlertarTelegram":false,"debeAlertarWhatsApp":false}.',
+    'Responde SOLO JSON valido: {"approved":true,"mensaje":"respuesta corregida opcional o vacio","razon":"max 160 caracteres","riesgo":"bajo|medio|alto","debeAlertarTelegram":false,"debeAlertarWhatsApp":false}.',
     '',
     `Contexto operativo:\n${contextoOperativo || 'Sin contexto'}`,
     '',

@@ -144,8 +144,7 @@ export function getContextoHorario(): string {
     : `Ya cerramos por hoy (abrimos mañana a las ${horarios.apertura}:00 am).`
   return (
     `\n\n[CONTEXTO: Fuera de Horario] Hora actual CDMX: ${ahora.etiqueta}. ${estadoHorario} ` +
-    `REGLA DE ORO: NUNCA le digas al cliente "mañana te muestro" o "mañana te atiendo". ` +
-    `SÍ PUEDES y DEBES enviarle el link del catálogo o el cotizador web (https://floreria-app-mauve.vercel.app/) en este momento para que adelante su pedido y quede agendado para nuestra apertura. ` +
-    `Para cotizaciones de envío complejas que no estén en la web, dile amablemente que a las ${horarios.apertura} am le confirmas el costo exacto.`
+    `Flora sigue disponible para ayudar al cliente con cosas útiles: puede enviar FOTO de referencia del arreglo que quiere, indicar su presupuesto, su nombre y para qué día lo necesita, para que el equipo lo cotice a primera hora cuando abramos. ` +
+    `Pídele amablemente esos datos o confirma que recibió su foto de referencia. NUNCA le digas "mañana te muestro" ni inventes precios ni horarios.`
   )
 }

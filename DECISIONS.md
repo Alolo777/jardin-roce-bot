@@ -1628,5 +1628,27 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-077: Eliminar cotizador web, mejorar fuera-de-horario, no insistir + activar IA revisora (v2.2.0)
+
+**Fecha:** 2026-08-04
+**Estado:** Aceptada
+
+**Motivo:** (1) El cotizador web `floreria-app-mauve.vercel.app` no se usa y contaminaba el prompt, las reglas validadas y el flujo fuera-de-horario. (2) Fuera de horario el bot solo decía "abrimos mañana" sin aprovechar la oportunidad de recoger referencias. (3) Flora era insistente (varias preguntas, repeticiones) y no detectaba cuándo no debía responder. (4) `revisarRespuestaFlora` existía pero nunca se conectó al flujo activo.
+
+**Alternativas consideradas:**
+1. Dejar el cotizador web (rechazada: el cliente se perdía en una herramienta muerta).
+2. **Eliminar el cotizador web y pedir foto de referencia (elegida):** el equipo cotiza directo desde la referencia del cliente; se conserva el catálogo Drive.
+3. **Fuera de horario = recoger referencias (elegida):** Flora ofrece recibir foto/presupuesto/fecha para cotizar a primera hora, en lugar de mandar links.
+4. **Solo prompt para "no insistir" (elegida) + activar IA revisora (elegida):** el usuario eligió el nivel "Prompt + activar IA revisora". `revisarRespuestaFlora` ahora se llama tras cada respuesta; desaprueba precios inventados (con corrección o `HUMAN_REQUIRED`) y respuestas innecesarias/insistentes.
+5. Mantener modelos actuales (decisión del usuario): se conserva `gemini-3.1-flash-lite` + fallback OpenRouter/Groq, ya verificados con `check:apis`.
+
+**Resultado:** Prompt reescrito (`system-prompt.corregido.ts`, subido a Supabase y verificado), reglas validadas sin cotizador web (`prompt.builder.ts`), fallback limpio (`lib/ai.ts`), intención 'cotizador' pide foto (`message-handler.ts`), fuera-de-horario recoge referencias (`message-utils.ts`), IA revisora conectada al flujo.
+
+**Ventajas:** El cliente ya no aterriza en una herramienta muerta; fuera de horario se capturan pedidos; respuestas más naturales y sin alucinaciones de precio (doble verificación con la revisora).
+
+**Desventajas:** La IA revisora agrega +1 llamada de IA por mensaje (cuota y latencia ~1-2s). Si la revisora falla, `revisarRespuestaFlora` retorna `approved:true` por defecto, así que nunca bloquea el envío.
+
+---
+
 
 
