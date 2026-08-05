@@ -53,7 +53,7 @@ import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema, 
 import { crearPedido, obtenerPedido, transitar, transitarDesdeFlujo, archivarPedido, archivarSilencioso, cancelarPedido, limpiarCachesPedidos, cargarPedidosDesdeBD, persistirPedidosEngine, contarPedidosPorEstado, listarPedidosActivosGlobales, obtenerPedidoPorId, serializarPedidoParaDashboard, cambiarEstado } from './src/pedidos/pedido.service'
 import { analizarIntencion, Decision } from './src/decision/decision.engine'
 import { Intencion, PedidoActual, EstadoPedido, EstadoFlujo, FuenteConfirmacionPrecio } from './src/models/types'
-import { createMessageHandler, esTextoReferenciaOCotizacion } from './src/whatsapp/message-handler'
+import { createMessageHandler } from './src/whatsapp/message-handler'
 import type { MsgHandlerDeps } from './src/whatsapp/message-handler'
 import { createMessageEntry, type MessageEntryDeps } from './src/whatsapp/message-entry'
 import { construirContextoPrompt } from './src/openai/prompt.builder'
@@ -427,8 +427,8 @@ export function encolarMensajeAgrupado(clienteId: string, msg: any): void {
 
     const intervencion = obtenerIntervencionHumanaReciente(clienteId)
     const humanoRespondioDuranteEspera = intervencion && intervencion.haceMs < AGRUPAR_MENSAJES_MS + 1_500
-    if (humanoRespondioDuranteEspera && intervencion.precio && esTextoReferenciaOCotizacion(base.body)) {
-      console.log(`[bot] 🙋 Equipo cotizó durante la espera; Flora no duplica respuesta para ${clienteId}`)
+    if (humanoRespondioDuranteEspera) {
+      console.log(`[bot] 🙋 Equipo respondió durante la espera; Flora no duplica respuesta para ${clienteId}`)
       return
     }
 

@@ -1588,5 +1588,25 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-075: Silencio del bot ante cualquier respuesta del equipo durante la agrupación (v2.1.8)
+
+**Fecha:** 2026-08-04
+**Estado:** Aceptada
+
+**Motivo:** La condición original (`bot.ts`) callaba a Flora únicamente cuando el empleado cotizaba un precio durante la ventana de agrupación de 50s (`intervencion.precio && esTextoReferenciaOCotizacion`). Si el empleado respondía sin precio (ej. "Te paso las fotos en un momento"), el bot respondía igual y duplicaba al equipo.
+
+**Alternativas consideradas:**
+1. Mantener la condición restringida (rechazada: deja el caso "empleado responde sin precio" sin protección).
+2. **Cualquier respuesta del empleado dentro de la ventana calla al bot (elegida):** la presencia de una intervención humana reciente es señal suficiente de que el equipo tomó la conversación. El bot reanuda automáticamente cuando el cliente escribe un mensaje nuevo fuera de la ventana (`haceMs > AGRUPAR_MENSAJES_MS + 1.5s`).
+3. Exigir solo texto de referencia/cotización sin precio (rechazada: sigue sin cubrir respuestas tipo "te paso fotos" / "claro").
+
+**Resultado:** `bot.ts` — condición reducida a `humanoRespondioDuranteEspera`; se elimina el import de `esTextoReferenciaOCotizacion`.
+
+**Ventajas:** Regla predecible ("si el equipo responde, el bot cierra la boca"); reduce duplicados; compatible con la ventana de 50s existente.
+
+**Desventajas:** Si un empleado envía un mensaje irrelevante durante la ventana (ej. por error), esa tanda del bot queda en silencio; mitigado porque el TTL de la intervención es de 10 min y la ventana de silencio es de ~51.5s.
+
+---
+
 
 

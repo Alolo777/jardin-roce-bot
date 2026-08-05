@@ -2,6 +2,26 @@
 
 ## 2026-08-04
 
+### Silencio del bot ante cualquier respuesta del equipo durante la agrupación (v2.1.8)
+
+**Problema:** La condición que callaba al bot cuando un empleado contestaba al cliente durante la ventana de agrupación (`AGRUPAR_MENSAJES_MS = 50s`) era demasiado restrictiva: exigía que la respuesta del empleado **contuviera un precio** (`intervencion.precio`) **y** que el mensaje del cliente fuera de cotización/referencia (`esTextoReferenciaOCotizacion`). Si el empleado respondía sin precio (ej. "Te paso las fotos en un momento"), Flora respondía igual y duplicaba al empleado.
+
+**Solución (código):**
+- `bot.ts`: la condición en `encolarMensajeAgrupado` pasa a ser únicamente `humanoRespondioDuranteEspera` (intervención humana dentro de la ventana de 50s + 1.5s). Cualquier respuesta del equipo calla a Flora para esa tanda; el bot vuelve a responder cuando el cliente escribe un mensaje nuevo después de la ventana.
+- Se elimina el import de `esTextoReferenciaOCotizacion` (ya no se usa en `bot.ts`).
+
+**Archivos modificados:** `bot.ts`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `npm run test:template`, `test:telefono`, `test:validator` OK.
+
+**Impacto:** Compatible. Reduce respuestas duplicadas cuando el equipo toma la conversación.
+
+**Rollback:** Sí — revertir el commit.
+
+---
+
+## 2026-08-04
+
 ### BUG-014: Proveedor primario Gemini roto — gemini-2.5-flash-lite deprecado (v2.1.7)
 
 **Problema:** Al verificar todas las APIs con el nuevo `npm run check:apis`, Gemini devolvía `404 NOT_FOUND: This model models/gemini-2.5-flash-lite is no longer available to new users`. El proveedor primario del bot (que recibe la mayor carga de respuestas) estaba caído sin que se notara porque el fallback a OpenRouter/Groq cubría las peticiones.
