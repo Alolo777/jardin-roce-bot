@@ -20,7 +20,7 @@ export default function LoginPage() {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) throw error
-      router.push('/admin/inventario')
+      router.push('/admin')
       router.refresh()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error desconocido'

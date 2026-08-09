@@ -2,9 +2,38 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { createSupabaseBrowserClient } from '@/lib/supabase-client'
 import QRCode from 'qrcode'
+
+function BotonSalir() {
+  const router = useRouter()
+  const [cerrando, setCerrando] = useState(false)
+  const supabase = createSupabaseBrowserClient()
+
+  async function cerrarSesion() {
+    setCerrando(true)
+    try {
+      await supabase.auth.signOut()
+      router.push('/admin/login')
+      router.refresh()
+    } catch {
+      setCerrando(false)
+    }
+  }
+
+  return (
+    <button
+      onClick={cerrarSesion}
+      disabled={cerrando}
+      title="Cerrar sesión"
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 text-white/80 hover:bg-white/10 hover:text-white disabled:opacity-50"
+    >
+      <span className="text-base">🚪</span>
+      <span className="hidden sm:inline">{cerrando ? '...' : 'Salir'}</span>
+    </button>
+  )
+}
 
 function BotonPausa() {
   const [pausado,  setPausado]  = useState(false)
@@ -205,6 +234,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <div className="w-px h-6 bg-white/20 mx-1" />
               <BotonPausa />
               <QrDisplay />
+              <BotonSalir />
             </div>
           </div>
         </div>

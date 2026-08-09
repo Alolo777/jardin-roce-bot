@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## 2026-08-09
+
+### Dashboard protegido: login obligatorio + fix de redirección y botón de salir
+
+**Problema:** El panel administrativo estaba abierto: cualquiera con la URL podía entrar a `/admin/prompt` y modificar el system prompt sin autenticarse.
+
+**Solución (código):**
+- **Verificado que la protección ya existe y funciona en producción**: `proxy.ts` (middleware de Next.js 16) redirige `/admin/*` a `/admin/login` (307) y bloquea `/api/*` con 401 sin sesión de Supabase Auth. Probado en `jardin-roce-bot.vercel.app`.
+- **Fix login**: `app/admin/login/page.tsx` redirigía a `/admin/inventario`, página que no existe (404 tras iniciar sesión). Ahora redirige a `/admin`.
+- **Botón "Salir"**: `app/admin/layout.tsx` agrega `BotonSalir` en el nav que llama `supabase.auth.signOut()` y vuelve a `/admin/login`.
+
+**Archivos modificados:** `app/admin/login/page.tsx`, `app/admin/layout.tsx`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; curl en producción: `/admin/prompt` → 307 a login, `PUT /api/prompt` → 401, `GET /api/bot/status` → 401.
+
+**Impacto:** El panel queda protegido de acceso no autorizado. El bot Express (VM) no se ve afectado (usa sus propias rutas).
+
+**Rollback:** Sí — revertir el commit.
+
+---
+
 ## 2026-08-04
 
 ### System prompt actualizado: sin cotizador web, mejor fuera-de-horario, no insistente + IA revisora activa (v2.2.0)

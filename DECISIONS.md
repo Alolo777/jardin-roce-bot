@@ -1650,5 +1650,24 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-078: Proteger el dashboard con login obligatorio vía proxy de Next.js
+
+**Fecha:** 2026-08-09
+**Estado:** Aceptada
+
+**Motivo:** Cualquier persona con la URL podía entrar a `/admin/prompt` y modificar el system prompt de Flora sin autenticarse. El login (`/admin/login`) existía pero ninguna ruta verificaba la sesión.
+
+**Alternativas consideradas:**
+1. Verificar sesión solo en cada página y API route (rechazada: repetitivo y fácil de omitir).
+2. **Middleware/proxy global de Next.js (elegida):** un solo punto (`proxy.ts`) que redirige `/admin/*` a login y devuelve 401 para `/api/*` sin sesión de Supabase Auth. Ya existía desde `ba72207`; se verificó activo en producción.
+3. Protección solo client-side (rechazada: no impide llamadas directas a `/api`).
+
+**Resultado:** Verificado en producción: `/admin/prompt` y `/admin/operaciones` redirigen (307) a `/admin/login`; `PUT/GET /api/prompt` y `GET /api/bot/status` devuelven 401 sin sesión. Se corrigió además que el login redirigiera a `/admin/inventario` (página inexistente) y se agregó botón "Salir" en el nav.
+
+**Ventajas:** Seguridad centralizada e infalible; el bot Express (VM) no se ve afectado porque usa sus propias rutas (`src/api/server.ts`) y comparte datos vía Supabase.
+
+**Desventajas:** Ninguna relevante.
+
+---
 
 
