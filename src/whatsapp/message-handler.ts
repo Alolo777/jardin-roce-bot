@@ -504,10 +504,13 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
 
       const intervencionHumana = obtenerIntervencionHumanaReciente(clienteId)
       if (intervencionHumana && !equipoRespondio) {
+        const conPrecio = intervencionHumana.precio
+          ? ` El equipo indicó un precio: $${intervencionHumana.precio}. Úsalo como precio confirmado por el equipo.`
+          : ''
         contextoExtra +=
           `\n\n[INTERVENCION HUMANA RECIENTE] ` +
           `El equipo respondió hace ${Math.round(intervencionHumana.haceMs / 1000)} segundos: "${intervencionHumana.texto.replace(/"/g, "'")}". ` +
-          `Flora NO debe ignorar esa respuesta. Si contiene precio, úsalo como precio confirmado por el equipo. No digas que falta confirmar ese mismo precio.`
+          `Flora NO debe ignorar esa respuesta.${conPrecio} No digas que falta confirmar ese mismo precio.`
       }
 
       contextoExtra +=
@@ -544,7 +547,9 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           `Pide al equipo que le mande fotos disponibles y espera a que el cliente elija una foto nueva.`
       }
 
-      const seleccionaFotoDisponible = !pideFotosDisponibles && deps.hayFotosDisponiblesRecientes(clienteId) && clienteEligeFotoDisponible(textoCliente)
+      const pedidoPreSeleccion = deps.pedidoActual(clienteId)
+      const yaPreciadoPorEquipo = (pedidoPreSeleccion.precioConfirmadoPor === 'equipo' || pedidoPreSeleccion.precioConfirmadoPor === 'manual') && pedidoPreSeleccion.precioPersonalizado
+      const seleccionaFotoDisponible = !pideFotosDisponibles && !yaPreciadoPorEquipo && deps.hayFotosDisponiblesRecientes(clienteId) && clienteEligeFotoDisponible(textoCliente)
       if (seleccionaFotoDisponible) {
         deps.resetearPedidoActivo(clienteId)
         FOTOS_DISPONIBLES_RECIENTES.delete(clienteId)

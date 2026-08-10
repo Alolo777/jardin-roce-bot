@@ -1650,6 +1650,26 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-079: El precio dado por el equipo en el chat se reconoce sin depender del símbolo `$`
+
+**Fecha:** 2026-08-10
+**Estado:** Aceptada
+
+**Motivo:** `procesarMensajeEquipo` (bot.ts:791) solo aplicaba el precio al pedido si `parsePrecio` lo extraía. El parser solo reconocía precios con `$` o pocas palabras clave (`total`, `saldría`, `está en`, `queda en`, `precio`), así que frases reales del equipo como "Son 450", "Cuesta 450" o "Te sale en 450" devolvían `null`, el pedido quedaba en `esperando_precio_equipo` y el bot seguía pidiendo confirmación.
+
+**Alternativas consideradas:**
+1. Instruir al equipo a escribir siempre con `$` (rechazada: no controlamos cómo escribe el equipo; el backend debe ser tolerante).
+2. Confiar en que el LLM detecte el precio del `[Agente: ...]` en el historial (rechazada: el estado del pedido no se actualiza, y el bot se contradice).
+3. **Ampliar el parser de precio en el backend (elegida):** `parsePrecio` ahora acepta verbos de precio comunes (`son`, `sale`, `cuesta`, `quedó en`, `costaría`, `aprox`) y un número suelto como único contenido del mensaje ("450"). Además, el contexto `[PEDIDO]` y `[INTERVENCION HUMANA RECIENTE]` informan al LLM que el precio ya está validado por el equipo.
+
+**Resultado:** Cuando el empleado responde con un precio (con o sin `$`), el pedido se actualiza a `precio_confirmado` con `precioConfirmadoPor='equipo'`, y el LLM deja de pedir confirmación. Se protegió además `seleccionaFotoDisponible` para no archivar un pedido ya preciado.
+
+**Ventajas:** Backend tolerante a como escribe el equipo; el estado del pedido es la fuente de verdad; el LLM nunca contradice al equipo; sin falsos positivos (un número suelto solo se acepta si es TODO el mensaje).
+
+**Desventajas:** Riesgo menor de extraer un número de frases tipo "son las 10" en un mensaje del equipo (baja probabilidad en ese contexto).
+
+---
+
 ## DEC-078: Proteger el dashboard con login obligatorio vía proxy de Next.js
 
 **Fecha:** 2026-08-09

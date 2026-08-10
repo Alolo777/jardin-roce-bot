@@ -15,6 +15,7 @@
     "test:inventario": "tsx --env-file=.env.test tests/inventario.test.mts",
     "test:reclamaciones": "tsx --env-file=.env.test tests/reclamaciones.test.mts",
     "test:telefono": "tsx --env-file=.env.test tests/telefono.test.mts",
+    "test:precio": "tsx --env-file=.env.test tests/precio.test.mts",
     "test:template": "tsx --env-file=.env.test tests/template-payment.test.mts",
     "check:apis": "tsx --env-file=.env.local scripts/check-apis.mts",
     "start": "next start",

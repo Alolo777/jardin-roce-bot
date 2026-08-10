@@ -52,6 +52,7 @@
 | #19 — Precio/fecha no arrastrados a eventos operativos de Telegram (sin fecha de entrega) | ✅ Resuelto (DEC-072): template.builder renderiza 📅 fecha/hora en VENTA CERRADA, PEDIDO APARTADO y PAGO PENDIENTE |
 | #20 — ORDER_CREATED con payload incompleto (faltaba orderId/sucursal/metodoPago) | ✅ Resuelto (DEC-073): crearPedido usa buildOrderPayload; comprobante-pendiente incluye orderId; cotizador web crea pedido real |
 | #21 — Proveedor primario Gemini roto (gemini-2.5-flash-lite deprecado 404) | ✅ Resuelto (DEC-074): GEMINI_MODEL → gemini-3.1-flash-lite + script npm run check:apis |
+| #22 — Bot seguía pidiendo "confirmación del equipo" aunque el equipo ya diera el precio en el chat | ✅ Resuelto (BUG-015/DEC-079): parsePrecio ampliado (sin `$`), contexto [PEDIDO] con precio confirmado, guard en seleccionaFotoDisponible |
 
 ## Fases de Migración (Parte 4.1)
 
@@ -206,6 +207,7 @@ Tras el commit/push, probar flujo completo en producción. Luego continuar extra
 
 - [x] v2.1.9 — Historial con fecha/hora por mensaje al LLM (creadoEn + prefijo [dd/mm/aaaa hh:mm] CDMX + [NOTA DE TIEMPO])
 - [x] v2.2.0 — Prompt sin cotizador web, fuera-de-horario recoge referencias, no insistente + IA revisora activa (subido a Supabase)
+- [x] v2.2.1 — Bot reconoce precios reales del equipo en el chat (parsePrecio ampliado + contexto [PEDIDO] con fuente de confirmación + guard seleccionaFotoDisponible)
 
 ## Bloqueados
 

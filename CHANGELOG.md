@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## 2026-08-10
+
+### Bot reconoce precios reales dados por el equipo en el chat (BUG-015)
+
+**Problema:** Aunque un empleado respondiera en el chat del cliente con el precio real ("Son 450", "Queda en 450", "Te sale en 450"...), el bot seguía diciendo "esperando confirmación del equipo". El precio del empleado nunca se aplicaba al pedido.
+
+**Solución (código):**
+- **Parser de precio ampliado** (`src/parser/precio.parser.ts`): reconoce frases comunes sin `$` (`son`, `sale`, `cuesta`, `quedó en`, `se queda en`, `costaría`, `aprox`, etc.) y un número suelto ("450", "$450", "450 pesos"). Antes solo funcionaba con `$` o pocas palabras clave; cuando el empleado escribía el precio sin `$`, `procesarMensajeEquipo` (bot.ts:799) nunca lo aplicaba al pedido.
+- **Contexto `[PEDIDO]`** (`src/openai/prompt.builder.ts`): ahora incluye `Precio confirmado por: equipo (ya validado — NO vuelvas a pedir confirmación de este mismo precio)` cuando el precio ya está confirmado, para que el LLM nunca vuelva a decir "confirmo con el equipo".
+- **Contexto `[INTERVENCION HUMANA RECIENTE]`** (`src/whatsapp/message-handler.ts`): incluye el precio extraído de la respuesta del equipo cuando existe, instruyendo a Flora a usarlo como confirmado.
+- **Guard de selección de foto** (`src/whatsapp/message-handler.ts:547`): si el pedido actual ya tiene un precio confirmado por el equipo (`precioConfirmadoPor === 'equipo'` o `'manual'`), un "lo quiero / cuánto es" del cliente NO resetea/archiva el pedido preciado (antes lo borraba y volvía a `esperando_precio_equipo`).
+
+**Archivos modificados:** `src/parser/precio.parser.ts`, `src/openai/prompt.builder.ts`, `src/whatsapp/message-handler.ts`, `tests/precio.test.mts` (nuevo), `package.json` (script `test:precio`)
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `npm run test:precio` OK (15 frases reales del equipo parseadas, 7 textos sin precio rechazados).
+
+**Impacto:** Compatible. No cambia contratos ni estados. Si se despliega en la VM: `git pull` + `sudo systemctl restart floreria-bot`.
+
+**Rollback:** Sí — revertir el commit.
+
+---
+
 ## 2026-08-09
 
 ### Dashboard protegido: login obligatorio + fix de redirección y botón de salir

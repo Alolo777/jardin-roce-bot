@@ -133,6 +133,16 @@
 - **Pruebas:** `npx tsc --noEmit` 0 errores; suite aplicable (`test:template`, `test:telefono`, `test:validator`) OK. `test:wire` falla pre-existente (asume contrato antiguo ORDER_UPDATED), no relacionado.
 - **Versión donde se corrigió:** 2.1.6
 
+## BUG-015: El bot seguía pidiendo "confirmación del equipo" aunque el equipo ya diera el precio en el chat
+- **Prioridad:** Alta
+- **Estado:** Resuelto (2026-08-10, DEC-079)
+- **Reportado:** 2026-08-10
+- **Síntomas:** Cuando un empleado respondía en el chat del cliente con el precio real del ramo, el bot seguía respondiendo "déjame confirmar con el equipo el precio real". El precio nunca se aplicaba al pedido (quedaba en `esperando_precio_equipo`) aunque el `[Agente: ...]` estuviera en el historial.
+- **Causa raíz:** `parsePrecio` solo reconocía precios con `$` o pocas palabras clave; frases comunes del equipo sin `$` ("Son 450", "Cuesta 450", "Te sale en 450") devolvían `null`, por lo que `procesarMensajeEquipo` (bot.ts:799-800) nunca ejecutaba el bloque que fija `precioConfirmadoPor='equipo'` y transita a `precio_confirmado`. Además, el contexto `[PEDIDO]` no informaba al LLM que el precio ya estaba validado, y `seleccionaFotoDisponible` podía archivar un pedido ya preciado.
+- **Corrección (DEC-079):** parser ampliado con verbos de precio comunes y número suelto como único contenido; contexto `[PEDIDO]` con `Precio confirmado por: <fuente>` + instrucción de no volver a pedir confirmación; contexto `[INTERVENCION HUMANA RECIENTE]` con el precio extraído; guard en `seleccionaFotoDisponible` para no resetear un pedido ya preciado.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; `tests/precio.test.mts` (nuevo, `npm run test:precio`) cubre 15 frases reales del equipo y 7 textos sin precio.
+- **Versión donde se corrigió:** 2.2.1
+
 ## BUG-014: Proveedor primario Gemini roto — gemini-2.5-flash-lite deprecado (404)
 - **Prioridad:** Crítica
 - **Estado:** Resuelto (2026-08-04)

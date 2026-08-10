@@ -117,7 +117,12 @@ function formatearPedido(pedido: PedidoActual | null): string {
   if (pedido.sucursal) partes.push(`Sucursal: ${pedido.sucursal}${pedido.sucursal_por_confirmar ? ' (POR CONFIRMAR — pide confirmación antes de cerrar)' : ''}`)
   if (pedido.arreglo) partes.push(`Arreglo: ${pedido.arreglo.nombre} ($${pedido.arreglo.precio})`)
   if (pedido.productoPersonalizado) partes.push(`Personalizado: ${pedido.productoPersonalizado}`)
-  if (pedido.precioPersonalizado) partes.push(`Precio personalizado: $${pedido.precioPersonalizado}`)
+  if (pedido.precioPersonalizado) {
+    partes.push(`Precio personalizado: $${pedido.precioPersonalizado}`)
+    if (pedido.precioConfirmadoPor) {
+      partes.push(`Precio confirmado por: ${pedido.precioConfirmadoPor} (ya validado — NO vuelvas a pedir confirmación de este mismo precio)`)
+    }
+  }
   if (pedido.fechaEntrega) partes.push(`Fecha entrega: ${pedido.fechaEntrega}`)
   if (pedido.horaEntrega) partes.push(`Hora entrega: ${pedido.horaEntrega}`)
   if (pedido.envio) partes.push(`Envío: ${pedido.envio.zona} ($${pedido.envio.precio})`)
