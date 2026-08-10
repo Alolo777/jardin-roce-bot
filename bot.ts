@@ -61,10 +61,10 @@ import { cargarIgnorados, MENSAJES_RESCATADOS } from './src/whatsapp/preferences
 import { obtenerNumeroReal, setBaileysKeys, limpiarCacheNumeros } from './src/whatsapp/contact.service'
 import { notificarEmpleadosWhatsApp, enviarFotoEmpleadosWhatsApp } from './src/whatsapp/notification.service'
 import { detectarCancelacion, detectarQueja, detectarEvento, detectarInteresCompra } from './src/decision/intent-detector'
-import { FRUSTRACION_NOTIFICADA, ATENCION_HUMANA_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, RECLAMACION_NOTIFICADA, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, ALERTAS_DEDUP, ULTIMA_INTERVENCION_HUMANA, RATE_TIMESTAMPS, FOTOS_DISPONIBLES_TTL_MS, INTERVENCION_HUMANA_TTL_MS, limpiarCachesEstado, debeNotificarAtencionHumana, debeNotificarReclamacion, debeEnviarAlertaDedup, registrarIntervencionHumana, obtenerIntervencionHumanaReciente, extraerPrecioRespuesta, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, RATE_AVISADOS, estaRateLimited, obtenerFotosPendientesApertura, limpiarFotosPendientesApertura } from './src/whatsapp/bot-state'
-import { cargarEstado, guardarEstado, iniciarPersistenciaPeriodica } from './src/whatsapp/bot-state-persistence'
+import { FRUSTRACION_NOTIFICADA, ATENCION_HUMANA_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, RECLAMACION_NOTIFICADA, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, ALERTAS_DEDUP, ULTIMA_INTERVENCION_HUMANA, RATE_TIMESTAMPS, FOTOS_DISPONIBLES_TTL_MS, INTERVENCION_HUMANA_TTL_MS, limpiarCachesEstado, debeNotificarAtencionHumana, debeNotificarReclamacion, debeEnviarAlertaDedup, registrarIntervencionHumana, obtenerIntervencionHumanaReciente, extraerPrecioRespuesta, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, RATE_AVISADOS, estaRateLimited, obtenerFotosPendientesApertura, limpiarFotosPendientesApertura, setOnFotosPendientesCambiaron } from './src/whatsapp/bot-state'
+import { cargarEstado, guardarEstado, iniciarPersistenciaPeriodica, limpiarClavesVacias } from './src/whatsapp/bot-state-persistence'
 import { validarHorario, esHorarioAnticipado, HORARIO_APERTURA } from './src/validators/horario.validator'
-import { refrescarConfiguracion } from './src/config/configuracion.service'
+import { refrescarConfiguracion, obtenerHorarios } from './src/config/configuracion.service'
 import { refrescarInventario } from './src/config/inventario.service'
 import { listarReclamaciones, marcarReclamacionResuelta, formatearReclamaciones } from './src/reclamaciones/reclamacion.service'
 import { obtenerTextoCuenta, determinarInstruccionPago } from './src/validators/pago.validator'
@@ -287,7 +287,38 @@ async function flushearFotosPendientesApertura(): Promise<void> {
   }
 }
 
-// Revisa cada 5 min si ya hay horario de atención y hay fotos encoladas para reenviar.
+// Scheduler preciso: reenvía las fotos encoladas a la hora exacta de apertura.
+// Calcula los ms restantes hasta la próxima apertura (hoy si aún no abre, mañana si ya cerró)
+// y se reprograma después de cada disparo. El reintento de cada 5 min queda como red de seguridad.
+let timerFlushApertura: ReturnType<typeof setTimeout> | null = null
+
+function msHastaProximaApertura(): number {
+  const ahora = ahoraCdmx()
+  const horarios = obtenerHorarios()
+  const aperturaMs = horarios.apertura * 60 * 60_000
+  const minutosActuales = ahora.hora * 60 + ahora.minuto
+  const msActualesDia = minutosActuales * 60_000
+  if (msActualesDia < aperturaMs) {
+    return aperturaMs - msActualesDia
+  }
+  return (24 * 60 * 60_000) - msActualesDia + aperturaMs
+}
+
+function programarFlushApertura(): void {
+  if (timerFlushApertura) clearTimeout(timerFlushApertura)
+  const espera = Math.max(msHastaProximaApertura(), 30_000)
+  timerFlushApertura = setTimeout(() => {
+    if (sock && BOT_READY && estaEnHorario() && obtenerFotosPendientesApertura().length > 0) {
+      flushearFotosPendientesApertura().catch(err => console.error('[bot] Error flush fotos apertura:', err))
+    }
+    programarFlushApertura()
+  }, espera)
+  timerFlushApertura.unref?.()
+}
+programarFlushApertura()
+
+// Red de seguridad: si el scheduler exacto se pierde (reinicio, cambio de hora),
+// un ciclo de 5 min garantiza el reenvío sin duplicados.
 setInterval(() => {
   if (!sock || !BOT_READY) return
   if (!estaEnHorario()) return
@@ -1394,7 +1425,13 @@ const messageEntry = createMessageEntry({
   TIPOS_MEDIA_NO_SOPORTADOS,
   registrarActividad,
 })
-cargarEstado().catch(() => {})
+cargarEstado().then(() => {
+  limpiarClavesVacias().catch(() => {})
+}).catch(() => {})
+setOnFotosPendientesCambiaron(() => {
+  guardarEstado().catch(() => {})
+  limpiarClavesVacias().catch(() => {})
+})
 subscribeTelegramEvents()
 subscribeLogEvents()
 logger.info('bot', 'Bot iniciado — observabilidad activa')

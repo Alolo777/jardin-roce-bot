@@ -26,10 +26,19 @@ export interface FotoPendienteApertura {
 // las reciba a primera hora (cuando estén en horario de atención), sin molestarlos de noche.
 export const FOTOS_PENDIENTES_APERTURA = new Map<string, FotoPendienteApertura[]>()
 
+// Hook que se registra desde bot.ts para persistir la cola apenas se encola una foto
+// (evita perder la notificación si el bot se reinicia de noche).
+let onFotosPendientesCambiaron: (() => void) | null = null
+
+export function setOnFotosPendientesCambiaron(fn: (() => void) | null): void {
+  onFotosPendientesCambiaron = fn
+}
+
 export function encolarFotoPendienteApertura(clienteId: string, foto: FotoPendienteApertura): void {
   const actual = FOTOS_PENDIENTES_APERTURA.get(clienteId) ?? []
   actual.push(foto)
   FOTOS_PENDIENTES_APERTURA.set(clienteId, actual)
+  onFotosPendientesCambiaron?.()
 }
 
 export function obtenerFotosPendientesApertura(): FotoPendienteApertura[] {
@@ -38,6 +47,7 @@ export function obtenerFotosPendientesApertura(): FotoPendienteApertura[] {
 
 export function limpiarFotosPendientesApertura(): void {
   FOTOS_PENDIENTES_APERTURA.clear()
+  onFotosPendientesCambiaron?.()
 }
 
 export const FOTOS_DISPONIBLES_TTL_MS = 2 * 60 * 60_000

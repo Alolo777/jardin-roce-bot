@@ -1690,6 +1690,26 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-081: La cola de fotos fuera de horario se persiste en Supabase y se flushea a la hora exacta de apertura
+
+**Fecha:** 2026-08-10
+**Estado:** Aceptada
+
+**Motivo:** En DEC-080 la cola `FOTOS_PENDIENTES_APERTURA` vivía solo en memoria: si el bot se reiniciaba de noche (despliegue, crash, VM), el equipo perdía la notificación de fotos recibidas fuera de horario. Además, el flush con `setInterval` de 5 min hacía que las fotos pudieran llegar al equipo hasta 5 min después de abrir.
+
+**Alternativas consideradas:**
+1. Persistir la cola en una tabla nueva de Supabase (rechazada: `bot_cache` ya es el mecanismo estándar de persistencia del estado en memoria y sobrevive reinicios).
+2. Mantener solo el `setInterval` de 5 min (rechazada: las fotos podían llegar tarde a la apertura; y sin persistencia se perdían al reiniciar).
+3. **Agregar `FOTOS_PENDIENTES_APERTURA` a `MAPAS_A_PERSISTIR` + `setTimeout` a la hora exacta de apertura (elegida):** la cola se restaura con `cargarEstado()` y se guarda con `guardarEstado()`; un hook (`setOnFotosPendientesCambiaron`) persiste de inmediato al encolar; `programarFlushApertura()` calcula los ms exactos hasta la próxima apertura y se reprograma solo. El ciclo de 5 min queda como red de seguridad sin duplicar (la cola se limpia en el primer flush).
+
+**Resultado:** Las fotos fuera de horario sobreviven reinicios (persistidas en `bot_cache`), se persisten al instante al encolar, y el equipo las recibe exactamente a la apertura (10:00 por defecto, configurable en Supabase). `limpiarClavesVacias()` borra claves de mapas ya vacíos para no reenviar datos consumidos.
+
+**Ventajas:** Sin pérdida de notificaciones ante reinicios; reenvío puntual a la apertura; sin duplicados (la cola se limpia en el primer flush); sin cambios de esquema (reutiliza `bot_cache`).
+
+**Desventajas:** Una escritura adicional a Supabase por foto encolada (fuera de horario es bajo volumen, aceptable).
+
+---
+
 **Fecha:** 2026-08-09
 **Estado:** Aceptada
 

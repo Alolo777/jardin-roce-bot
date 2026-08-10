@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '../../lib/supabase'
-import { FRUSTRACION_NOTIFICADA, ATENCION_HUMANA_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, RECLAMACION_NOTIFICADA, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, ALERTAS_DEDUP, ULTIMA_INTERVENCION_HUMANA, RATE_TIMESTAMPS } from './bot-state'
+import { FRUSTRACION_NOTIFICADA, ATENCION_HUMANA_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, RECLAMACION_NOTIFICADA, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, ALERTAS_DEDUP, ULTIMA_INTERVENCION_HUMANA, RATE_TIMESTAMPS, FOTOS_PENDIENTES_APERTURA } from './bot-state'
 
 const MAPAS_A_PERSISTIR: { key: string; map: Map<string, any> }[] = [
   { key: 'ULTIMA_INTERVENCION_HUMANA', map: ULTIMA_INTERVENCION_HUMANA },
@@ -12,6 +12,7 @@ const MAPAS_A_PERSISTIR: { key: string; map: Map<string, any> }[] = [
   { key: 'ENVIO_NOTIFICADO',           map: ENVIO_NOTIFICADO },
   { key: 'FOTOS_NOTIFICADO',           map: FOTOS_NOTIFICADO },
   { key: 'FOTOS_DISPONIBLES_RECIENTES',map: FOTOS_DISPONIBLES_RECIENTES },
+  { key: 'FOTOS_PENDIENTES_APERTURA',  map: FOTOS_PENDIENTES_APERTURA },
 ]
 
 function mapToRecords(map: Map<string, any>): Record<string, any> {
@@ -74,6 +75,25 @@ export async function guardarEstado(): Promise<void> {
     }
   } catch (err) {
     console.error('[bot-cache] Error guardando estado:', err)
+  }
+}
+
+// Borra del bot_cache las claves cuyos mapas ahora están vacíos.
+// Evita que un reinicio restaure datos ya consumidos (ej: FOTOS_PENDIENTES_APERTURA
+// que ya fueron reenviadas al equipo) y reenvíe notificaciones duplicadas.
+export async function limpiarClavesVacias(): Promise<void> {
+  const clavesVacias = MAPAS_A_PERSISTIR.filter(e => e.map.size === 0).map(e => e.key)
+  if (clavesVacias.length === 0) return
+  try {
+    const { error } = await supabaseAdmin
+      .from('bot_cache')
+      .delete()
+      .in('key', clavesVacias)
+    if (error) {
+      console.error('[bot-cache] Error limpiando claves vacías:', error.message)
+    }
+  } catch (err) {
+    console.error('[bot-cache] Error limpiando claves vacías:', err)
   }
 }
 

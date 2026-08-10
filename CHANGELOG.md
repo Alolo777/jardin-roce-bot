@@ -2,6 +2,27 @@
 
 ## 2026-08-10
 
+### Fotos fuera de horario: cola persistida en Supabase + flush a la hora exacta de apertura
+
+**Problema:** La cola `FOTOS_PENDIENTES_APERTURA` vivía solo en memoria: si el bot se reiniciaba de noche, el equipo perdía la notificación de fotos recibidas fuera de horario. Además, el flush dependía de un ciclo de 5 minutos, así que las fotos podían llegar al equipo varios minutos después de la apertura.
+
+**Solución (código):**
+- **Persistencia en Supabase** (`src/whatsapp/bot-state-persistence.ts`): `FOTOS_PENDIENTES_APERTURA` se agregó a `MAPAS_A_PERSISTIR`, por lo que `cargarEstado()` restaura la cola al arrancar y `guardarEstado()` la conserva cada 5 min. Nueva función `limpiarClavesVacias()` borra del `bot_cache` las claves cuyos mapas ya están vacíos, evitando que un reinicio reenvíe fotos ya entregadas al equipo (sin duplicados).
+- **Persistencia inmediata al encolar** (`src/whatsapp/bot-state.ts`): nuevo hook `setOnFotosPendientesCambiaron()` que `bot.ts` registra para llamar `guardarEstado()` + `limpiarClavesVacias()` apenas se encola o se limpia la cola (ventana de pérdida ~0 ms).
+- **Flush a la hora exacta de apertura** (`bot.ts`): se reemplaza el `setInterval` de 5 min por `programarFlushApertura()`, un `setTimeout` que calcula los ms exactos hasta la próxima apertura (usa `obtenerHorarios().apertura`, hoy si aún no abre, mañana si ya cerró) y se reprograma tras cada disparo. Se conserva el ciclo de 5 min como red de seguridad (no duplica: la cola se limpia en el primer flush).
+
+**Archivos modificados:** `src/whatsapp/bot-state.ts`, `src/whatsapp/bot-state-persistence.ts`, `bot.ts`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `test:horario`, `test:precio`, `test:validator`, `test:flows` OK.
+
+**Impacto:** Compatible. Las fotos fuera de horario sobreviven reinicios del bot y llegan al equipo justo a la apertura. Si se despliega en la VM: `git pull` + `sudo systemctl restart floreria-bot`.
+
+**Rollback:** Sí — revertir el commit.
+
+---
+
+## 2026-08-10
+
 ### Flora se presenta como asistente virtual y atiende fuera de horario (fotos quedan para el equipo)
 
 **Problema:** El system prompt pedía a Flora presentarse como "empleada de Jardín RoCe" y las anotaciones `[CONTEXTO: Fuera de Horario]` existían en el prompt pero NUNCA llegaban al LLM (el código inyectaba solo `validarHorario().mensajeBackend`). Además, las fotos que llegaban fuera de horario se reenviaban al equipo al instante, molestándolos de noche, y el cliente quedaba sin atención.
