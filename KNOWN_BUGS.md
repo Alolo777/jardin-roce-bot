@@ -143,6 +143,16 @@
 - **Pruebas:** `npx tsc --noEmit` 0 errores; `tests/precio.test.mts` (nuevo, `npm run test:precio`) cubre 15 frases reales del equipo y 7 textos sin precio.
 - **Versión donde se corrigió:** 2.2.1
 
+## BUG-016: Fuera de horario las fotos se reenviaban al equipo al instante y el cliente quedaba sin atención clara
+- **Prioridad:** Media
+- **Estado:** Resuelto (2026-08-10, DEC-080)
+- **Reportado:** 2026-08-10
+- **Síntomas:** Con el negocio cerrado, las fotos/media que llegaban por WhatsApp se reenviaban de inmediato al equipo (alertas de noche). Además, la presentación de Flora como "empleada" y las anotaciones `[CONTEXTO: Fuera de Horario]` del prompt nunca llegaban al LLM, por lo que fuera de horario el cliente recibía respuestas genéricas o sin dirección.
+- **Causa raíz:** (1) `procesarMediaAcumulado` y el `finally` de medios pendientes emitían `PHOTO_RECEIVED` + `notificarEmpleadosWhatsApp` sin verificar el horario. (2) `message-handler.ts:472` inyectaba solo `validarHorario().mensajeBackend` en lugar de `getContextoHorario()` (que existía pero nunca se usaba). (3) `getContextoHorario()` solo contenía el texto de cierre, sin instrucciones para el modo asistente virtual fuera de horario.
+- **Corrección (DEC-080):** (1) Nueva cola `FOTOS_PENDIENTES_APERTURA` (bot-state.ts) + `encolarFotoPendienteApertura`/`obtenerFotosPendientesApertura`/`limpiarFotosPendientesApertura`. (2) Fuera de horario (`!estaEnHorario()`) las fotos/comprobantes/referencias/cotizaciones se encolan en lugar de emitir/notificar. (3) `getContextoHorario()` enriquecido y ahora sí inyectado. (4) Prompt: Flora se presenta como asistente virtual + nueva sección "Fuera de horario" + anotación reescrita. (5) Flush en bot.ts (cada 5 min) que al volver a estar en horario reenvía las fotos encoladas al equipo con resumen.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; `test:horario`, `test:precio`, `test:validator`, `test:flows` OK.
+- **Versión donde se corrigió:** 2.2.2
+
 ## BUG-014: Proveedor primario Gemini roto — gemini-2.5-flash-lite deprecado (404)
 - **Prioridad:** Crítica
 - **Estado:** Resuelto (2026-08-04)

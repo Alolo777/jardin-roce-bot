@@ -12,6 +12,34 @@ export const ALERTAS_DEDUP = new Map<string, number>()
 export const ULTIMA_INTERVENCION_HUMANA = new Map<string, { ts: number; texto: string; precio?: number }>()
 export const RATE_TIMESTAMPS = new Map<string, number[]>()
 
+export interface FotoPendienteApertura {
+  telefono: string
+  tipo: 'referencia' | 'comprobante' | 'otra' | 'cotizacion'
+  base64?: string
+  mimetype?: string
+  caption?: string
+  descripcion?: string
+  ts: number
+}
+
+// Fotos e imágenes recibidas FUERA DE HORARIO. Se guardan aquí para que el equipo
+// las reciba a primera hora (cuando estén en horario de atención), sin molestarlos de noche.
+export const FOTOS_PENDIENTES_APERTURA = new Map<string, FotoPendienteApertura[]>()
+
+export function encolarFotoPendienteApertura(clienteId: string, foto: FotoPendienteApertura): void {
+  const actual = FOTOS_PENDIENTES_APERTURA.get(clienteId) ?? []
+  actual.push(foto)
+  FOTOS_PENDIENTES_APERTURA.set(clienteId, actual)
+}
+
+export function obtenerFotosPendientesApertura(): FotoPendienteApertura[] {
+  return [...FOTOS_PENDIENTES_APERTURA.values()].flat()
+}
+
+export function limpiarFotosPendientesApertura(): void {
+  FOTOS_PENDIENTES_APERTURA.clear()
+}
+
 export const FOTOS_DISPONIBLES_TTL_MS = 2 * 60 * 60_000
 export const INTERVENCION_HUMANA_TTL_MS = 10 * 60_000
 

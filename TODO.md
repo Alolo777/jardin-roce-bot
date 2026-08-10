@@ -22,6 +22,7 @@
 **Progreso global estimado: ~99%**
 **bot.ts actual: ~2442 líneas (reducción diferida a Fase 10 — Optimización)**
 **Nota M11b:** Telegram verificado 100% basado en Event Engine. No hay llamadas directas a `lib/telegram` desde `bot.ts`.
+**Nota 2026-08-10:** Flora se presenta como asistente virtual y atiende fuera de horario. Fotos/media recibidas con el negocio cerrado se encolan en `FOTOS_PENDIENTES_APERTURA` (bot-state.ts) y se reenvían al equipo automáticamente en la apertura (flush cada 5 min en bot.ts). DEC-080.
 
 ## Errores de la Versión Anterior
 

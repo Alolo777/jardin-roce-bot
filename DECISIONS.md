@@ -1670,7 +1670,25 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
-## DEC-078: Proteger el dashboard con login obligatorio vía proxy de Next.js
+## DEC-080: Flora es asistente virtual y atiende fuera de horario; las fotos se encolan y se reenvían a la apertura
+
+**Fecha:** 2026-08-10
+**Estado:** Aceptada
+
+**Motivo:** (1) El system prompt le decía al LLM que Flora era "empleada de Jardín RoCe" y las anotaciones `[CONTEXTO: Fuera de Horario]` existían en el prompt pero nunca llegaban al LLM (el código inyectaba solo el texto corto de `validarHorario().mensajeBackend`). El cliente fuera de horario recibía atención genérica o quedaba sin respuesta. (2) Las fotos/media que llegaban fuera de horario se reenviaban al equipo al instante por WhatsApp, molestándolos de noche.
+
+**Alternativas consideradas:**
+1. Solo editar el prompt (rechazada: el `[CONTEXTO: Fuera de Horario]` del prompt nunca se inyectaba; además no resuelve el reenvío nocturno al equipo).
+2. Guardar las fotos en Supabase y dejar que el equipo las consulte a mano (rechazada: agrega flujo manual; la notificación proactiva ya existe).
+3. **Cola en memoria + flush a primera hora (elegida):** `FOTOS_PENDIENTES_APERTURA` en `bot-state.ts`; fuera de horario las fotos se encolan (comprobante/referencia/otra/cotización) sin emitir eventos ni notificar al equipo; un `setInterval` de 5 min en `bot.ts` reenvía todo cuando `estaEnHorario()` vuelve a ser `true`.
+
+**Resultado:** Flora se presenta como asistente virtual, explica su rol, y fuera de horario recoge foto + presupuesto + fecha, comparte catálogo Drive y cuenta BBVA, da la hora exacta de apertura y promete respuesta a primera hora. Los empleados reciben las fotos encoladas juntas en la apertura (resumen + foto), nunca de noche. El contexto de horario ahora SÍ llega al LLM vía `getContextoHorario()`.
+
+**Ventajas:** El cliente nunca queda sin atención; el equipo no recibe alertas de noche; el backend decide (no el LLM) cuándo diferir y cuándo reenviar; sin cambios en esquema de Supabase.
+
+**Desventajas:** Cola en memoria (se pierde si el bot se reinicia de noche). Aceptable: las fotos ya se persisten en el pedido (`fotoReferenciaBase64` / Supabase) cuando aplica; el riesgo es solo perder la notificación al equipo, no el dato.
+
+---
 
 **Fecha:** 2026-08-09
 **Estado:** Aceptada

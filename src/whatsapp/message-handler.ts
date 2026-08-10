@@ -4,10 +4,10 @@ import { supabaseAdmin } from '../../lib/supabase'
 import type { VentaCerrada } from '../../lib/types'
 import { obtenerHistorial, agregarAlHistorial, extraerTelefono, calcularHorasInactivo } from '../conversation/conversation.service'
 import { parseNombre, pareceNombreCliente, esNombrePlausible, parseSucursal, parseDireccion, extraerFecha, extraerHora } from '../parser'
-import { getMensajeTexto, getMessageBody, getFechaActual, hasQuotedMsg, getQuotedText, ahoraCdmx } from './message-utils'
+import { getMensajeTexto, getMessageBody, getFechaActual, hasQuotedMsg, getQuotedText, ahoraCdmx, getContextoHorario, estaEnHorario } from './message-utils'
 import { notificarEmpleadosWhatsApp, enviarFotoEmpleadosWhatsApp } from './notification.service'
 import { obtenerNumeroReal } from './contact.service'
-import { FRUSTRACION_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, FOTOS_DISPONIBLES_TTL_MS, debeEnviarAlertaDedup, debeNotificarAtencionHumana, debeNotificarReclamacion, obtenerIntervencionHumanaReciente, RATE_AVISADOS, RATE_LIMIT_WINDOW_MS, extraerPrecioRespuesta } from './bot-state'
+import { FRUSTRACION_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, FOTOS_DISPONIBLES_TTL_MS, debeEnviarAlertaDedup, debeNotificarAtencionHumana, debeNotificarReclamacion, obtenerIntervencionHumanaReciente, RATE_AVISADOS, RATE_LIMIT_WINDOW_MS, extraerPrecioRespuesta, encolarFotoPendienteApertura } from './bot-state'
 import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema, clasificarTipoCaso } from '../casos/caso.service'
 import { crearPedido, obtenerPedido, transitarDesdeFlujo, archivarPedido, sincronizarConCaso } from '../pedidos/pedido.service'
 import {
@@ -25,7 +25,7 @@ import { buildValidatedRulesSection } from '../openai/prompt.builder'
 
 import { construirContextoPrompt } from '../openai/prompt.builder'
 import { detectarCancelacion, detectarQueja, detectarEvento, detectarInteresCompra } from '../decision/intent-detector'
-import { validarHorario, esHorarioAnticipado, HORARIO_APERTURA } from '../validators/horario.validator'
+import { esHorarioAnticipado, HORARIO_APERTURA } from '../validators/horario.validator'
 import { obtenerTextoCuenta } from '../validators/pago.validator'
 import { validarSucursal, obtenerTextoConfirmacionSucursal } from '../validators/sucursal.validator'
 import { buscarEnvio, pareceConsultaEnvio, detectarLinkMaps, formatearZonasParaPrompt } from '../validators/envio.validator'
@@ -295,8 +295,14 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       }
     }
 
+    const enHorario = estaEnHorario()
+
     for (const media of mediaAcumulado) {
       if (esComprobante) {
+        if (!enHorario) {
+          encolarFotoPendienteApertura(clienteId, { telefono, tipo: 'comprobante', base64: media.base64, mimetype: media.mimetype, caption: media.caption, ts: Date.now() })
+          continue
+        }
         eventBus.emit(EventType.PHOTO_RECEIVED, {
           telefono,
           tipo: 'comprobante',
@@ -307,6 +313,10 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         enviarFotoEmpleadosWhatsApp(sock, media.base64, `📸 *Comprobante de pago* — ${telefono}${media.caption ? `\n\n${media.caption}` : ''}\n\nVerifica el comprobante y confirma el pago.`, media.mimetype).catch(err => console.error('[bot] WhatsApp foto comprobante:', err))
         notificarEmpleadosWhatsApp(sock, `💰 *Comprobante de pago recibido:* ${telefono}\n\nRevisa la foto del comprobante y confirma el pago con el equipo.`).catch(err => console.error('[bot] WhatsApp notif comprobante:', err))
       } else if (esReferencia) {
+        if (!enHorario) {
+          encolarFotoPendienteApertura(clienteId, { telefono, tipo: 'referencia', base64: media.base64, mimetype: media.mimetype, caption: media.caption, ts: Date.now() })
+          continue
+        }
         eventBus.emit(EventType.PHOTO_RECEIVED, {
           telefono,
           tipo: 'referencia',
@@ -319,6 +329,10 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           eventBus.emit(EventType.PHOTO_SENT, { telefono, descripcion: media.caption || 'Foto de referencia' })
         }
       } else {
+        if (!enHorario) {
+          encolarFotoPendienteApertura(clienteId, { telefono, tipo: 'otra', base64: media.base64, mimetype: media.mimetype, caption: media.caption, ts: Date.now() })
+          continue
+        }
         eventBus.emit(EventType.PHOTO_RECEIVED, {
           telefono,
           tipo: 'otra',
@@ -371,11 +385,15 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       pedido.detallesEspeciales = descripcion
       await deps.persistirPedido(clienteId, telefono, 'cotizacion', descripcion)
       if (debeEnviarAlertaDedup(clienteId, 'cotizacion-foto', descripcion, 30 * 60_000)) {
-        eventBus.emit(EventType.COTIZACION_REQUESTED, { telefono, descripcion })
-        eventBus.emit(EventType.CUSTOMER_WAITING, { telefono, descripcion: 'Cliente esperando cotización del equipo' })
-        notificarEmpleadosWhatsApp(sock,
-          `🌷 *Cliente necesita cotización:* ${telefono}\n\n${descripcion}\n\nRevisa la foto de referencia y cotízale por WhatsApp.`
-        ).catch(err => console.error('[bot] WhatsApp empleados cotización:', err))
+        if (!enHorario) {
+          encolarFotoPendienteApertura(clienteId, { telefono, tipo: 'cotizacion', caption: descripcion, ts: Date.now() })
+        } else {
+          eventBus.emit(EventType.COTIZACION_REQUESTED, { telefono, descripcion })
+          eventBus.emit(EventType.CUSTOMER_WAITING, { telefono, descripcion: 'Cliente esperando cotización del equipo' })
+          notificarEmpleadosWhatsApp(sock,
+            `🌷 *Cliente necesita cotización:* ${telefono}\n\n${descripcion}\n\nRevisa la foto de referencia y cotízale por WhatsApp.`
+          ).catch(err => console.error('[bot] WhatsApp empleados cotización:', err))
+        }
       }
       return 'referencia'
     }
@@ -451,7 +469,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       }
 
       const intencion = detectarIntencion(textoCliente, clienteId, { pedidoEstaCerrado: deps.pedidoEstaCerrado })
-      const horario = validarHorario().mensajeBackend
+      const horario = getContextoHorario()
       const pedidoEngine = obtenerPedido(clienteId)
       const contextoPrompt = construirContextoPrompt({
         decision,
@@ -782,14 +800,16 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
 
       let ventaCerrada = false
       const tipoMediaProcesada = await procesarMediaAcumulado(clienteId, await numeroRealPromise, textoCliente, sock, msg.pushName)
+      const enHorarioMedia = estaEnHorario()
+      const fueraDeHorarioTexto = enHorarioMedia ? '' : ' El equipo ya descansó, pero tu foto queda guardada y la revisa a primera hora 🌷'
       if (tipoMediaProcesada === 'referencia') {
-        const respuesta = 'Ya recibí la foto de referencia 🌷 Se la paso al equipo para que la revise y te confirme el precio.'
+        const respuesta = `Ya recibí la foto de referencia 🌷${fueraDeHorarioTexto ? ` ${fueraDeHorarioTexto}` : ' Se la paso al equipo para que la revise y te confirme el precio.'}`
         await deps.responderMensaje(msg, respuesta)
         await agregarAlHistorial(telefono, 'assistant', respuesta)
         return
       }
       if (tipoMediaProcesada === 'imagen') {
-        const respuesta = 'Ya recibí tu imagen 🌷 Se la paso al equipo para que la revise.'
+        const respuesta = `Ya recibí tu imagen 🌷${fueraDeHorarioTexto ? ` ${fueraDeHorarioTexto}` : ' Se la paso al equipo para que la revise.'}`
         await deps.responderMensaje(msg, respuesta)
         await agregarAlHistorial(telefono, 'assistant', respuesta)
         return
@@ -797,13 +817,13 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       if (tipoMediaProcesada === 'comprobante') {
         const venta = deps.ventaDesdeEstado(clienteId)
         if (venta && deps.ventaListaParaCerrar(clienteId) && !deps.pedidoEstaCerrado(clienteId)) {
-          const confirmacion = `¡Gracias, ${venta.cliente}! 🌸 Recibí tu comprobante. Tu pedido queda registrado. Total: ${venta.total}.`
+          const confirmacion = `¡Gracias, ${venta.cliente}! 🌸 Recibí tu comprobante. Tu pedido queda registrado. Total: ${venta.total}.${enHorarioMedia ? '' : ' El equipo lo valida a primera hora.'}`
           await deps.responderMensaje(msg, confirmacion)
           await agregarAlHistorial(telefono, 'assistant', confirmacion)
           await deps.ventaCerradaHandler(clienteId, venta, await numeroRealPromise)
           ventaCerrada = true
         } else {
-          const respuesta = 'Gracias, ya recibí tu comprobante 🌷 Lo registro para que el equipo continúe con tu pedido.'
+          const respuesta = `Gracias, ya recibí tu comprobante 🌷 Lo registro${enHorarioMedia ? ' para que el equipo continúe con tu pedido.' : ' y el equipo lo valida a primera hora.'}`
           await deps.responderMensaje(msg, respuesta)
           await agregarAlHistorial(telefono, 'assistant', respuesta)
         }
@@ -1063,7 +1083,12 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       if (mediaPendiente && mediaPendiente.length > 0) {
         deps.MEDIA_POR_CLIENTE.delete(clienteId)
         const telefonoReal = await numeroRealPromise.catch(() => telefono)
+        const enHorarioPendiente = estaEnHorario()
         for (const media of mediaPendiente) {
+          if (!enHorarioPendiente) {
+            encolarFotoPendienteApertura(clienteId, { telefono: telefonoReal, tipo: 'otra', base64: media.base64, mimetype: media.mimetype, caption: media.caption, ts: Date.now() })
+            continue
+          }
           eventBus.emit(EventType.PHOTO_RECEIVED, {
             telefono: telefonoReal,
             tipo: 'pendiente',

@@ -61,7 +61,7 @@ import { cargarIgnorados, MENSAJES_RESCATADOS } from './src/whatsapp/preferences
 import { obtenerNumeroReal, setBaileysKeys, limpiarCacheNumeros } from './src/whatsapp/contact.service'
 import { notificarEmpleadosWhatsApp, enviarFotoEmpleadosWhatsApp } from './src/whatsapp/notification.service'
 import { detectarCancelacion, detectarQueja, detectarEvento, detectarInteresCompra } from './src/decision/intent-detector'
-import { FRUSTRACION_NOTIFICADA, ATENCION_HUMANA_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, RECLAMACION_NOTIFICADA, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, ALERTAS_DEDUP, ULTIMA_INTERVENCION_HUMANA, RATE_TIMESTAMPS, FOTOS_DISPONIBLES_TTL_MS, INTERVENCION_HUMANA_TTL_MS, limpiarCachesEstado, debeNotificarAtencionHumana, debeNotificarReclamacion, debeEnviarAlertaDedup, registrarIntervencionHumana, obtenerIntervencionHumanaReciente, extraerPrecioRespuesta, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, RATE_AVISADOS, estaRateLimited } from './src/whatsapp/bot-state'
+import { FRUSTRACION_NOTIFICADA, ATENCION_HUMANA_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, RECLAMACION_NOTIFICADA, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, ALERTAS_DEDUP, ULTIMA_INTERVENCION_HUMANA, RATE_TIMESTAMPS, FOTOS_DISPONIBLES_TTL_MS, INTERVENCION_HUMANA_TTL_MS, limpiarCachesEstado, debeNotificarAtencionHumana, debeNotificarReclamacion, debeEnviarAlertaDedup, registrarIntervencionHumana, obtenerIntervencionHumanaReciente, extraerPrecioRespuesta, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, RATE_AVISADOS, estaRateLimited, obtenerFotosPendientesApertura, limpiarFotosPendientesApertura } from './src/whatsapp/bot-state'
 import { cargarEstado, guardarEstado, iniciarPersistenciaPeriodica } from './src/whatsapp/bot-state-persistence'
 import { validarHorario, esHorarioAnticipado, HORARIO_APERTURA } from './src/validators/horario.validator'
 import { refrescarConfiguracion } from './src/config/configuracion.service'
@@ -221,6 +221,79 @@ setInterval(() => {
     verificarTelegramDiario()
   }
 }, 30 * 60_000)
+
+// ════════════════════════════════════════════════════════════════
+// FOTOS RECIBIDAS FUERA DE HORARIO — reenvío a primera hora
+// Las fotos/imágenes que llegan con el negocio cerrado se encolan
+// (FOTOS_PENDIENTES_APERTURA) y aquí se reenvían al equipo cuando
+// vuelven a estar en horario de atención, sin molestarlos de noche.
+// ════════════════════════════════════════════════════════════════
+
+async function flushearFotosPendientesApertura(): Promise<void> {
+  const pendientes = obtenerFotosPendientesApertura()
+  if (pendientes.length === 0) return
+  limpiarFotosPendientesApertura()
+  const ahoraEtiqueta = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+  console.log(`[bot] 🌅 Reenviando ${pendientes.length} foto(s) recibida(s) fuera de horario al equipo`)
+  try {
+    await notificarEmpleadosWhatsApp(
+      sock,
+      `🌅 *Buenos días!* Te compartimos ${pendientes.length} foto(s)/solicitud(es) recibidas fuera de nuestro horario (ahora son las ${ahoraEtiqueta}). Atiéndelas a primera hora.`
+    )
+  } catch (err) {
+    console.error('[bot] Error avisando de fotos pendientes:', err)
+  }
+  for (const foto of pendientes) {
+    try {
+      if (foto.tipo === 'comprobante') {
+        eventBus.emit(EventType.PHOTO_RECEIVED, {
+          telefono: foto.telefono,
+          tipo: 'comprobante',
+          base64: foto.base64,
+          mimetype: foto.mimetype,
+          caption: foto.caption,
+        })
+        await enviarFotoEmpleadosWhatsApp(sock, foto.base64!, `📸 *Comprobante de pago (recibido fuera de horario)* — ${foto.telefono}${foto.caption ? `\n\n${foto.caption}` : ''}\n\nVerifica el comprobante y confirma el pago.`, foto.mimetype ?? 'image/jpeg')
+        await notificarEmpleadosWhatsApp(sock, `💰 *Comprobante de pago recibido fuera de horario:* ${foto.telefono}\n\nRevisa la foto del comprobante y confirma el pago con el equipo.`)
+      } else if (foto.tipo === 'referencia') {
+        eventBus.emit(EventType.PHOTO_RECEIVED, {
+          telefono: foto.telefono,
+          tipo: 'referencia',
+          base64: foto.base64,
+          mimetype: foto.mimetype,
+          caption: foto.caption,
+        })
+        await enviarFotoEmpleadosWhatsApp(sock, foto.base64!, `📷 Foto de referencia (recibida fuera de horario) de ${foto.telefono}${foto.caption ? `\n\nCliente dice: ${foto.caption}` : ''}`, foto.mimetype ?? 'image/jpeg')
+        eventBus.emit(EventType.PHOTO_SENT, { telefono: foto.telefono, descripcion: foto.caption || 'Foto de referencia' })
+      } else if (foto.tipo === 'cotizacion') {
+        await notificarEmpleadosWhatsApp(sock,
+          `🌷 *Cliente necesita cotización (recibida fuera de horario):* ${foto.telefono}\n\n${foto.caption || 'Revisa la foto de referencia y cotízale por WhatsApp.'}`
+        )
+      } else {
+        eventBus.emit(EventType.PHOTO_RECEIVED, {
+          telefono: foto.telefono,
+          tipo: 'otra',
+          base64: foto.base64,
+          mimetype: foto.mimetype,
+          caption: foto.caption,
+        })
+        if (foto.base64) {
+          await enviarFotoEmpleadosWhatsApp(sock, foto.base64, `📷 Imagen del cliente (recibida fuera de horario) — ${foto.telefono}${foto.caption ? `\n\nCliente dice: ${foto.caption}` : ''}`, foto.mimetype ?? 'image/jpeg')
+        }
+      }
+    } catch (err) {
+      console.error('[bot] Error reenviando foto pendiente:', err)
+    }
+  }
+}
+
+// Revisa cada 5 min si ya hay horario de atención y hay fotos encoladas para reenviar.
+setInterval(() => {
+  if (!sock || !BOT_READY) return
+  if (!estaEnHorario()) return
+  if (obtenerFotosPendientesApertura().length === 0) return
+  flushearFotosPendientesApertura().catch(err => console.error('[bot] Error flush fotos apertura:', err))
+}, 5 * 60_000)
 
 // ════════════════════════════════════════════════════════════════
 // LÍMITES Y RATE LIMITING

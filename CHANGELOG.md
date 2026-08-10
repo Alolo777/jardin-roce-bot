@@ -2,6 +2,30 @@
 
 ## 2026-08-10
 
+### Flora se presenta como asistente virtual y atiende fuera de horario (fotos quedan para el equipo)
+
+**Problema:** El system prompt pedía a Flora presentarse como "empleada de Jardín RoCe" y las anotaciones `[CONTEXTO: Fuera de Horario]` existían en el prompt pero NUNCA llegaban al LLM (el código inyectaba solo `validarHorario().mensajeBackend`). Además, las fotos que llegaban fuera de horario se reenviaban al equipo al instante, molestándolos de noche, y el cliente quedaba sin atención.
+
+**Solución (código + prompt):**
+- **Prompt** (`src/prompts/system-prompt.corregido.ts`): presentación actualizada a "asistente virtual" de la florería; anotación `[CONTEXTO: Fuera de Horario]` reescrita (asistente sigue trabajando, recoge foto + presupuesto + fecha, hora exacta de apertura, catálogo Drive, cuenta BBVA, mismo tono, NUNCA "mañana te muestro"); nueva sección `## Fuera de horario (la asistente virtual sigue trabajando)`.
+- **`getContextoHorario()`** (`src/whatsapp/message-utils.ts:136`): enriquecido con anotaciones completas de horario (abierto/cerrado) y ahora SÍ se inyecta en el prompt (`message-handler.ts:472` reemplaza a `validarHorario().mensajeBackend`).
+- **Cola de fotos fuera de horario** (`src/whatsapp/bot-state.ts`): `FOTOS_PENDIENTES_APERTURA` + `encolarFotoPendienteApertura()` / `obtenerFotosPendientesApertura()` / `limpiarFotosPendientesApertura()`.
+- **Diferir reenvíos al equipo** (`src/whatsapp/message-handler.ts`): en `procesarMediaAcumulado` y en el `finally` de medios pendientes, si `!estaEnHorario()` las fotos (comprobante/referencia/otra/cotización) se encolan en lugar de emitir eventos y notificar al equipo al instante.
+- **Respuestas al cliente** (`message-handler.ts:801`): fuera de horario, Flora confirma que guardó la foto y que el equipo la revisa a primera hora (mismo tono dulce).
+- **Flush de fotos a primera hora** (`bot.ts`): nuevo `setInterval` cada 5 min que, cuando vuelve a estar en horario, reenvía al equipo las fotos encoladas (foto + mensaje de resumen) y emite `PHOTO_RECEIVED`/`PHOTO_SENT`/notificaciones correspondientes.
+
+**Archivos modificados:** `src/prompts/system-prompt.corregido.ts`, `src/whatsapp/message-utils.ts`, `src/whatsapp/bot-state.ts`, `src/whatsapp/message-handler.ts`, `bot.ts`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `npm run test:horario`, `test:precio`, `test:validator`, `test:flows` todos OK.
+
+**Impacto:** Compatible. Fuera de horario los empleados dejan de recibir alertas/fotos al instante; reciben todo junto a la apertura. Si se despliega en la VM: `git pull` + `sudo systemctl restart floreria-bot`.
+
+**Rollback:** Sí — revertir el commit.
+
+---
+
+## 2026-08-10
+
 ### Bot reconoce precios reales dados por el equipo en el chat (BUG-015)
 
 **Problema:** Aunque un empleado respondiera en el chat del cliente con el precio real ("Son 450", "Queda en 450", "Te sale en 450"...), el bot seguía diciendo "esperando confirmación del equipo". El precio del empleado nunca se aplicaba al pedido.

@@ -140,11 +140,15 @@ export function getContextoHorario(): string {
     return `\n\n[CONTEXTO: Horario de atención] Hora actual CDMX: ${ahora.etiqueta}. Estamos ABIERTOS en este momento. No digas que estamos cerrados ni que se atenderá mañana.`
   }
   const estadoHorario = ahora.hora < horarios.apertura
-    ? `Aún no abrimos (abrimos a las ${horarios.apertura}:00 am).`
-    : `Ya cerramos por hoy (abrimos mañana a las ${horarios.apertura}:00 am).`
+    ? `Aún no abrimos (abrimos a las ${horarios.apertura}:00).`
+    : `Ya cerramos por hoy (abrimos mañana a las ${horarios.apertura}:00).`
   return (
     `\n\n[CONTEXTO: Fuera de Horario] Hora actual CDMX: ${ahora.etiqueta}. ${estadoHorario} ` +
-    `Flora sigue disponible para ayudar al cliente con cosas útiles: puede enviar FOTO de referencia del arreglo que quiere, indicar su presupuesto, su nombre y para qué día lo necesita, para que el equipo lo cotice a primera hora cuando abramos. ` +
-    `Pídele amablemente esos datos o confirma que recibió su foto de referencia. NUNCA le digas "mañana te muestro" ni inventes precios ni horarios.`
+    `El equipo humano ya no está disponible para contestar, PERO tú eres la asistente virtual de Jardín RoCe y sigues disponible para que el cliente NO pierda su pedido. ` +
+    `Ofrécele: 1) mandar la FOTO de referencia del arreglo que quiere, 2) decir su PRESUPUESTO aproximado y 3) para QUÉ DÍA lo necesita. ` +
+    `Promete amablemente que el equipo lo cotiza a primera hora cuando abran (a las ${horarios.apertura}:00). ` +
+    `Puedes compartir el catálogo de Google Drive (link del prompt) para que vaya viendo opciones y recibir su foto de referencia. ` +
+    `Si quiere pagar o apartar, comparte la cuenta BBVA (de [REGLAS VALIDADAS POR EL BACKEND]) y recibe su comprobante; el sistema lo registra y el equipo lo valida a primera hora. ` +
+    `NUNCA digas "mañana te muestro", NUNCA inventes precios, horarios, disponibilidad ni links.`
   )
 }
