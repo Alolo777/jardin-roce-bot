@@ -1728,4 +1728,24 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-082: Origen estructurado en historial_chat — distinguir respuestas verificadas del equipo
+
+**Fecha:** 2026-08-14
+**Estado:** Aceptada
+
+**Motivo:** La distinción entre "Flora (IA)" y "empleado humano" en el historial se basaba solo en el prefijo de texto `[Agente: ...]` y en el mapa en memoria `ULTIMA_INTERVENCION_HUMANA` (TTL 10 min, se pierde al reiniciar). Esto hacía que, pasada la TTL o tras un reinicio, el LLM pudiera ignorar o contradecir respuestas del equipo (precios, condiciones) y volver a preguntar lo ya confirmado.
+
+**Alternativas consideradas:**
+1. Seguir dependiendo del prefijo `[Agente:` y de la memoria (rechazada: frágil, no sobrevive reinicios, el `[EL EQUIPO HUMANO RESPONDIÓ]` solo se disparaba si el último mensaje assistant era del equipo).
+2. Crear una tabla nueva de "respuestas verificadas" (rechazada: duplica datos; `historial_chat` ya es la fuente de verdad).
+3. **Agregar columna `origen` a `historial_chat` + leer respuestas del equipo desde Supabase (elegida):** `origen` ('cliente' | 'flora' | 'equipo' | 'sistema') se escribe en cada `agregarAlHistorial`. Nueva función `obtenerUltimosMensajesEquipo()` consulta desde la DB (sobrevive reinicios, sin TTL de 10 min, retrocompatible con `[Agente:` via `.or()`). El contexto inyecta `[RESPUESTAS VERIFICADAS DEL EQUIPO]` con precio extraído, y el historial enviado al LLM/revisora se etiqueta con el origen real.
+
+**Resultado:** La IA y la revisora distinguen explícitamente mensajes `equipo (humano, VERIFICADO)`, `flora (IA)` y `sistema`. Los precios/mensajes del equipo persisten en la DB y se reinyectan con prioridad en cada request, incluso si Flora respondió después o el servidor se reinició.
+
+**Ventajas:** Distinción estructurada y persistente; retrocompatibilidad total (datos antiguos funcionan por el prefijo `[Agente:`); sin duplicación de datos; sin cambios de comportamiento en el flujo actual.
+
+**Desventajas:** Una columna nueva en la tabla (ALTER idempotente incluido en la migración); una consulta extra a Supabase por mensaje (bajo volumen, aceptable).
+
+---
+
 

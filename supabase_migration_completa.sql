@@ -244,8 +244,17 @@ CREATE TABLE IF NOT EXISTS historial_chat (
   cliente_id UUID NOT NULL REFERENCES clientes(id),
   rol        TEXT NOT NULL,
   contenido  TEXT NOT NULL,
+  origen     TEXT,  -- cliente | flora | equipo | sistema (quién escribió el mensaje)
   creado_en  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Retrocompatibilidad: en bases ya existentes se agrega la columna sin borrar datos.
+ALTER TABLE historial_chat ADD COLUMN IF NOT EXISTS origen TEXT;
+
+-- Índice parcial para localizar rápido las respuestas verificadas del equipo.
+CREATE INDEX IF NOT EXISTS idx_historial_chat_equipo
+  ON historial_chat (cliente_id, creado_en DESC)
+  WHERE origen = 'equipo';
 
 CREATE INDEX IF NOT EXISTS idx_historial_chat_cliente
   ON historial_chat (cliente_id, creado_en DESC);

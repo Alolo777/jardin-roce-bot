@@ -440,6 +440,9 @@ export interface MensajeChat {
   role: 'user' | 'assistant'
   content: string
   creadoEn?: string
+  // Quién escribió el mensaje: 'cliente' | 'flora' | 'equipo' | 'sistema'.
+  // Permite distinguir respuestas verificadas del equipo de las generadas por la IA.
+  origen?: string
 }
 
 export type IntencionConversacion =
@@ -616,7 +619,7 @@ export async function clasificarConversacion(
 ): Promise<ClasificacionConversacion> {
   const historialReciente = historial
     .slice(-30)
-    .map(m => `${m.role === 'user' ? 'cliente' : 'flora/equipo'}: ${m.content}`)
+    .map(m => `${etiquetaOrigen(m)}: ${m.content}`)
     .join('\n')
     .slice(-9000)
 
@@ -695,7 +698,7 @@ export async function revisarRespuestaFlora(
 ): Promise<RevisionRespuestaFlora> {
   const historialReciente = historial
     .slice(-30)
-    .map(m => `${m.role === 'user' ? 'cliente' : 'flora/equipo'}: ${m.content}`)
+    .map(m => `${etiquetaOrigen(m)}: ${m.content}`)
     .join('\n')
     .slice(-9000)
 
@@ -767,10 +770,26 @@ export async function revisarRespuestaFlora(
 }
 
 // ─── Función principal del agente ────────────────────────────────────────────
+// Etiqueta cada mensaje según quién lo escribió para que el LLM distinga
+// respuestas verificadas del equipo de las generadas por la propia IA.
+function etiquetaOrigen(m: MensajeChat): string {
+  if (m.role === 'user') return 'cliente'
+  if (m.origen === 'equipo') return 'equipo (humano, VERIFICADO)'
+  if (m.origen === 'sistema') return 'sistema'
+  return 'flora (IA)'
+}
+
 function formatearHistorialConFechas(historial: MensajeChat[]): MensajeChat[] {
   return historial.map(m => {
     const marca = m.creadoEn ? formatearFechaHoraMensaje(m.creadoEn) : ''
-    return marca ? { ...m, content: `[${marca}] ${m.content}` } : m
+    let anotacion = ''
+    if (m.role === 'assistant' && m.origen) {
+      if (m.origen === 'equipo') anotacion = ' [EQUIPO HUMANO, VERIFICADO]'
+      else if (m.origen === 'sistema') anotacion = ' [ANOTACIÓN DEL SISTEMA]'
+      else if (m.origen === 'flora') anotacion = ' [RESPUESTA DE FLORA]'
+    }
+    const prefijo = anotacion ? `[${marca}]${anotacion}` : (marca ? `[${marca}]` : '')
+    return prefijo ? { ...m, content: `${prefijo} ${m.content}` } : m
   })
 }
 

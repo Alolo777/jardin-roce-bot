@@ -52,7 +52,7 @@ import { getContenidoMensaje, getMessageBody, getMensajeTexto, getMessageType, h
 import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema, clasificarTipoCaso, limpiarCachesCasos, cargarCasosDesdeBD, contarCasosActivos, contarCasosRequierenAtencionHumana, listarCasosRequierenAtencion } from './src/casos/caso.service'
 import { crearPedido, obtenerPedido, transitar, transitarDesdeFlujo, archivarPedido, archivarSilencioso, cancelarPedido, limpiarCachesPedidos, cargarPedidosDesdeBD, persistirPedidosEngine, contarPedidosPorEstado, listarPedidosActivosGlobales, obtenerPedidoPorId, serializarPedidoParaDashboard, cambiarEstado } from './src/pedidos/pedido.service'
 import { analizarIntencion, Decision } from './src/decision/decision.engine'
-import { Intencion, PedidoActual, EstadoPedido, EstadoFlujo, FuenteConfirmacionPrecio } from './src/models/types'
+import { Intencion, PedidoActual, EstadoPedido, EstadoFlujo, FuenteConfirmacionPrecio, OrigenMensaje } from './src/models/types'
 import { createMessageHandler } from './src/whatsapp/message-handler'
 import type { MsgHandlerDeps } from './src/whatsapp/message-handler'
 import { createMessageEntry, type MessageEntryDeps } from './src/whatsapp/message-entry'
@@ -898,7 +898,7 @@ export async function procesarMensajeEquipo(remoteJid: string, msgType: string, 
   const num = telefonoDestino.startsWith('52') ? `+${telefonoDestino}` : telefonoDestino
   if (msgType === 'image' || msgType === 'document') marcarFotosDisponibles(remoteJid)
   registrarIntervencionHumana(remoteJid, body)
-  await agregarAlHistorial(num, 'assistant', `[Agente: ${body.trim()}]`)
+  await agregarAlHistorial(num, 'assistant', `[Agente: ${body.trim()}]`, OrigenMensaje.EQUIPO)
   if (esMensajeFotosDisponiblesEquipo(body)) marcarFotosDisponibles(remoteJid)
   const precioAgente = extraerPrecioRespuesta(body)
   if (precioAgente) {

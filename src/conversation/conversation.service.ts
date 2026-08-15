@@ -3,6 +3,7 @@
 
 import { supabaseAdmin } from '../../lib/supabase'
 import type { MensajeChat } from '../../lib/ai'
+import { OrigenMensaje } from '../models/types'
 import type { ConversationState } from '../models/types'
 
 // ════════════════════════════════════════════════════════════════
@@ -95,7 +96,7 @@ export async function obtenerHistorial(telefono: string): Promise<MensajeChat[]>
 
   try {
     const { data } = await supabaseAdmin
-      .from('historial_chat').select('rol, contenido, creado_en')
+      .from('historial_chat').select('rol, contenido, creado_en, origen')
       .eq('cliente_id', clienteId)
       .order('creado_en', { ascending: false })
       .limit(MAX_TURNOS_HISTORIAL * 2)
@@ -104,6 +105,7 @@ export async function obtenerHistorial(telefono: string): Promise<MensajeChat[]>
       role: m.rol as 'user' | 'assistant',
       content: m.contenido,
       creadoEn: m.creado_en ?? undefined,
+      origen: (m.origen as string | null) ?? undefined,
     }))
   } catch (err) {
     console.error('[conversation] Error leyendo historial:', err)
@@ -155,7 +157,12 @@ export async function obtenerHistorialCompletoConTimestamp(telefono: string): Pr
   }
 }
 
-export async function agregarAlHistorial(telefono: string, role: 'user' | 'assistant', content: string): Promise<void> {
+export async function agregarAlHistorial(
+  telefono: string,
+  role: 'user' | 'assistant',
+  content: string,
+  origen?: OrigenMensaje | string
+): Promise<void> {
   const clienteId = await obtenerClienteId(telefono)
   if (!clienteId) return
 
@@ -164,9 +171,41 @@ export async function agregarAlHistorial(telefono: string, role: 'user' | 'assis
       cliente_id: clienteId,
       rol: role,
       contenido: content,
+      origen: origen ?? (role === 'user' ? OrigenMensaje.CLIENTE : OrigenMensaje.FLORA),
     })
   } catch (err) {
     console.error('[conversation] Error guardando historial:', err)
+  }
+}
+
+// Mensajes recientes escritos por una persona del equipo (100% verificados),
+// persistidos en Supabase. Sobreviven a reinicios y a la TTL de memoria.
+export async function obtenerUltimosMensajesEquipo(
+  telefono: string,
+  horas: number = 24,
+  limite: number = 3
+): Promise<{ contenido: string; creadoEn: string }[]> {
+  const clienteId = await obtenerClienteId(telefono)
+  if (!clienteId) return []
+
+  const desde = new Date(Date.now() - horas * 60 * 60_000).toISOString()
+  try {
+    const { data } = await supabaseAdmin
+      .from('historial_chat')
+      .select('contenido, creado_en')
+      .eq('cliente_id', clienteId)
+      .or('origen.eq.equipo,contenido.like.*[Agente:*')
+      .gte('creado_en', desde)
+      .order('creado_en', { ascending: false })
+      .limit(limite)
+
+    return (data ?? []).map(m => ({
+      contenido: m.contenido,
+      creadoEn: m.creado_en,
+    }))
+  } catch (err) {
+    console.error('[conversation] Error leyendo mensajes del equipo:', err)
+    return []
   }
 }
 

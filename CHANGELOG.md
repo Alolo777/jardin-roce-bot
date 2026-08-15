@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## 2026-08-14
+
+### Historial con origen estructurado: la IA distingue respuestas verificadas del equipo (DEC-082)
+
+**Problema:** El historial (`historial_chat`) solo guardaba `rol` ('user'/'assistant') y el mensaje del equipo se marcaba solo con el prefijo de texto `[Agente: ...]`. La detección `[EL EQUIPO HUMANO RESPONDIÓ]` solo se disparaba si el ÚLTIMO mensaje assistant era del equipo, y `ULTIMA_INTERVENCION_HUMANA` (memoria, TTL 10 min) se perdía al reiniciar. Resultado: tras 10 min o un reinicio, el LLM podía ignorar/contradecir precios y respuestas del equipo y volver a preguntar lo ya confirmado.
+
+**Solución (código):**
+- **Esquema** (`supabase_migration_completa.sql`): nueva columna `origen` en `historial_chat` ('cliente' | 'flora' | 'equipo' | 'sistema') con `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` (retrocompatible) e índice parcial para mensajes del equipo.
+- **Persistencia** (`src/conversation/conversation.service.ts`): `agregarAlHistorial()` ahora recibe `origen` (por defecto `cliente`/`flora` según rol); `obtenerHistorial()` devuelve el origen; nueva función `obtenerUltimosMensajesEquipo(telefono, horas, limite)` consulta respuestas del equipo en Supabase (sobrevive reinicios, sin TTL de 10 min) incluyendo datos antiguos con prefijo `[Agente:` vía `.or()`.
+- **Marcado de orígenes** (`bot.ts`, `src/whatsapp/message-handler.ts`): mensajes del equipo → `equipo`; respuestas de Flora → `flora`; entradas internas ("Flora omitió respuesta") → `sistema`; mensajes del cliente → `cliente`.
+- **Contexto al LLM** (`message-handler.ts`): nuevo bloque `[RESPUESTAS VERIFICADAS DEL EQUIPO]` con los últimos mensajes del equipo desde la DB (fecha, precio extraído con `extraerPrecioRespuesta`) que se inyecta cuando el último mensaje NO es del equipo. Se refuerza la detección `equipoRespondio` con `origen === 'equipo'` además del prefijo. El bloque en memoria `[INTERVENCION HUMANA RECIENTE]` queda como fallback solo si la DB no encontró nada.
+- **Etiquetado para el LLM/revisora** (`lib/ai.ts`): `MensajeChat` incluye `origen`; `formatearHistorialConFechas()` anota `[EQUIPO HUMANO, VERIFICADO]`, `[RESPUESTA DE FLORA]` o `[ANOTACIÓN DEL SISTEMA]` en el historial enviado al modelo; `clasificarConversacion()` y `revisarRespuestaFlora()` etiquetan `cliente | equipo (humano, VERIFICADO) | sistema | flora (IA)` en lugar del ambiguo `flora/equipo`.
+- **Tipos** (`src/models/types.ts`): nuevo enum `OrigenMensaje`.
+
+**Archivos modificados:** `supabase_migration_completa.sql`, `src/models/types.ts`, `lib/ai.ts`, `src/conversation/conversation.service.ts`, `src/conversation/index.ts`, `bot.ts`, `src/whatsapp/message-handler.ts`, `DECISIONS.md`, `TODO.md`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores.
+
+**Impacto:** Compatible. Los datos históricos sin `origen` siguen funcionando (se detectan por el prefijo `[Agente:`). Los precios confirmados por el equipo ahora se respetan incluso después de reinicios y aunque Flora haya respondido después. Requiere aplicar la migración `ALTER TABLE` en la base.
+
+**Rollback:** Sí — revertir el commit y eliminar la columna `origen` si se desea.
+
+---
+
 ## 2026-08-10
 
 ### Fotos fuera de horario: cola persistida en Supabase + flush a la hora exacta de apertura

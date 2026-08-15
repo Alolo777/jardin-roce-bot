@@ -7,6 +7,7 @@ export {
   obtenerUltimoMensaje,
   obtenerHistorialCompletoConTimestamp,
   agregarAlHistorial,
+  obtenerUltimosMensajesEquipo,
   obtenerMensajeId,
   marcarMensajeProcesado,
   yaProcesadoRecientemente,

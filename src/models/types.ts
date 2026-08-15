@@ -97,6 +97,13 @@ export enum FuenteConfirmacionPrecio {
   MANUAL = 'manual',
 }
 
+export enum OrigenMensaje {
+  CLIENTE = 'cliente',
+  FLORA = 'flora',
+  EQUIPO = 'equipo',
+  SISTEMA = 'sistema',
+}
+
 export enum EstadoReclamacion {
   PENDIENTE = 'pendiente',
   EN_PROCESO = 'en_proceso',

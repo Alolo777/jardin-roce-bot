@@ -2,9 +2,9 @@ import { eventBus } from '../events/event-bus'
 import { EventType } from '../events/types'
 import { supabaseAdmin } from '../../lib/supabase'
 import type { VentaCerrada } from '../../lib/types'
-import { obtenerHistorial, agregarAlHistorial, extraerTelefono, calcularHorasInactivo } from '../conversation/conversation.service'
+import { obtenerHistorial, agregarAlHistorial, extraerTelefono, calcularHorasInactivo, obtenerUltimosMensajesEquipo } from '../conversation/conversation.service'
 import { parseNombre, pareceNombreCliente, esNombrePlausible, parseSucursal, parseDireccion, extraerFecha, extraerHora } from '../parser'
-import { getMensajeTexto, getMessageBody, getFechaActual, hasQuotedMsg, getQuotedText, ahoraCdmx, getContextoHorario, estaEnHorario } from './message-utils'
+import { getMensajeTexto, getMessageBody, getFechaActual, hasQuotedMsg, getQuotedText, ahoraCdmx, getContextoHorario, estaEnHorario, formatearFechaHoraMensaje } from './message-utils'
 import { notificarEmpleadosWhatsApp, enviarFotoEmpleadosWhatsApp } from './notification.service'
 import { obtenerNumeroReal } from './contact.service'
 import { FRUSTRACION_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, FOTOS_DISPONIBLES_TTL_MS, debeEnviarAlertaDedup, debeNotificarAtencionHumana, debeNotificarReclamacion, obtenerIntervencionHumanaReciente, RATE_AVISADOS, RATE_LIMIT_WINDOW_MS, extraerPrecioRespuesta, encolarFotoPendienteApertura } from './bot-state'
@@ -34,7 +34,7 @@ import { evaluarCancelacion } from '../validators/cancelacion.validator'
 import { evaluarQueja } from '../validators/queja.validator'
 import { getAIResponse, clasificarImagenVenta, revisarRespuestaFlora } from '../../lib/ai'
 import { logger } from '../../lib/logger.service'
-import { PedidoActual, EstadoPedido } from '../models/types'
+import { PedidoActual, EstadoPedido, OrigenMensaje } from '../models/types'
 
 export interface MsgHandlerDeps {
   pedidoActual: (clienteId: string) => PedidoActual
@@ -248,7 +248,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
     await deps.persistirPedido(clienteId, telefono, 'apartado', 'Falta fecha/hora antes de cerrar')
     const pregunta = '¿Para qué fecha y hora lo necesitas? 🌷'
     await deps.responderMensaje(msg, pregunta)
-    await agregarAlHistorial(telefono, 'assistant', pregunta)
+    await agregarAlHistorial(telefono, 'assistant', pregunta, OrigenMensaje.FLORA)
     return true
   }
 
@@ -422,7 +422,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
     try {
       await new Promise(r => setTimeout(r, 400 + Math.random() * 300))
 
-      await agregarAlHistorial(telefono, 'user', textoCliente)
+      await agregarAlHistorial(telefono, 'user', textoCliente, OrigenMensaje.CLIENTE)
 
       const pideEmpezarDesdeCero = /empecemos\s+desde\s+cero|desde\s+cero|borr[oó]n\s+y\s+cuenta\s+nueva|nuevo\s+pedido|otro\s+pedido|otro\s+ramo|es\s+aparte|aparte\s+ese|ya\s+hab[ií]a\s+finalizado|ya\s+se\s+finaliz[oó]|ese\s+ya\s+qued[oó]/i.test(textoCliente)
       if (pideEmpezarDesdeCero) deps.resetearPedidoActivo(clienteId)
@@ -510,7 +510,10 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       const historialTexto = historialCompleto.map(m => m.content).join('\n').toLowerCase()
 
       const ultimoAssistant = [...historialCompleto].reverse().find(m => m.role === 'assistant')
-      const equipoRespondio = ultimoAssistant && ultimoAssistant.content.startsWith('[Agente:')
+      const equipoRespondio = ultimoAssistant && (
+        ultimoAssistant.origen === OrigenMensaje.EQUIPO ||
+        ultimoAssistant.content.startsWith('[Agente:')
+      )
       if (equipoRespondio) {
         const textoAgente = ultimoAssistant.content.replace(/^\[Agente:\s*|\]$/g, '').trim()
         contextoExtra +=
@@ -520,8 +523,10 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           `Si el equipo dio un precio, úsalo como confirmado. No lo contradigas ni preguntes lo mismo.`
       }
 
+      const mensajesEquipo = await obtenerUltimosMensajesEquipo(telefono, 24, 3)
+
       const intervencionHumana = obtenerIntervencionHumanaReciente(clienteId)
-      if (intervencionHumana && !equipoRespondio) {
+      if (intervencionHumana && !equipoRespondio && mensajesEquipo.length === 0) {
         const conPrecio = intervencionHumana.precio
           ? ` El equipo indicó un precio: $${intervencionHumana.precio}. Úsalo como precio confirmado por el equipo.`
           : ''
@@ -529,6 +534,21 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           `\n\n[INTERVENCION HUMANA RECIENTE] ` +
           `El equipo respondió hace ${Math.round(intervencionHumana.haceMs / 1000)} segundos: "${intervencionHumana.texto.replace(/"/g, "'")}". ` +
           `Flora NO debe ignorar esa respuesta.${conPrecio} No digas que falta confirmar ese mismo precio.`
+      }
+
+      if (!equipoRespondio && mensajesEquipo.length > 0) {
+        const lineas = mensajesEquipo.map(m => {
+          const textoAgente = m.contenido.replace(/^\[Agente:\s*|\]$/g, '').trim()
+          const precio = extraerPrecioRespuesta(textoAgente)
+          const hora = m.creadoEn ? formatearFechaHoraMensaje(m.creadoEn) : ''
+          return `- [${hora}]${precio ? ` $${precio} (precio confirmado por el equipo):` : ''} "${textoAgente.replace(/"/g, "'")}"`
+        })
+        contextoExtra +=
+          `\n\n[RESPUESTAS VERIFICADAS DEL EQUIPO] ` +
+          `Mensajes recientes escritos por una persona del equipo humano (100% verificados, persistidos en el sistema):\n` +
+          `${lineas.join('\n')}\n` +
+          `NO los contradigas ni preguntes lo mismo que ya respondió el equipo. ` +
+          `Si el equipo dio un precio, úsalo como confirmado y no lo pidas de nuevo.`
       }
 
       contextoExtra +=
@@ -805,13 +825,13 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       if (tipoMediaProcesada === 'referencia') {
         const respuesta = `Ya recibí la foto de referencia 🌷${fueraDeHorarioTexto ? ` ${fueraDeHorarioTexto}` : ' Se la paso al equipo para que la revise y te confirme el precio.'}`
         await deps.responderMensaje(msg, respuesta)
-        await agregarAlHistorial(telefono, 'assistant', respuesta)
+        await agregarAlHistorial(telefono, 'assistant', respuesta, OrigenMensaje.FLORA)
         return
       }
       if (tipoMediaProcesada === 'imagen') {
         const respuesta = `Ya recibí tu imagen 🌷${fueraDeHorarioTexto ? ` ${fueraDeHorarioTexto}` : ' Se la paso al equipo para que la revise.'}`
         await deps.responderMensaje(msg, respuesta)
-        await agregarAlHistorial(telefono, 'assistant', respuesta)
+        await agregarAlHistorial(telefono, 'assistant', respuesta, OrigenMensaje.FLORA)
         return
       }
       if (tipoMediaProcesada === 'comprobante') {
@@ -819,13 +839,13 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         if (venta && deps.ventaListaParaCerrar(clienteId) && !deps.pedidoEstaCerrado(clienteId)) {
           const confirmacion = `¡Gracias, ${venta.cliente}! 🌸 Recibí tu comprobante. Tu pedido queda registrado. Total: ${venta.total}.${enHorarioMedia ? '' : ' El equipo lo valida a primera hora.'}`
           await deps.responderMensaje(msg, confirmacion)
-          await agregarAlHistorial(telefono, 'assistant', confirmacion)
+          await agregarAlHistorial(telefono, 'assistant', confirmacion, OrigenMensaje.FLORA)
           await deps.ventaCerradaHandler(clienteId, venta, await numeroRealPromise)
           ventaCerrada = true
         } else {
           const respuesta = `Gracias, ya recibí tu comprobante 🌷 Lo registro${enHorarioMedia ? ' para que el equipo continúe con tu pedido.' : ' y el equipo lo valida a primera hora.'}`
           await deps.responderMensaje(msg, respuesta)
-          await agregarAlHistorial(telefono, 'assistant', respuesta)
+          await agregarAlHistorial(telefono, 'assistant', respuesta, OrigenMensaje.FLORA)
         }
         return
       }
@@ -840,7 +860,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           ? 'Sí, podemos revisar el envío 🌷 Déjame confirmar con el equipo el precio real de ese ramo y el costo de envío antes de apartarlo.'
           : 'Claro 🌷 Déjame confirmar con el equipo el precio real de ese ramo y te digo.'
         await deps.responderMensaje(msg, respuesta)
-        await agregarAlHistorial(telefono, 'assistant', respuesta)
+        await agregarAlHistorial(telefono, 'assistant', respuesta, OrigenMensaje.FLORA)
         return
       }
 
@@ -914,7 +934,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
         const confirmacion = `¡Listo, ${ventaParaCierre.cliente}! 🌷 Tu pedido queda apartado para ${ventaParaCierre.direccion}. Total: ${ventaParaCierre.total}. Pagas al recoger.`
         await deps.responderMensaje(msg, confirmacion)
-        await agregarAlHistorial(telefono, 'assistant', confirmacion)
+        await agregarAlHistorial(telefono, 'assistant', confirmacion, OrigenMensaje.FLORA)
         await deps.pedidoApartadoHandler(clienteId, ventaParaCierre, await numeroRealPromise, 'Efectivo al recoger')
         ventaCerrada = true
       }
@@ -924,7 +944,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
         const confirmacion = `¡Gracias, ${ventaParaCierre.cliente}! 🌸 Tu pedido queda registrado. Total: ${ventaParaCierre.total}.`
         await deps.responderMensaje(msg, confirmacion)
-        await agregarAlHistorial(telefono, 'assistant', confirmacion)
+        await agregarAlHistorial(telefono, 'assistant', confirmacion, OrigenMensaje.FLORA)
         await deps.ventaCerradaHandler(clienteId, ventaParaCierre, await numeroRealPromise)
         ventaCerrada = true
       }
@@ -950,7 +970,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           const metodo = deps.pedidoActual(clienteId).metodoPago === 'tarjeta_recoger' ? 'Tarjeta al recoger' : 'Efectivo al recoger'
           const confirmacion = `¡Listo, ${venta.cliente}! 🌷 Tu pedido queda apartado para ${venta.direccion}. Total: ${venta.total}. Pagas al recoger.`
           await deps.responderMensaje(msg, confirmacion)
-          await agregarAlHistorial(telefono, 'assistant', confirmacion)
+          await agregarAlHistorial(telefono, 'assistant', confirmacion, OrigenMensaje.FLORA)
           await deps.pedidoApartadoHandler(clienteId, venta, await numeroRealPromise, metodo)
           ventaCerrada = true
         }
@@ -1025,7 +1045,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
               descripcion: `[REVISORA IA] El LLM propuso una respuesta no aprobada: ${revision.razon}. Se requiere atención humana. Mensaje original: ${textoCliente.substring(0, 200)}`,
               contexto: 'Revisora IA reject',
             })
-            await agregarAlHistorial(telefono, 'assistant', `[Flora omitió respuesta — revisora: "${revision.razon.slice(0, 150)}"]`)
+            await agregarAlHistorial(telefono, 'assistant', `[Flora omitió respuesta — revisora: "${revision.razon.slice(0, 150)}"]`, OrigenMensaje.SISTEMA)
             return
           }
         }
@@ -1047,12 +1067,12 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         const intervencionAntesDeEnviar = obtenerIntervencionHumanaReciente(clienteId)
         if (intervencionAntesDeEnviar && intervencionAntesDeEnviar.haceMs < 30_000) {
           console.log(`[bot] 🙋 Empleado respondió hace ${Math.round(intervencionAntesDeEnviar.haceMs / 1000)}s durante LLM; Flora omite respuesta para ${clienteId}`)
-          await agregarAlHistorial(telefono, 'assistant', `[Flora omitió respuesta — empleado respondió: "${intervencionAntesDeEnviar.texto.slice(0, 150)}"]`)
+          await agregarAlHistorial(telefono, 'assistant', `[Flora omitió respuesta — empleado respondió: "${intervencionAntesDeEnviar.texto.slice(0, 150)}"]`, OrigenMensaje.SISTEMA)
           return
         }
 
         await deps.responderMensaje(msg, mensajeFinal)
-        await agregarAlHistorial(telefono, 'assistant', mensajeFinal)
+        await agregarAlHistorial(telefono, 'assistant', mensajeFinal, OrigenMensaje.FLORA)
         if (respuestaPideComprobante(mensajeFinal) && deps.tieneArregloVerificado(clienteId)) {
           const pedido = deps.pedidoActual(clienteId)
           pedido.metodoPago = 'transferencia'
