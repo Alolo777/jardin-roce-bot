@@ -476,7 +476,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         caso: casoActivo,
         pedido: pedidoEngine,
         textoCliente,
-        horaActual: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+        horaActual: ahoraCdmx().etiqueta12,
         fechaActual: getFechaActual(),
       })
       let contextoExtra = `${contextoPrompt}${horario}`

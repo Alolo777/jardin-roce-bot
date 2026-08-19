@@ -163,3 +163,48 @@
 - **Corrección:** `GEMINI_MODEL` por defecto y en `.env*` → `gemini-3.1-flash-lite` (reemplazo oficial, verificado OK). Se creó `scripts/check-apis.mts` (`npm run check:apis`) para verificar todas las APIs de un vistazo.
 - **Pruebas:** `npx tsc --noEmit` 0 errores; `npm run check:apis` → Gemini `OK`.
 - **Versión donde se corrigió:** 2.1.7
+
+## BUG-017: Hora inyectada al LLM en 24h y zona del servidor (UTC en GCP) — se confundía con el horario de CDMX
+- **Prioridad:** Alta
+- **Estado:** ✅ Resuelto (2026-08-19, DEC-083)
+- **Reportado:** 2026-08-19 (revisión de código)
+- **Síntomas:** El `[HORA ACTUAL]` del contexto se generaba con `new Date().toLocaleTimeString('es-MX', {...})` SIN `timeZone` en `src/orchestrator.ts:45` y `src/whatsapp/message-handler.ts:479`, por lo que usaba la zona local del servidor (UTC en GCP). El `[CONTEXTO]` usaba `America/Mexico_City`, así que el LLM recibía dos horas distintas y se confundía al responder "¿ya están abiertos?". Todo el contexto iba en formato 24 horas mientras el equipo habla en 12 horas ("5 de la tarde", "3 pm"), y no existía un dato del backend sobre si se puede entregar en 1 hora dentro del horario laboral.
+- **Causa raíz:** (1) `toLocaleTimeString` sin `timeZone` depende de la zona del servidor. (2) Formato 24h inconsistente con el lenguaje del equipo. (3) La promesa de "entrega en 1 hora" no estaba validada por backend (el LLM podía confirmarla fuera de horario).
+- **Corrección (DEC-083):**
+  1. `ahoraCdmx()` (`message-utils.ts`) ahora devuelve `etiqueta12`/`hora12`/`ampm` en 12h; nuevo `formatoHora12(hora, minuto)` para apertura/cierre.
+  2. `getContextoHorario()` inyecta la hora en 12h y calcula "Entrega/finalización en 1 hora: POSIBLE (≈ <hora 12h>)" o "NO posible" (actual + 60 min contra el cierre del día).
+  3. `orchestrator.ts` y `message-handler.ts` inyectan `ahoraCdmx().etiqueta12` (desaparece el `toLocaleTimeString` sin timezone).
+  4. `horario.validator.ts` y `prompt.builder.ts` en formato 12h.
+  5. Prompt system (Supabase + `system-prompt.corregido.ts`): Flora usa SIEMPRE 12h, traduce "5 de la tarde"/"3 pm", confirma entrega en 1h solo si el contexto dice POSIBLE.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; `test:horario` y `test:validator` OK; verificación manual CDMX 14:07 → `etiqueta12:"2:07 pm"`, `formatoHora12(19,45)` = "7:45 pm", contexto ABIERTOS con entrega ≈ "3:07 pm". Prompt resincronizado: `node _sincronizar_prompt.mjs` (16,888 caracteres).
+- **Versión donde se corrigió:** 2.2.5
+
+## BUG-018: Clasificador de imágenes (visión) ignoraba quién escribió el historial — fotos ambiguas mal clasificadas
+- **Prioridad:** Media
+- **Estado:** ✅ Resuelto (2026-08-19)
+- **Reportado:** 2026-08-19 (revisión de código)
+- **Síntomas:** `clasificarImagenVenta` armaba el historial reciente con `${m.role}: ${m.content}` (solo `user`/`assistant`), por lo que el clasificador no distinguía si el pago/expectativa de comprobante venía del equipo humano verificado o solo de la IA. Ante una foto ambigua, podía clasificarse mal (ej. el equipo pidió el comprobante y la foto se marcó como "referencia").
+- **Causa raíz:** Inconsistencia con DEC-082: `clasificarConversacion` ya usaba `etiquetaOrigen(m)` pero `clasificarImagenVenta` no.
+- **Corrección:** `lib/ai.ts` — `clasificarImagenVenta` usa `etiquetaOrigen(m)` ("cliente", "equipo (humano, VERIFICADO)", "sistema", "flora (IA)") y el prompt prioriza `comprobante` si el historial indica que el equipo humano pidió el pago/comprobante aunque la imagen sea ambigua.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; `test:horario`, `test:validator`, `test:precio`, `test:flows` OK.
+- **Versión donde se corrigió:** 2.2.5
+
+## BUG-019: Fotos/documentos del equipo sin texto no se registraban como intervención verificada
+- **Prioridad:** Media
+- **Estado:** ✅ Resuelto (2026-08-19)
+- **Reportado:** 2026-08-19 (revisión de código)
+- **Síntomas:** Cuando el equipo respondía al cliente solo con una foto o documento (sin caption), el mensaje nunca se guardaba en `historial_chat`: `message-entry.ts` solo encolaba `if (body)`. La IA no sabía que el equipo ya había enviado una imagen al cliente y podía volver a preguntar lo mismo o no respetar la respuesta verificada.
+- **Causa raíz:** (1) `message-entry.ts:103` requería `body` (texto) para llamar a `procesarMensajeEquipo`. (2) `procesarMensajeEquipo` (bot.ts:894) solo persistía cuando había texto; con `body` vacío la intervención humana quedaba sin registro.
+- **Corrección:** (1) `message-entry.ts`: los mensajes `fromMe` de tipo `image`/`document` se encolan siempre (`if (body || esMediaEquipo)`). (2) `procesarMensajeEquipo`: si no hay texto pero es imagen/documento, registra la intervención y guarda `[Agente: envió una foto]` / `[Agente: envió un documento]` con `origen='equipo'`, sin tocar el estado del pedido.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; suite completa OK (`test:horario`, `test:validator`, `test:precio`, `test:flows`, `test:nombre`, `test:telefono`, `test:template`, `test:inventario`, `test:reclamaciones`).
+- **Versión donde se corrigió:** 2.2.5
+
+## BUG-020: Mensajes legacy del historial (sin `origen`) se etiquetaban como Flora aunque fueran del equipo (`[Agente: ...]`)
+- **Prioridad:** Media
+- **Estado:** ✅ Resuelto (2026-08-19)
+- **Reportado:** 2026-08-19 (revisión de código)
+- **Síntomas:** El historial guardado antes de DEC-082 no tiene valor en la columna `origen`. `etiquetaOrigen()` y `formatearHistorialConFechas()` (lib/ai.ts) etiquetaban esos mensajes como `flora (IA)` o sin anotación: los `[Agente: ...]` legacy podían parecer respuestas de la IA, y el LLM/revisora podían contradecir respuestas verificadas del equipo.
+- **Causa raíz:** Las funciones asumían `m.origen` siempre presente; no había inferencia retrocompatible por contenido (a diferencia de `message-handler.ts:514` y `obtenerUltimosMensajesEquipo`, que sí caen al prefijo `[Agente:`).
+- **Corrección:** Nueva `origenEfectivo(m)` en `lib/ai.ts` que, cuando falta `origen`, infiere por contenido: `[Agente: ...]` → equipo, `[Flora omitió respuesta ...`/`[ANOTACIÓN DEL SISTEMA ...` → sistema, resto → flora. Se usa en `etiquetaOrigen()` y `formatearHistorialConFechas()`.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; suite completa OK.
+- **Versión donde se corrigió:** 2.2.5

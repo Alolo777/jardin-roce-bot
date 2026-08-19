@@ -1,5 +1,79 @@
 # CHANGELOG
 
+## 2026-08-19
+
+### Hora inyectada al LLM unificada en formato 12 horas (CDMX) + dato de entrega en 1 hora (BUG-017, DEC-083)
+
+**Problema:** El `[HORA ACTUAL]` del contexto se generaba con `toLocaleTimeString` sin `timeZone`, usando la zona local del servidor (UTC en GCP) en lugar de CDMX, contradiciendo el `[CONTEXTO]` que sí usaba `America/Mexico_City`. El LLM recibía dos horas distintas y se confundía al contestar "¿ya están abiertos?". Además el contexto iba en formato 24 horas (empleados y clientes hablan en 12 horas: "5 de la tarde", "3 pm") y no existía un dato confiable del backend para saber si se puede entregar en 1 hora dentro del horario laboral.
+
+**Solución (código + prompt):**
+- **`src/whatsapp/message-utils.ts`**: `ahoraCdmx()` ahora devuelve `hora12`, `ampm` y `etiqueta12` (formato 12h, CDMX); nuevo `formatoHora12(hora, minuto)` para horarios de apertura/cierre; `getContextoHorario()` inyecta la hora en 12h y calcula si "Entrega/finalización en 1 hora" es **POSIBLE** o **NO** (hora actual + 60 min contra el cierre del día, L-V / S-D); `formatearFechaHoraMensaje()` ahora devuelve marcas de historial en 12h ("19/08/2026 2:07 pm").
+- **`src/validators/horario.validator.ts`**: `validarHorario()` y `horarioHoyManana()` usan formato 12h.
+- **`src/openai/prompt.builder.ts`**: sección `## Horarios (formato 12 horas)` en las reglas validadas; `[NOTA DE TIEMPO]` indica explícitamente formato 12h ("2:30 pm") y que se interpreten "5 de la tarde"/"3 pm" según el momento de cada mensaje.
+- **`src/orchestrator.ts` y `src/whatsapp/message-handler.ts`**: `horaActual` pasa de `toLocaleTimeString` (sin timezone, 24h) a `ahoraCdmx().etiqueta12`.
+- **`bot.ts`**: la notificación de fotos pendientes fuera de horario usa `ahoraCdmx().etiqueta12` (antes `toLocaleTimeString` sin timezone); eliminada variable muerta.
+- **Prompt system**: `_prompt_actualizado.txt` (el que vive en Supabase) y su espejo `src/prompts/system-prompt.corregido.ts` ahora instruyen a Flora a usar SIEMPRE formato de 12 horas, a traducir "5 de la tarde"/"3 pm", a confirmar la entrega en 1 hora solo cuando `[CONTEXTO]` diga POSIBLE (y dar la hora estimada que indique), a NO confirmarla/inventar hora si el backend dice NO posible, y a atender fuera de horario como asistente virtual sin frenar la venta.
+
+**Archivos modificados:** `src/whatsapp/message-utils.ts`, `src/validators/horario.validator.ts`, `src/openai/prompt.builder.ts`, `src/orchestrator.ts`, `src/whatsapp/message-handler.ts`, `bot.ts`, `_prompt_actualizado.txt`, `src/prompts/system-prompt.corregido.ts`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `test:horario` OK, `test:validator` OK; verificación manual: `ahoraCdmx().etiqueta12` = "2:07 pm", `formatoHora12(19,45)` = "7:45 pm", `getContextoHorario()` con CDMX 2:07 pm → "Entrega/finalización en 1 hora: POSIBLE — estaría listo alrededor de las 3:07 pm".
+
+**Impacto:** Compatible. El formato 24h se conserva en `ahoraCdmx().etiqueta` para quien lo necesite. Se requiere resincronizar el prompt en Supabase (ya ejecutado: `node _sincronizar_prompt.mjs`, 16,888 caracteres).
+
+**Rollback:** Sí — revertir el commit y, si se desea, restaurar el prompt anterior desde Supabase (`historial_prompt`).
+
+---
+
+### Clasificador de imágenes usa el origen del historial (equipo verificado vs. IA) (BUG-018)
+
+**Problema:** `clasificarImagenVenta` (visión) armaba el historial reciente con `${m.role}: ${m.content}`, sin distinguir quién escribió cada mensaje. El clasificador no sabía si el pago/expectativa de comprobante venía del equipo humano (verificado) o solo de la IA, pudiendo malclasificar fotos ambiguas.
+
+**Solución:** `lib/ai.ts` — `clasificarImagenVenta` ahora usa `etiquetaOrigen(m)` ("cliente", "equipo (humano, VERIFICADO)", "sistema", "flora (IA)") igual que `clasificarConversacion` (DEC-082), y el prompt de visión prioriza como `comprobante` cuando el historial indique que el equipo humano pidió el pago/comprobante, aunque la imagen sea ambigua.
+
+**Archivos modificados:** `lib/ai.ts`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `test:horario`, `test:validator`, `test:precio`, `test:flows` OK.
+
+**Impacto:** Compatible. Mejora la precisión de clasificación comprobante/referencia en fotos ambiguas; no cambia el contrato (`ClasificacionImagenVenta` intacto).
+
+**Rollback:** Sí.
+
+---
+
+### Las fotos/documentos del equipo sin texto se registran como intervención verificada (BUG-019)
+
+**Problema:** Cuando un miembro del equipo respondía al cliente solo con una foto o documento (sin caption/texto), `message-entry.ts` no encolaba el mensaje (`if (body)`) y `procesarMensajeEquipo` no persistía nada. El historial quedaba sin esa intervención verificada: la IA no sabía que el equipo ya envió una imagen al cliente y podía volver a pedir lo mismo o no tomar en cuenta la respuesta.
+
+**Solución:**
+- **`src/whatsapp/message-entry.ts`**: los mensajes `fromMe` tipo `image`/`document` se encolan a `procesarMensajeEquipo` incluso sin texto (`if (body || esMediaEquipo)`).
+- **`bot.ts`** `procesarMensajeEquipo`: si no hay texto pero es imagen/documento, registra la intervención humana y guarda en `historial_chat` `[Agente: envió una foto]` / `[Agente: envió un documento]` con `origen='equipo'`. No modifica el estado del pedido (no se toca precio/fecha/pago). Refactor: variables `body.trim()` → `texto`.
+
+**Archivos modificados:** `src/whatsapp/message-entry.ts`, `bot.ts`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `test:horario`, `test:validator`, `test:precio`, `test:flows`, `test:nombre`, `test:telefono`, `test:template`, `test:inventario`, `test:reclamaciones` OK.
+
+**Impacto:** Compatible. Nueva información en historial (mensaje assistant del equipo); `obtenerUltimosMensajesEquipo` y el bloque `[RESPUESTAS VERIFICADAS DEL EQUIPO]` ya lo consumen vía `origen='equipo'`. El texto "envió una foto" no dispara precio ni cierre de venta (`extraerPrecioRespuesta` devuelve null).
+
+**Rollback:** Sí.
+
+---
+
+### Origen inferido para mensajes legacy del historial — los `[Agente: ...]` antiguos ya no se ven como Flora (BUG-020)
+
+**Problema:** El historial guardado antes de DEC-082 (columna `origen`) no tiene valor en `origen`. En `lib/ai.ts`, `etiquetaOrigen()` y `formatearHistorialConFechas()` lo trataban como texto directo: los `[Agente: ...]` legacy se etiquetaban `flora (IA)` (o sin anotación), por lo que el LLM y la revisora podían ignorar/contradecir respuestas verificadas del equipo que sí existen en la DB.
+
+**Solución:** `lib/ai.ts` — nueva `origenEfectivo(m)` que, cuando falta `origen`, infiere por contenido: `[Agente: ...]` → `equipo`, `[Flora omitió respuesta ...` / `[ANOTACIÓN DEL SISTEMA ...` → `sistema`, resto → `flora`. Se usa en `etiquetaOrigen()` y `formatearHistorialConFechas()` (que ahora anota también mensajes legacy). Los mensajes de usuario (`role='user'`) siguen como `cliente`. Coherente con la inferencia ya existente en `message-handler.ts:514` y `obtenerUltimosMensajesEquipo`.
+
+**Archivos modificados:** `lib/ai.ts`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; suite completa OK.
+
+**Impacto:** Compatible. Mejora el etiquetado retrocompatible del historial antiguo; sin cambios de esquema ni de contrato.
+
+**Rollback:** Sí.
+
+---
+
 ## 2026-08-14
 
 ### Historial con origen estructurado: la IA distingue respuestas verificadas del equipo (DEC-082)

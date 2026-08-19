@@ -90,7 +90,17 @@ export function jidANumero(jid: string): string {
   return limpio.startsWith('52') ? `+${limpio}` : limpio
 }
 
-export function ahoraCdmx(): { dia: number; hora: number; minuto: number; etiqueta: string } {
+export interface HoraCdmx {
+  dia: number
+  hora: number
+  minuto: number
+  etiqueta: string
+  hora12: number
+  ampm: 'am' | 'pm'
+  etiqueta12: string
+}
+
+export function ahoraCdmx(): HoraCdmx {
   const partes = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Mexico_City',
     weekday: 'short',
@@ -102,12 +112,25 @@ export function ahoraCdmx(): { dia: number; hora: number; minuto: number; etique
   const dias: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
   const hora = Number(valor('hour'))
   const minuto = Number(valor('minute'))
+  const hora12 = hora % 12 === 0 ? 12 : hora % 12
+  const ampm: 'am' | 'pm' = hora < 12 ? 'am' : 'pm'
+  const mm = String(Number.isFinite(minuto) ? minuto : 0).padStart(2, '0')
   return {
     dia: dias[valor('weekday')] ?? 0,
     hora: Number.isFinite(hora) ? hora : 0,
     minuto: Number.isFinite(minuto) ? minuto : 0,
-    etiqueta: `${String(Number.isFinite(hora) ? hora : 0).padStart(2, '0')}:${String(Number.isFinite(minuto) ? minuto : 0).padStart(2, '0')}`,
+    etiqueta: `${String(Number.isFinite(hora) ? hora : 0).padStart(2, '0')}:${mm}`,
+    hora12,
+    ampm,
+    etiqueta12: `${hora12}:${mm} ${ampm}`,
   }
+}
+
+// Formatea una hora 0-23 a formato 12h ("3:00 pm", "10:00 am").
+export function formatoHora12(hora: number, minuto: number = 0): string {
+  const h12 = hora % 12 === 0 ? 12 : hora % 12
+  const ampm = hora < 12 ? 'am' : 'pm'
+  return `${h12}:${String(minuto).padStart(2, '0')} ${ampm}`
 }
 
 export function estaEnHorario(): boolean {
@@ -126,27 +149,43 @@ export function getFechaActual(): string {
 export function formatearFechaHoraMensaje(creadoEn: string): string {
   const fecha = new Date(creadoEn)
   if (Number.isNaN(fecha.getTime())) return ''
-  return new Intl.DateTimeFormat('es-MX', {
+  const partes = new Intl.DateTimeFormat('es-MX', {
     timeZone: 'America/Mexico_City',
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(fecha)
+  }).formatToParts(fecha)
+  const valor = (tipo: string) => partes.find(p => p.type === tipo)?.value || ''
+  const hh = Number(valor('hour'))
+  const h12 = hh % 12 === 0 ? 12 : hh % 12
+  const ampm = hh < 12 ? 'am' : 'pm'
+  return `${valor('day')}/${valor('month')}/${valor('year')} ${h12}:${valor('minute')} ${ampm}`
 }
 
 export function getContextoHorario(): string {
   const ahora = ahoraCdmx()
   const horarios = obtenerHorarios()
+  const esFinDeSemana = ahora.dia === 0 || ahora.dia === 6
+  const cierre = esFinDeSemana ? horarios.cierreFinSemana : horarios.cierreSemana
+
   if (estaEnHorario()) {
-    return `\n\n[CONTEXTO: Horario de atención] Hora actual CDMX: ${ahora.etiqueta}. Estamos ABIERTOS en este momento. No digas que estamos cerrados ni que se atenderá mañana.`
+    const minutosActuales = ahora.hora * 60 + ahora.minuto
+    const horaEntregaMin = minutosActuales + 60
+    const entregaPosible = horaEntregaMin <= cierre * 60
+    const horaEntregaHora = Math.floor(horaEntregaMin / 60)
+    const horaEntregaResto = horaEntregaMin % 60
+    const facturaEntrega = entregaPosible
+      ? `Entrega/finalización en 1 hora: POSIBLE — estaría listo alrededor de las ${formatoHora12(horaEntregaHora, horaEntregaResto)}, aún dentro del horario (cerramos a las ${formatoHora12(cierre)}). Si el cliente pregunta por entrega en 1 hora, puedes confirmar esa hora estimada.`
+      : `Entrega/finalización en 1 hora: NO posible — el equipo cierra a las ${formatoHora12(cierre)} y la hora estimada supera el cierre. NO prometas entrega en 1 hora ni inventes una hora; ofrece agendar para el siguiente horario disponible.`
+    return `\n\n[CONTEXTO: Horario de atención] Hora actual CDMX: ${ahora.etiqueta12}. Estamos ABIERTOS en este momento (cierre: ${formatoHora12(cierre)}). ${facturaEntrega} No digas que estamos cerrados ni que se atenderá mañana.`
   }
   const estadoHorario = ahora.hora < horarios.apertura
-    ? `Aún no abrimos (abrimos a las ${horarios.apertura}:00).`
-    : `Ya cerramos por hoy (abrimos mañana a las ${horarios.apertura}:00).`
+    ? `Aún no abrimos (abrimos a las ${formatoHora12(horarios.apertura)}).`
+    : `Ya cerramos por hoy (abrimos mañana a las ${formatoHora12(horarios.apertura)}).`
   return (
-    `\n\n[CONTEXTO: Fuera de Horario] Hora actual CDMX: ${ahora.etiqueta}. ${estadoHorario} ` +
-    `El equipo humano ya no está disponible para contestar, PERO tú eres la asistente virtual de Jardín RoCe y sigues disponible para que el cliente NO pierda su pedido. ` +
+    `\n\n[CONTEXTO: Fuera de Horario] Hora actual CDMX: ${ahora.etiqueta12}. ${estadoHorario} ` +
+    `Estamos CERRADOS para el equipo humano, PERO tú sigues disponible como asistente virtual para que el cliente NO pierda su pedido. ` +
     `Ofrécele: 1) mandar la FOTO de referencia del arreglo que quiere, 2) decir su PRESUPUESTO aproximado y 3) para QUÉ DÍA lo necesita. ` +
-    `Promete amablemente que el equipo lo cotiza a primera hora cuando abran (a las ${horarios.apertura}:00). ` +
+    `Promete amablemente que el equipo lo cotiza a primera hora cuando abran (a las ${formatoHora12(horarios.apertura)}). ` +
     `Puedes compartir el catálogo de Google Drive (link del prompt) para que vaya viendo opciones y recibir su foto de referencia. ` +
     `Si quiere pagar o apartar, comparte la cuenta BBVA (de [REGLAS VALIDADAS POR EL BACKEND]) y recibe su comprobante; el sistema lo registra y el equipo lo valida a primera hora. ` +
     `NUNCA digas "mañana te muestro", NUNCA inventes precios, horarios, disponibilidad ni links.`

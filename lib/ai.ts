@@ -515,7 +515,7 @@ export async function clasificarImagenVenta(
 
   const historialReciente = historial
     .slice(-8)
-    .map(m => `${m.role}: ${m.content}`)
+    .map(m => `${etiquetaOrigen(m)}: ${m.content}`)
     .join('\n')
     .slice(-3000)
 
@@ -526,6 +526,7 @@ export async function clasificarImagenVenta(
     'referencia = flores, ramo, arreglo floral, imagen de inspiracion/cotizacion o producto deseado.',
     'otra = imagen no relacionada con pago ni flores.',
     'incierto = no se puede determinar.',
+    'Prioriza como comprobante si el historial indica que el equipo humano (humano, VERIFICADO) pidio el pago o el comprobante, aunque la imagen sea ambigua.',
     'Si el historial dice que esperaba pago pero la imagen muestra flores, clasifica referencia.',
     'Si el historial dice que cotizaba flores pero la imagen muestra banco/recibo, clasifica comprobante.',
     '',
@@ -770,12 +771,24 @@ export async function revisarRespuestaFlora(
 }
 
 // ─── Función principal del agente ────────────────────────────────────────────
+// Origen efectivo de un mensaje. Los mensajes guardados antes de que existiera
+// la columna `origen` (DEC-082) no tienen valor; se infieren por su contenido
+// (`[Agente: ...]` = equipo verificado, anotaciones del sistema).
+function origenEfectivo(m: MensajeChat): string {
+  if (m.origen) return m.origen
+  const contenido = (m.content || '').trim()
+  if (contenido.startsWith('[Agente:')) return 'equipo'
+  if (contenido.startsWith('[Flora omitió respuesta') || contenido.startsWith('[ANOTACIÓN DEL SISTEMA')) return 'sistema'
+  return 'flora'
+}
+
 // Etiqueta cada mensaje según quién lo escribió para que el LLM distinga
 // respuestas verificadas del equipo de las generadas por la propia IA.
 function etiquetaOrigen(m: MensajeChat): string {
   if (m.role === 'user') return 'cliente'
-  if (m.origen === 'equipo') return 'equipo (humano, VERIFICADO)'
-  if (m.origen === 'sistema') return 'sistema'
+  const origen = origenEfectivo(m)
+  if (origen === 'equipo') return 'equipo (humano, VERIFICADO)'
+  if (origen === 'sistema') return 'sistema'
   return 'flora (IA)'
 }
 
@@ -783,10 +796,11 @@ function formatearHistorialConFechas(historial: MensajeChat[]): MensajeChat[] {
   return historial.map(m => {
     const marca = m.creadoEn ? formatearFechaHoraMensaje(m.creadoEn) : ''
     let anotacion = ''
-    if (m.role === 'assistant' && m.origen) {
-      if (m.origen === 'equipo') anotacion = ' [EQUIPO HUMANO, VERIFICADO]'
-      else if (m.origen === 'sistema') anotacion = ' [ANOTACIÓN DEL SISTEMA]'
-      else if (m.origen === 'flora') anotacion = ' [RESPUESTA DE FLORA]'
+    if (m.role === 'assistant') {
+      const origen = origenEfectivo(m)
+      if (origen === 'equipo') anotacion = ' [EQUIPO HUMANO, VERIFICADO]'
+      else if (origen === 'sistema') anotacion = ' [ANOTACIÓN DEL SISTEMA]'
+      else if (origen === 'flora') anotacion = ' [RESPUESTA DE FLORA]'
     }
     const prefijo = anotacion ? `[${marca}]${anotacion}` : (marca ? `[${marca}]` : '')
     return prefijo ? { ...m, content: `${prefijo} ${m.content}` } : m

@@ -1,4 +1,4 @@
-import { ahoraCdmx, estaEnHorario } from '../whatsapp/message-utils'
+import { ahoraCdmx, estaEnHorario, formatoHora12 } from '../whatsapp/message-utils'
 import { obtenerHorarios, HORARIOS_DEFAULT } from '../config/configuracion.service'
 
 export const HORARIO_APERTURA = HORARIOS_DEFAULT.apertura
@@ -22,14 +22,14 @@ export function validarHorario(): InfoHorario {
 
   let mensajeBackend: string
   if (abierto) {
-    mensajeBackend = `Hora actual CDMX: ${ahora.etiqueta}. Estamos abiertos (cierre: ${horaCierre}:00).`
+    mensajeBackend = `Hora actual CDMX: ${ahora.etiqueta12}. Estamos abiertos (cierre: ${formatoHora12(horaCierre)}).`
   } else if (ahora.hora < horarios.apertura) {
-    mensajeBackend = `Hora actual CDMX: ${ahora.etiqueta}. Abrimos a las ${horarios.apertura}:00.`
+    mensajeBackend = `Hora actual CDMX: ${ahora.etiqueta12}. Abrimos a las ${formatoHora12(horarios.apertura)}.`
   } else {
-    mensajeBackend = `Hora actual CDMX: ${ahora.etiqueta}. Cerramos a las ${horaCierre}:00, abrimos mañana a las ${horarios.apertura}:00.`
+    mensajeBackend = `Hora actual CDMX: ${ahora.etiqueta12}. Cerramos a las ${formatoHora12(horaCierre)}, abrimos mañana a las ${formatoHora12(horarios.apertura)}.`
   }
 
-  return { abierto, horaActual: ahora.etiqueta, horaApertura: horarios.apertura, horaCierre, mensajeBackend }
+  return { abierto, horaActual: ahora.etiqueta12, horaApertura: horarios.apertura, horaCierre, mensajeBackend }
 }
 
 export function esHorarioAnticipado(hora: string): boolean {
@@ -59,8 +59,8 @@ export function horarioHoyManana(): { hoy: string; manana: string } {
   const mananaDia = (ahora.dia + 1) % 7
   const nombreManana = DIAS_SEMANA[mananaDia] ?? 'mañana'
 
-  const hoy = `${nombreHoy.charAt(0).toUpperCase() + nombreHoy.slice(1)}: ${horarios.apertura}:00 a ${cerrarDe(ahora.dia)}:00`
-  const manana = `${nombreManana.charAt(0).toUpperCase() + nombreManana.slice(1)}: ${horarios.apertura}:00 a ${cerrarDe(mananaDia)}:00`
+  const hoy = `${nombreHoy.charAt(0).toUpperCase() + nombreHoy.slice(1)}: ${formatoHora12(horarios.apertura)} a ${formatoHora12(cerrarDe(ahora.dia))}`
+  const manana = `${nombreManana.charAt(0).toUpperCase() + nombreManana.slice(1)}: ${formatoHora12(horarios.apertura)} a ${formatoHora12(cerrarDe(mananaDia))}`
 
   return { hoy, manana }
 }

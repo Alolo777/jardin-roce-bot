@@ -233,12 +233,11 @@ async function flushearFotosPendientesApertura(): Promise<void> {
   const pendientes = obtenerFotosPendientesApertura()
   if (pendientes.length === 0) return
   limpiarFotosPendientesApertura()
-  const ahoraEtiqueta = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
   console.log(`[bot] 🌅 Reenviando ${pendientes.length} foto(s) recibida(s) fuera de horario al equipo`)
   try {
     await notificarEmpleadosWhatsApp(
       sock,
-      `🌅 *Buenos días!* Te compartimos ${pendientes.length} foto(s)/solicitud(es) recibidas fuera de nuestro horario (ahora son las ${ahoraEtiqueta}). Atiéndelas a primera hora.`
+      `🌅 *Buenos días!* Te compartimos ${pendientes.length} foto(s)/solicitud(es) recibidas fuera de nuestro horario (ahora son las ${ahoraCdmx().etiqueta12}). Atiéndelas a primera hora.`
     )
   } catch (err) {
     console.error('[bot] Error avisando de fotos pendientes:', err)
@@ -897,13 +896,27 @@ export async function procesarMensajeEquipo(remoteJid: string, msgType: string, 
   if (!telefonoDestino) return
   const num = telefonoDestino.startsWith('52') ? `+${telefonoDestino}` : telefonoDestino
   if (msgType === 'image' || msgType === 'document') marcarFotosDisponibles(remoteJid)
-  registrarIntervencionHumana(remoteJid, body)
-  await agregarAlHistorial(num, 'assistant', `[Agente: ${body.trim()}]`, OrigenMensaje.EQUIPO)
-  if (esMensajeFotosDisponiblesEquipo(body)) marcarFotosDisponibles(remoteJid)
-  const precioAgente = extraerPrecioRespuesta(body)
+  const texto = (body ?? '').trim()
+
+  // El equipo envió solo multimedia (foto/documento sin texto): se registra como
+  // intervención verificada para que la IA sepa que el equipo ya respondió con
+  // una imagen/documento, sin modificar el estado del pedido.
+  if (!texto) {
+    if (msgType === 'image' || msgType === 'document') {
+      const textoMedia = msgType === 'document' ? 'envió un documento' : 'envió una foto'
+      registrarIntervencionHumana(remoteJid, textoMedia)
+      await agregarAlHistorial(num, 'assistant', `[Agente: ${textoMedia}]`, OrigenMensaje.EQUIPO)
+    }
+    return
+  }
+
+  registrarIntervencionHumana(remoteJid, texto)
+  await agregarAlHistorial(num, 'assistant', `[Agente: ${texto}]`, OrigenMensaje.EQUIPO)
+  if (esMensajeFotosDisponiblesEquipo(texto)) marcarFotosDisponibles(remoteJid)
+  const precioAgente = extraerPrecioRespuesta(texto)
   if (precioAgente) {
     const pedido = pedidoActual(remoteJid)
-    if (pedido.esperandoPrecioEnvio || /\b(env[ií]o|flete|reparto|domicilio|llevar)\b/i.test(body)) {
+    if (pedido.esperandoPrecioEnvio || /\b(env[ií]o|flete|reparto|domicilio|llevar)\b/i.test(texto)) {
       pedido.envio = { zona: pedido.envio?.zona ?? 'Envío confirmado por equipo', precio: precioAgente }
       pedido.esperandoPrecioEnvio = false
       if (pedido.precioPersonalizado || pedido.arreglo) pedido.estadoFlujo = 'esperando_pago'
@@ -915,9 +928,9 @@ export async function procesarMensajeEquipo(remoteJid: string, msgType: string, 
       pedido.estadoFlujo = 'precio_confirmado'
       transitarDesdeFlujo(remoteJid, 'precio_confirmado')
     }
-    persistirPedido(remoteJid, num, 'cotizacion', `[Agente: ${body.trim()}]`).catch(() => {})
+    persistirPedido(remoteJid, num, 'cotizacion', `[Agente: ${texto}]`).catch(() => {})
   }
-  if (/\b(gracias\s+por\s+(su\s+)?pago|pago\s+recibido|comprobante\s+recibido|le\s+agendamos|queda\s+agendado|pagado)\b/i.test(body)) {
+  if (/\b(gracias\s+por\s+(su\s+)?pago|pago\s+recibido|comprobante\s+recibido|le\s+agendamos|queda\s+agendado|pagado)\b/i.test(texto)) {
     const pedido = pedidoActual(remoteJid)
     pedido.metodoPago = 'transferencia'
     pedido.estadoFlujo = 'pagado_transferencia'
@@ -926,7 +939,7 @@ export async function procesarMensajeEquipo(remoteJid: string, msgType: string, 
     if (venta && ventaListaParaPagoTransferencia(remoteJid)) {
       ventaCerradaHandler(remoteJid, venta, num).catch(() => {})
     } else {
-      persistirPedido(remoteJid, num, 'pagado', `[Agente confirmó pago: ${body.trim()}]`).catch(() => {})
+      persistirPedido(remoteJid, num, 'pagado', `[Agente confirmó pago: ${texto}]`).catch(() => {})
     }
   }
 }

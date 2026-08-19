@@ -99,8 +99,9 @@ export function createMessageEntry(deps: MessageEntryDeps) {
     }
 
     if (msg.key?.fromMe) {
-      if (msgType === 'image' || msgType === 'document') marcarFotosDisponibles(remoteJid)
-      if (body) encolarPorCliente(remoteJid, () => procesarMensajeEquipo(remoteJid, msgType, body))
+      const esMediaEquipo = msgType === 'image' || msgType === 'document'
+      if (esMediaEquipo) marcarFotosDisponibles(remoteJid)
+      if (body || esMediaEquipo) encolarPorCliente(remoteJid, () => procesarMensajeEquipo(remoteJid, msgType, body))
       return
     }
 

@@ -4,6 +4,7 @@ import { horarioHoyManana } from '../validators/horario.validator'
 import { obtenerTextoCuenta } from '../validators/pago.validator'
 import { obtenerHorarios, obtenerTextoPrecios } from '../config/configuracion.service'
 import { obtenerTextoDisponibilidad } from '../config/inventario.service'
+import { formatoHora12 } from '../whatsapp/message-utils'
 
 export interface ContextoPrompt {
   decision: Decision
@@ -67,11 +68,11 @@ export function buildValidatedRulesSection(): string {
   const partes = [
     `[REGLAS VALIDADAS POR EL BACKEND]`,
     ``,
-    `## Horarios`,
+    `## Horarios (formato 12 horas)`,
     `- ${horario.hoy}`,
     `- ${horario.manana}`,
-    `- Lunes a viernes: ${horarios.apertura}:00 a ${horarios.cierreSemana}:00`,
-    `- Sábado y domingo: ${horarios.apertura}:00 a ${horarios.cierreFinSemana}:00`,
+    `- Lunes a viernes: ${formatoHora12(horarios.apertura)} a ${formatoHora12(horarios.cierreSemana)}`,
+    `- Sábado y domingo: ${formatoHora12(horarios.apertura)} a ${formatoHora12(horarios.cierreFinSemana)}`,
     ``,
     `## Pagos`,
     `- Transferencia BBVA: ${cuenta}`,
@@ -141,7 +142,7 @@ export function construirContextoPrompt(ctx: ContextoPrompt): string {
 
   partes.push(`[FECHA ACTUAL: ${ctx.fechaActual}]`)
   partes.push(`[HORA ACTUAL: ${ctx.horaActual}]`)
-  partes.push(`[NOTA DE TIEMPO] Cada mensaje del historial lleva un prefijo [dd/mm/aaaa hh:mm] con la fecha y hora exactas en que se escribió (hora de México). Interpreta palabras relativas como "hoy", "mañana", "ayer", "el día de la entrega" o "a las 9" según CUÁNDO se escribió cada mensaje, no según el mensaje actual. Si el cliente cambió una fecha u hora después, el cambio más reciente gana. Nunca confirmes una entrega para "mañana" si el mensaje donde se pidió "mañana" es de un día anterior y la entrega ya es hoy.`)>
+  partes.push(`[NOTA DE TIEMPO] Cada mensaje del historial lleva un prefijo [dd/mm/aaaa hh:mm am/pm] con la fecha y hora exactas en que se escribió (hora de México, formato 12 horas). La hora actual se indica en [HORA ACTUAL] también en formato 12 horas (ej. "2:30 pm"). Interpreta palabras relativas como "hoy", "mañana", "ayer", "el día de la entrega", "5 de la tarde", "3 pm" o "a las 9" según CUÁNDO se escribió cada mensaje, no según el mensaje actual. Usa SIEMPRE formato de 12 horas (am/pm) al responder y nunca el de 24 horas. Si el cliente cambió una fecha u hora después, el cambio más reciente gana. Nunca confirmes una entrega para "mañana" si el mensaje donde se pidió "mañana" es de un día anterior y la entrega ya es hoy.`)>
 
   partes.push(`[CASO: ${formatearCaso(ctx.caso)}]`)
   partes.push(`[PEDIDO: ${formatearPedido(ctx.pedido)}]`)

@@ -3,6 +3,7 @@ import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema }
 import { crearPedido, obtenerPedido, sincronizarConCaso } from './pedidos/pedido.service'
 import { construirContextoPrompt, buildValidatedRulesSection } from './openai/prompt.builder'
 import { Caso, PedidoActual } from './models/types'
+import { ahoraCdmx } from './whatsapp/message-utils'
 
 export interface MensajeEntrante {
   texto: string
@@ -42,7 +43,7 @@ export function procesarMensajePre(mensaje: MensajeEntrante): ContextoProcesamie
       caso: casoActivo,
       pedido: pedidoActivo,
       textoCliente: mensaje.texto,
-      horaActual: new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+      horaActual: ahoraCdmx().etiqueta12,
       fechaActual: new Date().toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' }),
     }),
   ].join('\n\n')

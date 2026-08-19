@@ -1748,4 +1748,24 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-083: Hora inyectada al LLM unificada en formato 12 horas y tiempo de México + lógica de entrega en 1 hora
+
+**Fecha:** 2026-08-19
+**Estado:** Aceptada
+
+**Motivo:** (BUG-017) El `[HORA ACTUAL]` que se inyectaba al LLM se generaba con `new Date().toLocaleTimeString('es-MX', {...})` SIN `timeZone`, por lo que usaba la zona local del servidor (UTC en GCP) en lugar de CDMX, contradiciendo el `[CONTEXTO]` (que sí usaba `America/Mexico_City`). El LLM recibía dos horas distintas y se confundía al responder "¿ya están abiertos?". Además todo el contexto iba en formato 24 horas mientras que empleados/clientes hablan en 12 horas ("5 de la tarde", "3 pm"), y no existía un dato confiable para saber si se puede entregar en 1 hora dentro del horario laboral.
+
+**Alternativas consideradas:**
+1. Agregar solo `timeZone: 'America/Mexico_City'` a las llamadas existentes (rechazada: dejaba el formato 24h inconsistente con el lenguaje del equipo).
+2. Depender del LLM para calcular si alcanza la entrega en 1 hora (rechazada: viola DEC-001, el LLM no decide horarios).
+3. **Unificar la hora en un solo punto con 12 horas + dato calculado por el backend (elegida):** `ahoraCdmx()` ahora devuelve `etiqueta12`/`hora12`/`ampm` en formato 12h; nuevo `formatoHora12(hora, minuto)` para horarios de apertura/cierre; `getContextoHorario()` inyecta la hora y calcula si "Entrega/finalización en 1 hora" es POSIBLE o NO (hora actual + 60 min dentro del cierre del día). `orchestrator.ts` y `message-handler.ts` dejan de usar `toLocaleTimeString` sin timezone. Prompts (Supabase `system_prompt` vía `_prompt_actualizado.txt` y `system-prompt.corregido.ts`) instruyen a Flora a usar SIEMPRE 12 horas y a no confirmar entregas que el backend marque como imposibles.
+
+**Resultado:** La hora inyectada es única, correcta (CDMX) y en 12 horas; el LLM sabe con datos del backend cuándo puede prometer entrega en 1 hora y cuándo no; fuera de horario sigue ateniendo como asistente virtual sin frenar la venta.
+
+**Ventajas:** Un solo caso (sin contradicción de horas); lenguaje natural mexicano (12h); sin lógica de horario en el prompt; retrocompatible (la etiqueta 24h se conserva en `ahoraCdmx().etiqueta` para usos que ya la consumen).
+
+**Desventajas:** El prompt de Supabase requiere resincronizarse (`node _sincronizar_prompt.mjs`); si el servidor ya estaba en CDMX el bug no se manifestaba, pero ahora queda garantizado en cualquier zona.
+
+---
+
 
