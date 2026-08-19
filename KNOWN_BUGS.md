@@ -208,3 +208,15 @@
 - **Corrección:** Nueva `origenEfectivo(m)` en `lib/ai.ts` que, cuando falta `origen`, infiere por contenido: `[Agente: ...]` → equipo, `[Flora omitió respuesta ...`/`[ANOTACIÓN DEL SISTEMA ...` → sistema, resto → flora. Se usa en `etiquetaOrigen()` y `formatearHistorialConFechas()`.
 - **Pruebas:** `npx tsc --noEmit` 0 errores; suite completa OK.
 - **Versión donde se corrigió:** 2.2.5
+
+## BUG-021: La respuesta al cliente podía incluir anotaciones internas del historial imitadas por el LLM
+- **Prioridad:** 🔴 Crítica
+- **Estado:** ✅ Resuelto (2026-08-19)
+- **Reportado:** 2026-08-19 (producción)
+- **Síntomas:** Flora respondió al cliente literalmente `[19/08/2026 8:26 am] [RESPUESTA DE FLORA] ¡Claro! Ya le pedí a una compañera...`. Se filtró metadata interna (marca de fecha/hora + etiqueta de origen) a la conversación visible del cliente.
+- **Causa raíz:** `formatearHistorialConFechas()` (lib/ai.ts, DEC-082) antepone `[dd/mm/yyyy h:mm am] [ANOTACIÓN]` a cada mensaje del historial enviado al modelo. El LLM (Gemini) imitó ese prefijo del historial y lo incluyó al inicio de su propia respuesta. El sanitizador final (`sanitizarRespuestaIA`) limpiaba markdown y bloques `[CLIENTE|CONTEXTO|...]` pero no la marca de fecha ni las etiquetas `[RESPUESTA DE FLORA]`/`[EQUIPO HUMANO, VERIFICADO]`/`[ANOTACIÓN DEL SISTEMA]`.
+- **Corrección:**
+  1. `src/validators/response.validator.ts` — `sanitizarRespuestaIA` elimina `MARCA_FECHA_ANOTACION_RE` (prefijos `[dd/mm/yyyy h:mm am]`) y `ANOTACION_INTERNA_RE` (`[RESPUESTA DE FLORA]`, `[EQUIPO HUMANO, VERIFICADO]`, `[ANOTACIÓN DEL SISTEMA]`) en cualquier parte de la respuesta + colapso de espacios dobles. Cubre la respuesta de `getAIResponse` y la corregida por la revisora (message-handler.ts:1014 y 1037).
+  2. Prompt system (regla reforzada en `_prompt_actualizado.txt` y `system-prompt.corregido.ts`): prohibido mostrar/repetir esas anotaciones o prefijos de fecha. Sincronizado a Supabase (17,097 caracteres).
+- **Pruebas:** `npx tsc --noEmit` 0 errores; verificación manual del sanitizador con el caso real → prefijo eliminado y contenido intacto; `test:validator`, `test:horario`, `test:precio`, `test:flows` OK.
+- **Versión donde se corrigió:** 2.2.5

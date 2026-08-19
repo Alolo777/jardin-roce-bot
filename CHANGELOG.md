@@ -74,6 +74,24 @@
 
 ---
 
+### La respuesta al cliente podía incluir anotaciones internas del historial que el LLM imitaba (BUG-021)
+
+**Problema:** En producción se detectó una respuesta al cliente como `[19/08/2026 8:26 am] [RESPUESTA DE FLORA] ¡Claro! Ya le pedí a una compañera...`. El prefijo `[dd/mm/yyyy h:mm am] [ANOTACIÓN]` es la marca que `formatearHistorialConFechas()` (lib/ai.ts, DEC-082) antepone a cada mensaje del historial enviado al modelo; el LLM (Gemini) imitó ese formato interno y lo incluyó en su respuesta. La fecha/hora interna además podía salir distorsionada. `limpiarRespuestaIA` / `sanitizarRespuestaIA` limpiaban links markdown y bloques `[CLIENTE|CONTEXTO|...]` pero NO esta marca de fecha/anotaciones.
+
+**Solución:**
+- **`src/validators/response.validator.ts`** `sanitizarRespuestaIA`: nuevas constantes `MARCA_FECHA_ANOTACION_RE` (quita `[dd/mm/yyyy h:mm am]`) y `ANOTACION_INTERNA_RE` (quita `[RESPUESTA DE FLORA]`, `[EQUIPO HUMANO, VERIFICADO]`, `[ANOTACIÓN DEL SISTEMA]`) en cualquier parte de la respuesta, + colapso de espacios dobles. Este es el punto final por el que pasan tanto la respuesta de `getAIResponse` (line 1014) como la corregida por la revisora (line 1037) en `message-handler.ts`.
+- **Prompt system** (prevención): regla reforzada en `_prompt_actualizado.txt` (regla 4) y `src/prompts/system-prompt.corregido.ts` (regla 5): no mostrar ni repetir al inicio `[RESPUESTA DE FLORA]`, `[EQUIPO HUMANO, VERIFICADO]`, `[ANOTACIÓN DEL SISTEMA]` ni prefijos de fecha/hora. Prompt resincronizado en Supabase con `node _sincronizar_prompt.mjs` (17,097 caracteres).
+
+**Archivos modificados:** `src/validators/response.validator.ts`, `_prompt_actualizado.txt`, `src/prompts/system-prompt.corregido.ts`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; verificación manual del sanitizador con el caso real (prefijo eliminado, contenido intacto: `¡Claro! Ya le pedí a una compañera...`); `test:validator`, `test:horario`, `test:precio`, `test:flows` OK.
+
+**Impacto:** Compatible. Garantiza que ninguna anotación interna llegue al cliente, aunque el proveedor IA vuelva a imitarlas. Requiere desplegar el código; el prompt ya está sincronizado.
+
+**Rollback:** Sí — revertir el commit y, si se desea, restaurar el prompt anterior desde Supabase (`historial_prompt`).
+
+---
+
 ## 2026-08-14
 
 ### Historial con origen estructurado: la IA distingue respuestas verificadas del equipo (DEC-082)

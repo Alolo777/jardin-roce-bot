@@ -250,14 +250,27 @@ export function validarRespuestaIA(respuesta: string, contexto: string): Validat
   return { valido: true }
 }
 
+// Anotaciones internas del historial que `formatearHistorialConFechas`
+// (lib/ai.ts) agrega a cada mensaje y que el LLM puede imitar dentro de su
+// respuesta: `[dd/mm/yyyy H:MM am] [RESPUESTA DE FLORA]` o `[EQUIPO HUMANO,
+// VERIFICADO]`. Nunca deben llegar al cliente.
+const MARCA_FECHA_ANOTACION_RE = /\[\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}\s*(?:a\.?m\.?|p\.?m\.?)\]\s*/gi
+const ANOTACION_INTERNA_RE = /\[(?:RESPUESTA DE FLORA|EQUIPO HUMANO, VERIFICADO|ANOTACIÓN DEL SISTEMA)\]\s*/gi
+
 export function sanitizarRespuestaIA(respuesta: string): string {
   let texto = respuesta
+
+  // BUG-021: quitar prefijos de anotación interna del historial que el LLM
+  // pueda imitar (ej. "[19/08/2026 8:26 am] [RESPUESTA DE FLORA] ¡Claro!...")
+  texto = texto.replace(MARCA_FECHA_ANOTACION_RE, '')
+  texto = texto.replace(ANOTACION_INTERNA_RE, '')
 
   texto = texto.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$2')
   texto = texto.replace(/\[([^\]]*)\]\(([^)]+)\)/g, '$2')
   texto = texto.replace(/https:\/\/[^\s]+supabase\.co\/storage\/[^\s]*/gi, '')
   texto = texto.replace(/\[(?:CLIENTE|CONTEXTO|INSTRUCCION|ARREGLO|TODOS|EXPRESIÓN|POSIBLE)[^\]]*\]\n?/gi, '')
   texto = texto.replace(/\n{3,}/g, '\n\n')
+  texto = texto.replace(/[ \t]{2,}/g, ' ')
 
   return texto.trim()
 }
