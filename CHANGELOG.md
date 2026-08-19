@@ -92,6 +92,22 @@
 
 ---
 
+### Response validator interpretaba las horas en 12h como si fueran AM (BUG-022)
+
+**Problema:** Tras migrar el contexto a formato 12 horas (BUG-017), `validarRespuestaIA` podía reaccionar mal: `HORA_REGEX` capturaba el meridiano en un grupo NO capturado y `extraerHoras()` devolvía solo `HH:MM`, descartando `am`/`pm`. Así, "3:00 pm" se trataba como 3:00 AM → minutos antes de apertura → si además aparecía una frase de confirmación ("sí podemos", "lo tenemos a las..."), el validador rechazaba la respuesta correcta de Flora (falso positivo). Igualmente "7:00 am" debía rechazarse y no se garantizaba correctamente.
+
+**Solución:** `src/validators/response.validator.ts` — `HORA_REGEX` ahora captura el meridiano (grupo 3) y `extraerHoras()` normaliza a reloj de 24h: `pm` y hora < 12 → +12; `am` y hora 12 → 0; sin sufijo se conserva tal cual ("hrs"/"horas" siguen siendo 24h). Devuelve siempre `HH:MM` de 5 caracteres.
+
+**Archivos modificados:** `src/validators/response.validator.ts`, `tests/response-validator.test.mts`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; nuevos casos 12h en `test:validator`: "3:00 pm" se acepta, "7:00 am" se rechaza, "10:00 am" (apertura) se acepta; suite completa OK.
+
+**Impacto:** Compatible. Corrige el juicio de horario del validador para el nuevo formato 12h sin cambiar su contrato.
+
+**Rollback:** Sí.
+
+---
+
 ## 2026-08-14
 
 ### Historial con origen estructurado: la IA distingue respuestas verificadas del equipo (DEC-082)

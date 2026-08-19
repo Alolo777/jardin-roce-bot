@@ -12,14 +12,22 @@ interface ValidationResult {
 }
 
 const PRECIO_REGEX = /\$\s*\d+(?:[.,]\d+)?/g
-const HORA_REGEX = /\b(\d{1,2}):(\d{2})\s*(?:am|pm|hrs|horas)?\b/i
+const HORA_REGEX = /\b(\d{1,2}):(\d{2})\s*(am|pm|hrs|horas)?\b/i
 
+// Convierte cada hora mencionada a HH:MM en reloj de 24 h. Respeta el meridiano
+// (am/pm) para que "3:00 pm" no se interprete como 3:00 AM al comparar contra
+// apertura/cierre (BUG-022).
 function extraerHoras(texto: string): string[] {
   const horas: string[] = []
   let match: RegExpExecArray | null
   const re = new RegExp(HORA_REGEX.source, 'gi')
   while ((match = re.exec(texto)) !== null) {
-    horas.push(`${match[1]}:${match[2]}`)
+    let h = Number(match[1])
+    const m = Number(match[2])
+    const meridiem = (match[3] || '').toLowerCase()
+    if (meridiem === 'pm' && h < 12) h += 12
+    else if (meridiem === 'am' && h === 12) h = 0
+    horas.push(`00${h}:${match[2]}`.slice(-5))
   }
   return horas
 }

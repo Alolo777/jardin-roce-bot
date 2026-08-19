@@ -220,3 +220,13 @@
   2. Prompt system (regla reforzada en `_prompt_actualizado.txt` y `system-prompt.corregido.ts`): prohibido mostrar/repetir esas anotaciones o prefijos de fecha. Sincronizado a Supabase (17,097 caracteres).
 - **Pruebas:** `npx tsc --noEmit` 0 errores; verificación manual del sanitizador con el caso real → prefijo eliminado y contenido intacto; `test:validator`, `test:horario`, `test:precio`, `test:flows` OK.
 - **Versión donde se corrigió:** 2.2.5
+
+## BUG-022: Response validator interpretaba horas en formato 12h como AM (falsos positivos al confirmar horario)
+- **Prioridad:** Alta
+- **Estado:** ✅ Resuelto (2026-08-19)
+- **Reportado:** 2026-08-19 (revisión tras migrar a formato 12h, BUG-017)
+- **Síntomas:** `validarRespuestaIA` podía rechazar respuestas correctas de Flora: `HORA_REGEX` capturaba el meridiano en grupo NO capturado y `extraerHoras()` devolvía solo `HH:MM`, descartando `am`/`pm`. "3:00 pm" se interpretaba como 3:00 AM (antes de apertura) y, si la respuesta incluía una frase de confirmación ("sí podemos", "lo tenemos a las"), se marcaba como horario fuera de rango (rechazo / HUMAN_REQUIRED innecesario). El dato "7:00 am" (que sí debe rechazarse) tampoco se garantizaba.
+- **Causa raíz:** La comparación contra `apertura`/`cierre` usaba la hora cruda sin normalizar el meridiano del formato 12h (funcionaba antes porque el contexto era 24h).
+- **Corrección:** `src/validators/response.validator.ts` — `HORA_REGEX` captura el meridiano (grupo 3) y `extraerHoras()` normaliza a reloj 24h: `am`/`pm` convertidos, sin sufijo se conserva ("hrs"/"horas" siguen en 24h). Devuelve `HH:MM` normalizado.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; nuevos casos 12h en `test:validator`: "3:00 pm" se acepta, "7:00 am" se rechaza, "10:00 am" (apertura) se acepta; suite completa OK.
+- **Versión donde se corrigió:** 2.2.5

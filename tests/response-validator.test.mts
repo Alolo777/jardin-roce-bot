@@ -37,6 +37,20 @@ assert.match(r.razon ?? '', /fuera del horario/, 'Razon debe indicar horario fue
 r = validarRespuestaIA('Podrías recoger a las 15:00.', CONTEXTO)
 assert.equal(r.valido, true, 'Mencion de hora sin confirmar debe aceptarse')
 
+// BUG-022: formato 12 horas — "3:00 pm" es 15:00 y debe ACEPTARSE
+// (antes se interpretaba como 3:00 AM y se rechazaba).
+r = validarRespuestaIA('Sí, podemos tenerlo listo a las 3:00 pm.', CONTEXTO)
+assert.equal(r.valido, true, 'Confirmar horario en 12h dentro de rango (3:00 pm) debe aceptarse')
+
+// BUG-022: "7:00 am" es antes de apertura y debe RECHAZARSE.
+r = validarRespuestaIA('Sí, podemos tenerlo listo a las 7:00 am.', CONTEXTO)
+assert.equal(r.valido, false, 'Confirmar horario en 12h antes de apertura debe rechazarse')
+assert.match(r.razon ?? '', /fuera del horario/, 'Razon debe indicar horario fuera de rango')
+
+// BUG-022: "10:00 am" es la apertura (10:00) y debe ACEPTARSE.
+r = validarRespuestaIA('Podemos tenerlo listo a las 10:00 am.', CONTEXTO)
+assert.equal(r.valido, true, 'Confirmar horario en 12h en apertura debe aceptarse')
+
 // 3) Prometer inventario sin respaldo se rechaza.
 r = validarRespuestaIA('Sí, tenemos ese ramo disponible.', CONTEXTO)
 assert.equal(r.valido, false, 'Confirmar disponibilidad sin inventario debe rechazarse')
