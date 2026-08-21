@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## 2026-08-21
+
+### Motor de Novedades: digest diario 3 am + panel de administradores del bot (DEC-084)
+
+**Objetivo:** Dar al equipo visibilidad de lo pendiente en cada chat (cotizaciones sin precio, pedidos atascos, cambios de fecha, modificaciones de arreglo, dudas sin responder) y permitir que administradores designados le pregunten al bot por WhatsApp "¿qué novedades hay?" recibiendo un resumen breve — sin gastar cuota de IA al consultar.
+
+**Implementación:**
+- **Nuevo módulo `src/novedades/`**:
+  - `types.ts`: `TipoNovedad` (cotizacion_pendiente, pedido_sin_tratar, cambio_fecha, modificacion_arreglo, pago_pendiente, duda_sin_responder, queja, otro), `Novedad`, `NovedadesDiarias`.
+  - `novedades.repository.ts`: digest persistido en `configuracion_bot` clave `novedades_diarias`; lista de admins en clave `admins_bot` (`obtenerAdminsBot`, `esAdminBot` con comparación por dígitos tolerante a +52/@c.us/LID).
+  - `novedad.detector.ts`: reglas backend sin LLM — pedidos atascos por `estadoFlujo` (esperando_precio_equipo → cotización, esperando_pago → pago pendiente, etc.), casos QUEJA/prioridad alta; `normalizarNovedadIA` valida la salida del LLM; `fusionarNovedades` deduplica priorizando reglas.
+  - `novedades.service.ts`: `generarNovedadesDiarias()` (3 am) = reglas + UNA pasada IA sobre transcripciones compactas (últimos 50 mensajes por chat activo del día anterior CDMX, lotes de 30 chats); idempotente por fecha analizada (protege cuota ante reinicios). `construirMensajeNovedades()` plantilla ordenada por prioridad. `enviarNovedadesProactivo()` (6 am) solo si hay novedades.
+  - `admin.handler.ts`: responde SIEMPRE desde el digest guardado — cero llamadas LLM al consultar.
+- **`lib/ai.ts`**: nueva `resumirNovedadesChats()` — JSON estricto con categorías cerradas del backend, temperature 0, `callWithFallback` + `conRetry`.
+- **`src/whatsapp/message-entry.ts`**: intercepto de admins antes del flujo de cliente (sin rate-limit ni pausa; es uso interno). Los admins ya no son atendidos por Flora como si fueran clientes.
+- **`bot.ts`**: schedulers integrados al bloque diario (3 am generar con recuperación `hora >= 3`; 6 am enviar solo con bot listo).
+- **Dashboard**: nueva sección `/admin/administradores` + API `/api/admins` (GET/PUT sobre `admins_bot`), link "Admins" en el nav.
+
+**Archivos nuevos:** `src/novedades/*` (5 archivos), `app/api/admins/route.ts`, `app/admin/administradores/page.tsx`, `tests/novedades.test.mts`
+**Archivos modificados:** `lib/ai.ts`, `src/whatsapp/message-entry.ts`, `bot.ts`, `app/admin/layout.tsx`, `package.json` (script `test:novedades`)
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `test:novedades` nuevo (detector de reglas, normalización IA, fusión/dedup, plantilla del mensaje, ventana de 24 h del día anterior); suite completa OK.
+
+**Impacto:** Compatible. No modifica tablas existentes (usa `configuracion_bot`). Para activarlo: agregar números en `/admin/administradores`. Las alertas críticas instantáneas (Telegram/WhatsApp empleados) se mantienen igual.
+
+**Rollback:** Sí — revertir el commit; el intercepto de admins y los schedulers desaparecen con él.
+
+---
+
 ## 2026-08-19
 
 ### Hora inyectada al LLM unificada en formato 12 horas (CDMX) + dato de entrega en 1 hora (BUG-017, DEC-083)

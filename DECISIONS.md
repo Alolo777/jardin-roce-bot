@@ -1768,4 +1768,24 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-084: Motor de Novedades — digest diario a las 3 am y panel de administradores del bot
+
+**Fecha:** 2026-08-21
+**Estado:** Aceptada
+
+**Motivo:** El equipo necesitaba visibilidad de lo que quedó PENDIENTE en cada chat (cotizaciones sin precio, pedidos atascos, clientes que piden cambiar fecha/hora o modificar su arreglo, dudas sin responder) sin revisar chat por chat. Además, los administradores querían preguntarle al bot por WhatsApp "¿qué novedades hay?" y recibir un resumen breve. Restricción dura: la cuota de Gemini es limitada (BUG-010), así que la consulta NO puede gastar llamadas de IA.
+
+**Alternativas consideradas:**
+1. Analizar con IA los mensajes cada vez que un admin pregunta (rechazada: gasta cuota a cualquier hora y responde lento).
+2. Notificar cada novedad al instante por WhatsApp (rechazada: duplica las alertas críticas existentes HUMAN_REQUIRED/Telegram y satura; se decidió mantener esas alertas como hoy).
+3. **Digest diario único + respuesta desde caché (elegida):** a las 3 am CDMX `generarNovedadesDiarias()` combina señales de reglas del backend (`pedidos_bot` atascos, casos QUEJA/prioridad alta) con UNA pasada de IA sobre transcripciones compactas (últimos 50 mensajes por chat activo del día anterior, lotes de 30 chats). Resultado guardado en `configuracion_bot` clave `novedades_diarias` (idempotente por fecha: si ya existe el digest del día analizado, no regenera aunque el bot se reinicie). A las 6 am se envía proactivamente a los admins solo si hay novedades. Cuando un admin escribe al bot, `procesarMensajeAdmin` responde desde el digest con plantilla — cero LLM.
+
+**Resultado:** Nuevo módulo `src/novedades/` (types, repository, detector de reglas, service, admin.handler), intercepto de admins en `message-entry.ts` (antes del flujo de cliente, sin rate-limit ni pausa), schedulers integrados al bloque diario de bot.ts (3 am generar / 6 am enviar, con recuperación si el bot estaba apagado), lista separada `admins_bot` en `configuracion_bot` gestionada desde la nueva sección `/admin/administradores` del dashboard, y `resumirNovedadesChats()` en `lib/ai.ts` (JSON estricto, categorías fijas del backend, temperature 0).
+
+**Ventajas:** Costo fijo de 1 llamada IA/día (2 si hay >30 chats); consulta instantánea gratis; cumple DEC-001 (el backend decide qué notificar, el LLM solo clasifica/redacta dentro de categorías cerradas); retrocompatible (no toca tablas existentes, usa `configuracion_bot`).
+
+**Desventajas:** Las novedades tienen hasta ~27 h de retraso (lo crítico sigue cubierto por alertas instantáneas existentes); el digest depende de que el bot esté encendido a las 3 am (si no, se genera al primer tick posterior con `hora >= 3`).
+
+---
+
 

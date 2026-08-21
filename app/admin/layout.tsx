@@ -180,6 +180,7 @@ const NAV_LINKS = [
   { href: '/admin', label: 'Dashboard', icon: '📊' },
   { href: '/admin/prompt', label: 'Cerebro', icon: '🧠' },
   { href: '/admin/empleados', label: 'Empleados', icon: '👥' },
+  { href: '/admin/administradores', label: 'Admins', icon: '🛡️' },
   { href: '/admin/ignorados', label: 'Silenciados', icon: '🔇' },
   { href: '/admin/logs', label: 'Logs', icon: '📜' },
   { href: '/admin/health', label: 'Salud', icon: '💓' },

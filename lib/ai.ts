@@ -691,6 +691,103 @@ export async function clasificarConversacion(
   }
 }
 
+// ─── Novedades diarias para administradores (DEC-084) ────────────────────────
+// Un único análisis al día (3 am CDMX) sobre los chats del día anterior.
+// El LLM SOLO clasifica dentro de categorías del backend y redacta el resumen;
+// nunca decide qué notificar ni toca la base de datos.
+
+function extraerJsonArray(texto: string): string {
+  const limpio = texto.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
+  const inicio = limpio.indexOf('[')
+  const fin = limpio.lastIndexOf(']')
+  return inicio >= 0 && fin > inicio ? limpio.slice(inicio, fin + 1) : limpio
+}
+
+export interface ChatParaResumen {
+  telefono: string
+  lineas: string[]
+}
+
+export interface NovedadCrudaIA {
+  telefono: string
+  tipo: string
+  resumen: string
+  prioridad?: string
+}
+
+const TIPOS_NOVEDAD_PERMITIDOS =
+  'cotizacion_pendiente|pedido_sin_tratar|cambio_fecha|modificacion_arreglo|pago_pendiente|duda_sin_responder|queja|otro'
+
+export async function resumirNovedadesChats(chats: ChatParaResumen[]): Promise<NovedadCrudaIA[] | null> {
+  if (chats.length === 0) return []
+
+  const bloques = chats
+    .map(c => `CHAT ${c.telefono}:\n${c.lineas.join('\n').slice(-1200)}`)
+    .join('\n\n')
+
+  const prompt = [
+    'Analiza las conversaciones de ayer de una floreria (Flora es la asistente virtual).',
+    'Detecta SOLO temas que quedaron PENDIENTES de atender por el equipo humano:',
+    '- cotizacion_pendiente: pidio precio/cotizacion y nadie del equipo confirmo.',
+    '- pedido_sin_tratar: mostro intencion de comprar/apartar y el pedido no avanzo.',
+    '- cambio_fecha: pidio cambiar la fecha o hora de entrega de un pedido ya apartado.',
+    '- modificacion_arreglo: pidio cambiar/modificar el arreglo floral (flores, tamano, dedicatoria, envio).',
+    '- pago_pendiente: dijo que pagaria/enviaria comprobante y no hay confirmacion de pago.',
+    '- duda_sin_responder: hizo una pregunta que quedo sin respuesta clara.',
+    '- queja: molestia, reclamo o cancelacion.',
+    '- otro: algo importante pendiente que no encaje arriba.',
+    'REGLAS: Ignora conversaciones cerradas con venta completa y agradecimientos finales. No inventes telefonos: usa EXACTAMENTE los de los bloques CHAT. Si un chat no tiene nada pendiente, omitelo. Maximo 1 novedad por chat (la mas importante). resumen maximo 120 caracteres, espanol mexicano, sin emojis.',
+    `Responde SOLO JSON valido, sin markdown, formato: [{"telefono":"...","tipo":"${TIPOS_NOVEDAD_PERMITIDOS}","resumen":"...","prioridad":"baja|media|alta"}]. Si no hay novedades responde [].`,
+    '',
+    bloques,
+  ].join('\n')
+
+  try {
+    console.time('[ai.ts] Novedades diarias')
+    const rawTexto = await callWithFallback(
+      async () => {
+        if (!geminiClient) throw new Error('Gemini no configurado')
+        const model = geminiClient.getGenerativeModel({ model: GEMINI_MODEL })
+        const result = await conRetry(() => model.generateContent({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 2048, temperature: 0 },
+        }), 3)
+        return result.response.text() || ''
+      },
+      async (provider: OpenAICompatProvider) => {
+        if (!provider.client) throw new Error(`${provider.name} no configurado`)
+        const completion = await conRetry(async () => {
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 30_000)
+          try {
+            return await provider.client!.chat.completions.create(
+              {
+                model: provider.model,
+                messages: [{ role: 'user', content: prompt }],
+                max_tokens: 2048,
+                temperature: 0,
+              },
+              { signal: controller.signal }
+            )
+          } finally {
+            clearTimeout(timeoutId)
+          }
+        }, 2)
+        return completion.choices[0]?.message?.content?.trim() || ''
+      },
+      'resumirNovedadesChats'
+    )
+    console.timeEnd('[ai.ts] Novedades diarias')
+
+    const parsed = JSON.parse(extraerJsonArray(rawTexto)) as NovedadCrudaIA[]
+    if (!Array.isArray(parsed)) return null
+    return parsed.filter(n => n && typeof n.telefono === 'string' && typeof n.resumen === 'string')
+  } catch (error) {
+    console.warn('[ai.ts] Error generando novedades diarias:', error instanceof Error ? error.message : error)
+    return null
+  }
+}
+
 export async function revisarRespuestaFlora(
   historial: MensajeChat[],
   mensajeCliente: string,

@@ -33,6 +33,10 @@ export interface MessageEntryDeps {
   mediaToBase64: (media: Buffer | Uint8Array | ArrayBuffer) => string
   TIPOS_MEDIA_NO_SOPORTADOS: Set<string>
   registrarActividad: () => void
+  // DEC-084: los administradores del bot escriben desde SU número y reciben
+  // el digest de novedades; no pasan por el flujo de cliente.
+  esAdminBot: (numeroOJid: string) => Promise<boolean>
+  procesarMensajeAdmin: (remoteJid: string, body: string) => Promise<void>
 }
 
 export function createMessageEntry(deps: MessageEntryDeps) {
@@ -46,6 +50,8 @@ export function createMessageEntry(deps: MessageEntryDeps) {
     mediaToBase64,
     TIPOS_MEDIA_NO_SOPORTADOS,
     registrarActividad,
+    esAdminBot,
+    procesarMensajeAdmin,
   } = deps
 
   function timestampMensajeMs(msg: any): number {
@@ -95,6 +101,14 @@ export function createMessageEntry(deps: MessageEntryDeps) {
     const variantesMensaje = [...new Set(candidatosIgnorar.flatMap(n => variantesTelefono(jidANumero(n))))]
     if (!msg.key?.fromMe && variantesMensaje.some(n => ignorados.includes(n))) {
       console.log(`[entry] 🔇 Número ignorado: ${numeroRealParaIgnorar || remoteJid}`)
+      return
+    }
+
+    // DEC-084: intercepto de administradores. Va antes del flujo de cliente
+    // y sin rate-limit/pausa: es uso interno del panel operativo.
+    if (!msg.key?.fromMe && body.trim() && (await esAdminBot(numeroRealParaIgnorar || remoteJid))) {
+      console.log(`[entry] 🛡️ Mensaje de administrador: ${numeroRealParaIgnorar || remoteJid}`)
+      encolarPorCliente(remoteJid, () => procesarMensajeAdmin(remoteJid, body))
       return
     }
 

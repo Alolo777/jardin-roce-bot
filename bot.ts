@@ -72,6 +72,7 @@ import { validarSucursal, obtenerTextoConfirmacionSucursal } from './src/validat
 import { buscarEnvio, pareceConsultaEnvio } from './src/validators/envio.validator'
 import { evaluarCancelacion } from './src/validators/cancelacion.validator'
 import { evaluarQueja } from './src/validators/queja.validator'
+import { esAdminBot, crearAdminHandler, generarNovedadesDiarias, enviarNovedadesProactivo } from './src/novedades/index'
 
 // ════════════════════════════════════════════════════════════════
 // PAUSA DEL BOT
@@ -200,6 +201,8 @@ setInterval(() => {
 let ultimoDiaAlertaDiaria = ''
 let ultimoDiaResumenDiario = ''
 let ultimoDiaVerifTelegram = ''
+let ultimoDiaNovedadesGenerado = ''
+let ultimoDiaNovedadesEnviado = ''
 setInterval(() => {
   const ahora = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' })
   const d     = new Date(ahora)
@@ -219,6 +222,19 @@ setInterval(() => {
   if (hora === 10 && dia !== ultimoDiaVerifTelegram) {
     ultimoDiaVerifTelegram = dia
     verificarTelegramDiario()
+  }
+
+  // DEC-084: digest de novedades — se genera a las 3 am analizando el día
+  // anterior (1 pasada de IA máxima, idempotente por fecha) y se envía
+  // proactivamente a los administradores a las 6 am si hay novedades.
+  // Los flags usan >= para recuperar el disparo si el bot estaba apagado.
+  if (hora >= 3 && dia !== ultimoDiaNovedadesGenerado) {
+    ultimoDiaNovedadesGenerado = dia
+    generarNovedadesDiarias().catch(err => console.error('[bot] Error generando novedades:', err))
+  }
+  if (hora >= 6 && dia !== ultimoDiaNovedadesEnviado && sock && BOT_READY) {
+    ultimoDiaNovedadesEnviado = dia
+    enviarNovedadesProactivo(sock).catch(err => console.error('[bot] Error enviando novedades:', err))
   }
 }, 30 * 60_000)
 
@@ -1437,6 +1453,12 @@ const messageEntry = createMessageEntry({
   mediaToBase64,
   TIPOS_MEDIA_NO_SOPORTADOS,
   registrarActividad,
+  esAdminBot,
+  procesarMensajeAdmin: crearAdminHandler({
+    responderAdmin: async (jid: string, texto: string) => {
+      await sock?.sendMessage(jid, { text: texto })
+    },
+  }),
 })
 cargarEstado().then(() => {
   limpiarClavesVacias().catch(() => {})
