@@ -3,6 +3,7 @@
 // y acceso a la lista de administradores del bot.
 
 import { supabaseAdmin } from '../../lib/supabase'
+import { coincideAdminPorVariantes } from './novedad.detector'
 import type { NovedadesDiarias } from './types'
 
 export const CLAVE_NOVEDADES = 'novedades_diarias'
@@ -70,18 +71,12 @@ export async function obtenerAdminsBot(): Promise<string[]> {
 }
 
 // Verifica si un número/jid pertenece a la lista de admins.
-// Compara solo dígitos para tolerar variantes (+52, @c.us, LID).
+// BUG-023: compara CONJUNTOS DE VARIANTES (52↔521, +, @c.us, LID) porque el
+// dígito extra mexicano va en medio del número y un sufijo simple no lo detecta.
 export async function esAdminBot(numeroOJid: string): Promise<boolean> {
-  const digitos = String(numeroOJid ?? '').replace(/\D/g, '')
-  if (!digitos) return false
+  if (!String(numeroOJid ?? '').replace(/\D/g, '')) return false
   const admins = await obtenerAdminsBot()
-  return admins.some(admin => {
-    const adminDigitos = admin.replace(/\D/g, '')
-    // Mínimo 10 dígitos para evitar falsos positivos con entradas cortas
-    if (adminDigitos.length < 10) return false
-    // Coincidencia exacta o por sufijo (52 + 10 dígitos vs 10 dígitos)
-    return digitos === adminDigitos || digitos.endsWith(adminDigitos) || adminDigitos.endsWith(digitos)
-  })
+  return coincideAdminPorVariantes(numeroOJid, admins)
 }
 
 export function limpiarCacheAdmins(): void {

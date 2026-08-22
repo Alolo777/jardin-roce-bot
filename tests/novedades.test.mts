@@ -4,6 +4,7 @@ import {
   detectarCasosAtencion,
   normalizarNovedadIA,
   fusionarNovedades,
+  coincideAdminPorVariantes,
 } from '../src/novedades/novedad.detector.ts'
 import { construirMensajeNovedades, ventanaDiaAnteriorCdmx } from '../src/novedades/novedades.service.ts'
 import { TipoNovedad, type Novedad, type NovedadesDiarias } from '../src/novedades/types.ts'
@@ -107,5 +108,24 @@ assert.match(ventana.fechaAnalizada, /^\d{4}-\d{2}-\d{2}$/, 'Fecha analizada en 
 const duracion = new Date(ventana.finIso).getTime() - new Date(ventana.inicioIso).getTime()
 assert.equal(duracion, 24 * 60 * 60_000, 'La ventana cubre exactamente 24 horas')
 assert.ok(new Date(ventana.finIso).getTime() < Date.now(), 'La ventana siempre queda en el pasado')
+
+// ─── coincideAdminPorVariantes (BUG-023) ─────────────────────────
+// El mismo número MX existe como 521XXXXXXXXXX (13) y 52XXXXXXXXXX (12);
+// el dígito extra va en MEDIO, así que un sufijo simple no lo detecta.
+
+assert.equal(
+  coincideAdminPorVariantes('5212411933932@s.whatsapp.net', ['522411933932']),
+  true,
+  'JID real de 13 dígitos debe matchear admin registrado con 12'
+)
+assert.equal(
+  coincideAdminPorVariantes('522411933932', ['5212411933932']),
+  true,
+  '12 dígitos registrado vs admin en formato 13'
+)
+assert.equal(coincideAdminPorVariantes('522411933932@c.us', ['522411933932']), true, 'Con @c.us matchea')
+assert.equal(coincideAdminPorVariantes('+52 1 241 119 3393', ['2411193393']), true, 'Con espacios/+ y admin local a 10')
+assert.equal(coincideAdminPorVariantes('529988776655', ['522411933932']), false, 'Número distinto NO matchea')
+assert.equal(coincideAdminPorVariantes('', ['522411933932']), false, 'Vacío NO matchea')
 
 console.log('novedades.test.mts: ok — detector de reglas, fusión y plantilla del digest correctos (DEC-084)')

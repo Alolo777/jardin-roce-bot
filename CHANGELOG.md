@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## 2026-08-22
+
+### Fix — Admins atendidos por Flora y digest proactivo que nunca llegaba (BUG-023)
+
+**Problema:** (1) Al escribir un admin al bot, Flora contestaba con el flujo de ventas: `esAdminBot` comparaba por sufijo de dígitos y NO detectaba la variante mexicana (`52XXXXXXXXXX` registrado vs `521XXXXXXXXXX` real — el dígito extra va en medio). (2) El resumen de las 6 am nunca llegó: el envío armaba el JID sin resolverlo con `onWhatsApp` y no enviaba nada si no había novedades. (3) El digest ni siquiera existía: la generación podía quedar colgada si el proveedor IA no respondía (sin timeout).
+
+**Solución:**
+- **`src/novedades/novedad.detector.ts`**: nueva `coincideAdminPorVariantes()` — compara conjuntos de variantes vía `variantesTelefono()` (misma lógica que el filtro de ignorados).
+- **`src/novedades/novedades.repository.ts`**: `esAdminBot` usa ese matching.
+- **`src/whatsapp/notification.service.ts`**: emisor genérico `enviarTextoANumeros()` (resuelve JID real con `onWhatsApp`, dedup por destino, aviso si es el propio bot); `notificarEmpleadosWhatsApp` lo reutiliza sin cambio de comportamiento.
+- **`src/novedades/novedades.service.ts`**: envío proactivo vía `enviarTextoANumeros` y SIEMPRE confirma (aunque sea "No hay novedades"); timeout 150 s por lote IA (`Promise.race`) para que el digest siempre se guarde.
+
+**Archivos modificados:** `src/novedades/novedad.detector.ts`, `src/novedades/novedades.repository.ts`, `src/novedades/novedades.service.ts`, `src/whatsapp/notification.service.ts`, `tests/novedades.test.mts`, `KNOWN_BUGS.md`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `test:novedades` con casos 12↔13 dígitos MX; verificación en vivo contra la lista real de producción (ambos formatos del número → ADMIN); suite completa OK.
+
+**Impacto:** Compatible. Los empleados siguen recibiendo exactamente las mismas notificaciones (mismo emisor refactorizado).
+
+**Rollback:** Sí.
+
+---
+
 ## 2026-08-21
 
 ### Motor de Novedades: digest diario 3 am + panel de administradores del bot (DEC-084)

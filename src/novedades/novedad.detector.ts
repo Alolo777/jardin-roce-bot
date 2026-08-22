@@ -4,6 +4,7 @@
 // Funciones puras para facilitar pruebas.
 
 import { EstadoPedido, Prioridad, TipoCaso, type Caso, type PedidoActual } from '../models/types'
+import { variantesTelefono } from '../conversation/conversation.service'
 import { TipoNovedad, type Novedad, type NovedadIA } from './types'
 
 export interface PedidoConCliente {
@@ -94,6 +95,17 @@ export function normalizarNovedadIA(cruda: NovedadIA): Novedad | null {
   const tipo = TIPOS_IA_VALIDOS.has(cruda?.tipo) ? (cruda.tipo as TipoNovedad) : TipoNovedad.OTRO
   const prioridad = cruda?.prioridad === 'alta' || cruda?.prioridad === 'baja' ? cruda.prioridad : 'media'
   return { telefono, tipo, resumen, prioridad, fuente: 'ia' }
+}
+
+// ─── Matching de administradores por variantes de teléfono ──────────────────
+// BUG-023: en México el mismo número existe como 521XXXXXXXXXX (13 dígitos,
+// formato WhatsApp móvil) y 52XXXXXXXXXX (12 dígitos); el dígito extra va en
+// MEDIO, así que una comparación por sufijo no lo detecta. Se comparan los
+// conjuntos de variantes (misma lógica que usa el filtro de ignorados).
+export function coincideAdminPorVariantes(numeroOJid: string, admins: string[]): boolean {
+  const variantesMensaje = new Set(variantesTelefono(String(numeroOJid ?? '')))
+  if (variantesMensaje.size === 0) return false
+  return admins.some(admin => variantesTelefono(admin).some(v => variantesMensaje.has(v)))
 }
 
 export function fusionarNovedades(reglas: Novedad[], ia: Novedad[]): Novedad[] {

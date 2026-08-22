@@ -25,17 +25,18 @@ export async function obtenerEmpleadosANotificar(): Promise<string[]> {
   }
 }
 
-export async function notificarEmpleadosWhatsApp(sock: any, mensaje: string): Promise<void> {
-  const numeros = await obtenerEmpleadosANotificar()
-  if (numeros.length === 0) {
-    console.warn('[notif] No hay empleados configurados para notificar vía WhatsApp')
-    return
-  }
+// Envía un texto a una lista de números/jids resolviendo el JID real con
+// onWhatsApp (tolera variantes MX 52/521) y sin duplicar envíos al mismo
+// contacto. Usada por empleados y admins (DEC-084). Devuelve cuántos envíos
+// se realizaron.
+export async function enviarTextoANumeros(sock: any, numeros: string[], mensaje: string): Promise<number> {
   if (!sock?.user) {
-    console.warn('[notif] sock.user no disponible — no se puede notificar')
-    return
+    console.warn('[notif] sock.user no disponible — no se puede enviar')
+    return 0
   }
-  console.log(`[notif] Notificando a ${numeros.length} empleado(s)...`)
+  const botUser = jidANumero(sock.user.id || '').replace(/^\+/, '')
+  const enviados = new Set<string>()
+  let exitosos = 0
   for (const num of numeros) {
     let jid = ''
     try {
@@ -46,20 +47,33 @@ export async function notificarEmpleadosWhatsApp(sock: any, mensaje: string): Pr
         const contacto = resultado?.find((r: { exists: boolean; jid: string }) => r.exists && r.jid)
         if (contacto?.jid) jid = contacto.jid.replace(/@c\.us$/, '@s.whatsapp.net')
         if (resultado && !contacto) {
-          console.warn(`[notif] Empleado ${telefono} no aparece como usuario válido`)
+          console.warn(`[notif] ${telefono} no aparece como usuario válido`)
           continue
         }
       }
-      const empleadoUser = jidANumero(jid).replace(/^\+/, '')
-      const botUser = jidANumero(sock.user.id || '').replace(/^\+/, '')
-      if (empleadoUser && botUser && empleadoUser === botUser) {
-        console.warn(`[notif] El empleado ${jid} es el mismo número conectado al bot`)
+      const destinoUser = jidANumero(jid).replace(/^\+/, '')
+      if (!destinoUser || enviados.has(destinoUser)) continue
+      if (destinoUser && botUser && destinoUser === botUser) {
+        console.warn(`[notif] El destinatario ${jid} es el mismo número conectado al bot`)
       }
+      enviados.add(destinoUser)
       await sock.sendMessage(jid, { text: mensaje })
+      exitosos++
     } catch (err) {
-      console.warn(`[notif] Error notificando a empleado ${num} (JID: ${jid}):`, err)
+      console.warn(`[notif] Error enviando a ${num} (JID: ${jid}):`, err)
     }
   }
+  return exitosos
+}
+
+export async function notificarEmpleadosWhatsApp(sock: any, mensaje: string): Promise<void> {
+  const numeros = await obtenerEmpleadosANotificar()
+  if (numeros.length === 0) {
+    console.warn('[notif] No hay empleados configurados para notificar vía WhatsApp')
+    return
+  }
+  console.log(`[notif] Notificando a ${numeros.length} empleado(s)...`)
+  await enviarTextoANumeros(sock, numeros, mensaje)
 }
 
 export async function enviarFotoEmpleadosWhatsApp(sock: any, base64: string, caption: string, mimetype = 'image/jpeg'): Promise<void> {

@@ -230,3 +230,17 @@
 - **Corrección:** `src/validators/response.validator.ts` — `HORA_REGEX` captura el meridiano (grupo 3) y `extraerHoras()` normaliza a reloj 24h: `am`/`pm` convertidos, sin sufijo se conserva ("hrs"/"horas" siguen en 24h). Devuelve `HH:MM` normalizado.
 - **Pruebas:** `npx tsc --noEmit` 0 errores; nuevos casos 12h en `test:validator`: "3:00 pm" se acepta, "7:00 am" se rechaza, "10:00 am" (apertura) se acepta; suite completa OK.
 - **Versión donde se corrigió:** 2.2.5
+
+## BUG-023: Los administradores eran atendidos por Flora y no recibían el digest de novedades
+- **Prioridad:** 🔴 Crítica
+- **Estado:** ✅ Resuelto (2026-08-22)
+- **Reportado:** 2026-08-22 (producción)
+- **Síntomas:** Al escribir un admin al bot, Flora respondía con el flujo de ventas en lugar del digest de novedades. Además el envío proactivo de las 6 am nunca llegó y el digest (`novedades_diarias`) ni siquiera existía.
+- **Causa raíz:** (1) `esAdminBot` comparaba por dígitos/sufijo simple, pero el mismo número MX existe como `52XXXXXXXXXX` (12 dígitos) y `521XXXXXXXXXX` (13 dígitos) con el dígito extra EN MEDIO — ningún sufijo coincide → el intercepto nunca disparaba y el admin caía al flujo de cliente. (2) El envío proactivo armaba el JID manualmente (`telefono@s.whatsapp.net`) sin resolverlo con `onWhatsApp`, fallando con variantes MX; además no enviaba nada cuando no había novedades (silencio ambiguo). (3) La generación del digest podía quedar colgada indefinidamente si un proveedor IA no respondía (sin timeout), impidiendo guardar.
+- **Corrección:**
+  1. Nueva `coincideAdminPorVariantes()` en `novedad.detector.ts`: compara CONJUNTOS DE VARIANTES vía `variantesTelefono()` (misma lógica que el filtro de ignorados). `esAdminBot` la usa.
+  2. `notification.service.ts`: nuevo emisor genérico `enviarTextoANumeros(sock, numeros, texto)` con resolución `onWhatsApp`, dedup por JID y aviso si el destino es el propio bot. `notificarEmpleadosWhatsApp` lo reutiliza (comportamiento preservado).
+  3. `enviarNovedadesProactivo` usa `enviarTextoANumeros` y SIEMPRE envía confirmación diaria (aunque sea "No hay novedades pendientes").
+  4. Timeout de 150 s por lote IA en `generarNovedadesDiarias` (`Promise.race`): el digest siempre se guarda aunque un proveedor se cuelgue.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; `test:novedades` ampliado con casos 12↔13 dígitos, @c.us, +/espacios y número ajeno; verificación en vivo contra la lista real de producción (`522411933932` y JID `5212411933932@s.whatsapp.net` → ADMIN); suite completa OK.
+- **Versión donde se corrigió:** 2.3.1

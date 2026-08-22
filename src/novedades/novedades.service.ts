@@ -12,10 +12,10 @@ import { supabaseAdmin } from '../../lib/supabase'
 import { resumirNovedadesChats } from '../../lib/ai'
 import { listarPedidosActivosGlobales } from '../pedidos/pedido.service'
 import { listarCasosRequierenAtencion } from '../casos/caso.service'
+import { enviarTextoANumeros } from '../whatsapp/notification.service'
 import { detectarCasosAtencion, detectarPedidosAtascos, fusionarNovedades, normalizarNovedadIA } from './novedad.detector'
 import { cargarNovedades, guardarNovedades, obtenerAdminsBot } from './novedades.repository'
 import { TipoNovedad, type Novedad, type NovedadesDiarias, type TranscripcionChat } from './types'
-import { limpiarTelefono } from '../parser'
 
 const MENSAJES_POR_CHAT = 50
 const CHATS_POR_LOTE_IA = 30
@@ -116,8 +116,13 @@ export async function generarNovedadesDiarias(opciones: { forzar?: boolean } = {
     const chats = await obtenerTranscripcionesDeAyer()
     console.log(`[novedades] ${chats.length} chat(s) activo(s) el ${fechaAnalizada}`)
     for (let i = 0; i < chats.length; i += CHATS_POR_LOTE_IA) {
-      const crudas = await resumirNovedadesChats(chats.slice(i, i + CHATS_POR_LOTE_IA))
-      if (!crudas) break // proveedor caído: no insistir (protege cuota)
+      // BUG-023: tope de tiempo por lote. Si un proveedor se cuelga, seguimos
+      // con lo que haya para que el digest SIEMPRE se guarde.
+      const crudas = await Promise.race([
+        resumirNovedadesChats(chats.slice(i, i + CHATS_POR_LOTE_IA)),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), 150_000)),
+      ])
+      if (!crudas) break // proveedor caído o lento: no insistir (protege cuota)
       novedadesIA.push(...crudas.map(normalizarNovedadIA).filter((n): n is Novedad => n !== null))
     }
   } catch (err) {
@@ -181,24 +186,22 @@ export function construirMensajeNovedades(digest: NovedadesDiarias | null): stri
 }
 
 // ─── Envío proactivo (6 am) ──────────────────────────────────────
+// BUG-023: usa enviarTextoANumeros (resuelve el JID real con onWhatsApp,
+// tolerando variantes MX 52/521 y entradas duplicadas). Envía SIEMPRE una
+// confirmación diaria, aunque no haya novedades, para que el admin sepa
+// que el sistema está vivo.
 
 export async function enviarNovedadesProactivo(sock: any): Promise<void> {
   try {
     const admins = await obtenerAdminsBot()
-    if (admins.length === 0) return
-    const digest = await obtenerNovedadesDelDia()
-    if (!digest || digest.novedades.length === 0) return // nada que reportar: no molestar
-    const mensaje = construirMensajeNovedades(digest)
-    for (const admin of admins) {
-      try {
-        const telefono = limpiarTelefono(admin)
-        const jid = admin.includes('@') ? admin : `${telefono}@s.whatsapp.net`
-        await sock?.sendMessage(jid, { text: mensaje })
-      } catch (err) {
-        console.warn(`[novedades] Error enviando digest a admin ${admin}:`, err)
-      }
+    if (admins.length === 0) {
+      console.warn('[novedades] Sin admins_bot configurados — no se envía digest proactivo')
+      return
     }
-    console.log(`[novedades] ☀️ Digest proactivo enviado a ${admins.length} admin(s)`)
+    const digest = await obtenerNovedadesDelDia()
+    const mensaje = construirMensajeNovedades(digest)
+    const exitosos = await enviarTextoANumeros(sock, admins, mensaje)
+    console.log(`[novedades] ☀️ Digest proactivo enviado a ${exitosos}/${admins.length} admin(s)`)
   } catch (err) {
     console.error('[novedades] Error en envío proactivo:', err)
   }
