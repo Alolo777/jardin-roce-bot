@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## 2026-08-23 (5)
+
+### Fix — Fallback del system prompt alineado + logs visibles + tono de Flora en la revisora (BUG-027)
+
+**Problema (auditoría de flujos de IA):** Si fallaba la lectura de `configuracion_bot.system_prompt` sin caché, el bot usaba silenciosamente `FALLBACK_SYSTEM_PROMPT` — un prompt VIEJO hardcodeado (~10 KB) con datos desactualizados (Norte 18:00, anticipo 50%, anotaciones inexistentes) → Flora contestaba "distinta a la del Cerebro" sin rastro. Además, la revisora podía reescribir respuestas sin respetar la personalidad.
+
+**Aclaración de la auditoría:** NO hay cruce cliente↔admin. El system_prompt del Cerebro SOLO alimenta `getAIResponse` (flujo de clientes). Novedades (`resumirNovedadesChats`) y seguimiento de admins (`responderConsultaAdmin`) usan prompts internos propios; el chat del admin no se guarda en historial.
+
+**Solución:**
+1. Eliminado `FALLBACK_SYSTEM_PROMPT`; fallback ahora = `SYSTEM_PROMPT_CORREGIDO` (espejo actualizado del repo).
+2. Ambos caminos de fallback escriben en tabla `logs` → visibles en `/admin/logs`.
+3. `revisarRespuestaFlora`: nueva regla "TONO AL CORREGIR" (voz de Flora, máx 3 líneas, 1-2 emojis, una pregunta).
+
+**Archivos modificados:** `lib/ai.ts`, `KNOWN_BUGS.md`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; suite completa OK; grep confirma 0 referencias al prompt eliminado.
+
+**Impacto:** Compatible. El comportamiento normal no cambia; solo el camino de emergencia queda alineado y observable.
+
+**Rollback:** Sí.
+
+---
+
 ## 2026-08-23 (4)
 
 ### Feat — Fotos de contexto en el seguimiento del admin (DEC-085)

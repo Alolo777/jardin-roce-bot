@@ -284,3 +284,17 @@
   4. Demora anti-ban ahora aleatoria entre 8–15 s.
 - **Pruebas:** `npx tsc --noEmit` 0 errores; `test:novedades` ampliado (máscara, extracción de últimos 4, digest sin número completo); suite completa OK.
 - **Versión donde se corrigió:** 2.3.4
+
+## BUG-027: Fallback silencioso con system_prompt VIEJO — Flora contestaba distinta a la del Cerebro
+- **Prioridad:** Alta
+- **Estado:** ✅ Resuelto (2026-08-23)
+- **Reportado:** 2026-08-23 (auditoría de flujos de IA solicitada por el usuario)
+- **Síntomas:** El bot contestaba a los clientes con un estilo/reglas distintos a los del prompt del Cerebro sin razón aparente.
+- **Causa raíz:** Si la lectura de `configuracion_bot.system_prompt` fallaba sin caché disponible, `obtenerSystemPrompt()` caía silenciosamente a `FALLBACK_SYSTEM_PROMPT` hardcodeado en ai.ts — una versión ANTIGUA con datos desactualizados (Norte cerraba 18:00, "anticipo mínimo 50%", anotaciones `[CASO ACTIVO]` inexistentes). Solo dejaba console.error en la VM. Auditoría adicional: el CONTEXTO EXTRA (~23 bloques backend) domina en la práctica y la revisora podía reescribir respuestas sin reglas de tono.
+- **Corrección:**
+  1. Eliminado `FALLBACK_SYSTEM_PROMPT` (~10 KB de prompt viejo); el fallback ahora usa `SYSTEM_PROMPT_CORREGIDO` (espejo actualizado del repo).
+  2. Los dos caminos de fallback registran en la tabla `logs` (`logger.warn/error` módulo 'prompt') → visibles en /admin/logs.
+  3. La revisora (`revisarRespuestaFlora`) ahora tiene regla TONO AL CORREGIR: voz de Flora, máx 3 líneas, 1-2 emojis, una pregunta.
+  4. Aclarado en auditoría: NO existe cruce cliente↔admin — el Cerebro solo alimenta `getAIResponse`; novedades/seguimiento usan prompts internos propios.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; suite completa OK; grep confirma 0 referencias al prompt eliminado.
+- **Versión donde se corrigió:** 2.3.6
