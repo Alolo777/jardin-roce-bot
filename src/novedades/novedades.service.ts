@@ -9,13 +9,14 @@
 //   cualquier hora → un admin escribe al bot y recibe el digest guardado
 
 import { supabaseAdmin } from '../../lib/supabase'
-import { resumirNovedadesChats } from '../../lib/ai'
+import { resumirNovedadesChats, responderConsultaAdmin, type ChatParaResumen } from '../../lib/ai'
 import { logger } from '../../lib/logger.service'
 import { listarPedidosActivosGlobales } from '../pedidos/pedido.service'
 import { listarCasosRequierenAtencion } from '../casos/caso.service'
 import { enviarTextoANumeros } from '../whatsapp/notification.service'
 import { resolverLidInverso } from '../whatsapp/contact.service'
-import { detectarCasosAtencion, detectarPedidosAtascos, filtrarNovedadesDeChatsActivos, fusionarNovedades, normalizarNovedadIA } from './novedad.detector'
+import { variantesTelefono } from '../conversation/conversation.service'
+import { detectarCasosAtencion, detectarPedidosAtascos, extraerUltimos4, filtrarNovedadesDeChatsActivos, fusionarNovedades, mascararTelefono, normalizarNovedadIA, coincideAdminPorVariantes } from './novedad.detector'
 import { cargarNovedades, guardarNovedades, obtenerAdminsBot } from './novedades.repository'
 import { TipoNovedad, type Novedad, type NovedadesDiarias, type TranscripcionChat } from './types'
 
@@ -167,14 +168,20 @@ export async function generarNovedadesDiarias(
     : []
 
   const novedades = fusionarNovedades(reglas, novedadesIA)
+  // BUG-026: los administradores son internos — si alguno disparó una novedad
+  // (p. ej. mandó una foto de prueba al bot), se omite del digest.
+  const admins = await obtenerAdminsBot()
+  const finales = admins.length > 0
+    ? novedades.filter(n => !coincideAdminPorVariantes(n.telefono, admins))
+    : novedades
   const digest: NovedadesDiarias = {
     fechaAnalizada,
     tipoVentana,
     generadaEn: new Date().toISOString(),
-    novedades,
+    novedades: finales,
   }
   await guardarNovedades(digest)
-  console.log(`[novedades] ✅ Digest guardado: ${novedades.length} novedad(es) (${reglas.length} reglas + ${novedadesIA.length} IA)`)
+  console.log(`[novedades] ✅ Digest guardado: ${finales.length} novedad(es) (${reglas.length} reglas + ${novedadesIA.length} IA)`)
   return digest
 }
 
@@ -210,7 +217,7 @@ export function construirMensajeNovedades(digest: NovedadesDiarias | null): stri
     const etiqueta = ETIQUETA_TIPO[n.tipo] ?? ETIQUETA_TIPO[TipoNovedad.OTRO]
     const cliente = n.cliente ? ` (${n.cliente})` : ''
     const marca = n.prioridad === 'alta' ? '🔴' : n.prioridad === 'media' ? '🟡' : '⚪'
-    return `${marca} ${i + 1}. *${n.telefono}*${cliente}: ${etiqueta}${n.resumen ? ` — ${n.resumen}` : ''}`
+    return `${marca} ${i + 1}. *${mascararTelefono(n.telefono)}*${cliente}: ${etiqueta}${n.resumen ? ` — ${n.resumen}` : ''}`
   })
 
   const restantes = ordenadas.length - Math.min(ordenadas.length, MAX_NOVEDADES_EN_MENSAJE)
@@ -249,5 +256,114 @@ export async function enviarNovedadesProactivo(sock: any): Promise<void> {
     console.log(`[novedades] ☀️ Digest proactivo enviado a ${exitosos}/${admins.length} admin(s)`)
   } catch (err) {
     console.error('[novedades] Error en envío proactivo:', err)
+  }
+}
+
+// ─── Consulta de detalle de un chat (seguimiento del admin, BUG-026) ─────────
+// El admin pregunta algo específico ("¿qué pasó con el 7890?" / "¿y Lizet?")
+// y aquí se localiza el chat (por últimos 4 dígitos del teléfono real o por
+// nombre en pedidos), se leen sus últimos mensajes y la IA responde.
+
+const STOPWORDS_ADMIN = new Set([
+  'que', 'como', 'cuando', 'donde', 'paso', 'para', 'por', 'los', 'las', 'del',
+  'una', 'uno', 'este', 'esta', 'esto', 'quiero', 'saber', 'dice', 'dijo',
+  'chats', 'chat', 'cliente', 'numero', 'hace', 'hay', 'mas', 'cual', 'quien',
+  'todo', 'toda', 'todos', 'sobre', 'entre', 'pero', 'aun', 'dime', 'tell',
+  'manda', 'muestra', 'revisa', 'revisas', 'puedes', 'podrias', 'favor',
+])
+
+function candidatosNombre(texto: string): string[] {
+  return [...new Set(
+    texto
+      .split(/[^a-záéíóúñü]+/i)
+      .map(w => w.trim())
+      .filter(w => w.length >= 4 && !STOPWORDS_ADMIN.has(w.toLowerCase()))
+      .slice(0, 3),
+  )]
+}
+
+function coincideEnVariantes(numero: string, lista: string[]): boolean {
+  const variantes = new Set(variantesTelefono(numero))
+  if (variantes.size === 0) return false
+  return lista.some(t => variantesTelefono(t).some(v => variantes.has(v)))
+}
+
+export async function consultarChatParaAdmin(pregunta: string): Promise<string> {
+  try {
+    const ult4 = extraerUltimos4(pregunta)
+    const nombres = ult4 ? [] : candidatosNombre(pregunta)
+    if (!ult4 && nombres.length === 0) return ''
+
+    // Cargar clientes y resolver número real (cache LID→PN de Baileys)
+    const { data: clientesRows } = await supabaseAdmin.from('clientes').select('id, telefono').limit(2000)
+    let candidatas: { clienteId: string; stored: string; real: string }[] = []
+    for (const c of clientesRows ?? []) {
+      const stored = String(c.telefono ?? '').trim()
+      if (!stored) continue
+      let real = stored
+      try {
+        const r = await resolverLidInverso(stored)
+        if (r) real = r
+      } catch { /* sin mapeo */ }
+      candidatas.push({ clienteId: c.id, stored, real })
+    }
+
+    if (ult4) {
+      candidatas = candidatas.filter(e => e.stored.endsWith(ult4) || e.real.endsWith(ult4))
+    }
+    if (nombres.length > 0 && candidatas.length !== 1) {
+      // Desambiguar por nombre registrado en pedidos
+      for (const nombre of nombres) {
+        const { data: peds } = await supabaseAdmin
+          .from('pedidos_bot')
+          .select('telefono')
+          .ilike('cliente_nombre', `%${nombre}%`)
+          .limit(5)
+        const tels = (peds ?? []).map(p => String(p.telefono ?? '')).filter(Boolean)
+        if (tels.length > 0) {
+          const porNombre = candidatas.filter(e => coincideEnVariantes(e.real, tels) || coincideEnVariantes(e.stored, tels))
+          if (porNombre.length > 0) { candidatas = porNombre; break }
+        }
+      }
+    }
+
+    if (candidatas.length === 0) {
+      return '🤔 No encontré un chat que coincida. Prueba con otros 4 dígitos del número o el nombre del pedido.'
+    }
+    candidatas = candidatas.slice(0, 3)
+
+    const bloques: ChatParaResumen[] = []
+    for (const cand of candidatas) {
+      const { data } = await supabaseAdmin
+        .from('historial_chat')
+        .select('rol, contenido, creado_en, origen')
+        .eq('cliente_id', cand.clienteId)
+        .order('creado_en', { ascending: false })
+        .limit(MENSAJES_POR_CHAT)
+      const mensajes = (data ?? []).reverse()
+      if (mensajes.length === 0) continue
+      const lineas = mensajes.map(m => {
+        let hora = ''
+        if (m.creado_en) {
+          hora = new Date(m.creado_en)
+            .toLocaleString('es-MX', { timeZone: 'America/Mexico_City', hour: 'numeric', minute: '2-digit', hour12: true })
+            .replace('a. m.', 'am').replace('p. m.', 'pm')
+        }
+        const origen = m.origen === 'equipo' ? 'equipo' : m.origen === 'sistema' ? 'sistema' : m.rol === 'user' ? 'cliente' : 'flora'
+        const contenido = String(m.contenido ?? '').replace(/\s+/g, ' ').slice(0, 200)
+        return `[${hora}] ${origen}: ${contenido}`
+      })
+      bloques.push({ telefono: mascararTelefono(cand.real), lineas })
+    }
+
+    if (bloques.length === 0) return '🤔 Encontré el chat pero no tiene mensajes guardados recientes.'
+
+    const respuesta = await responderConsultaAdmin(pregunta, bloques)
+    if (!respuesta) return '🌸 No pude analizar el chat ahorita. Intenta de nuevo en un momento.'
+    logger.info('novedades', `Consulta de admin respondida (${bloques.length} chat(s))`)
+    return respuesta
+  } catch (err) {
+    console.error('[novedades] Error en consulta de admin:', err)
+    return ''
   }
 }

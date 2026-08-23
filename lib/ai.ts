@@ -790,6 +790,76 @@ export async function resumirNovedadesChats(chats: ChatParaResumen[]): Promise<N
   }
 }
 
+// ─── Consulta de seguimiento de un admin sobre un chat concreto (BUG-026) ────
+// El administrador pregunta algo específico ("¿qué pasó con el 7890?") y el
+// LLM responde leyendo la transcripción reciente de ESE chat. Una llamada
+// pequeña SOLO cuando el admin pregunta; nunca en el flujo del cliente.
+
+export async function responderConsultaAdmin(
+  pregunta: string,
+  chats: ChatParaResumen[]
+): Promise<string | null> {
+  if (chats.length === 0) return null
+
+  const bloques = chats
+    .map(c => `CHAT ${c.telefono}:\n${c.lineas.join('\n').slice(-2400)}`)
+    .join('\n\n')
+
+  const prompt = [
+    'Eres el asistente interno del equipo de una floreria. Un ADMINISTRADOR te pregunta sobre un chat de cliente.',
+    'Con base SOLO en la transcripción, responde su pregunta de forma breve (max 6 lineas), en espanol mexicano.',
+    'Incluye: que pidió/hizo el cliente, en qué quedó la conversación y qué falta por hacer del lado del equipo.',
+    'Si la transcripcion no contiene la respuesta, dilo claramente sin inventar datos (no inventes precios ni fechas).',
+    'No uses markdown pesado ni listas largas; texto plano amable y directo.',
+    '',
+    `Pregunta del administrador: ${pregunta}`,
+    '',
+    bloques,
+  ].join('\n')
+
+  try {
+    console.time('[ai.ts] Consulta admin')
+    const texto = await callWithFallback(
+      async () => {
+        if (!geminiClient) throw new Error('Gemini no configurado')
+        const model = geminiClient.getGenerativeModel({ model: GEMINI_MODEL })
+        const result = await conRetry(() => model.generateContent({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 500, temperature: 0.3 },
+        }), 2)
+        return result.response.text() || ''
+      },
+      async (provider: OpenAICompatProvider) => {
+        if (!provider.client) throw new Error(`${provider.name} no configurado`)
+        const completion = await conRetry(async () => {
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 25_000)
+          try {
+            return await provider.client!.chat.completions.create(
+              {
+                model: provider.model,
+                messages: [{ role: 'user', content: prompt }],
+                max_tokens: 500,
+                temperature: 0.3,
+              },
+              { signal: controller.signal }
+            )
+          } finally {
+            clearTimeout(timeoutId)
+          }
+        }, 2)
+        return completion.choices[0]?.message?.content?.trim() || ''
+      },
+      'responderConsultaAdmin'
+    )
+    console.timeEnd('[ai.ts] Consulta admin')
+    return texto && texto.length > 0 ? texto.slice(0, 900) : null
+  } catch (error) {
+    console.warn('[ai.ts] Error en consulta de admin:', error instanceof Error ? error.message : error)
+    return null
+  }
+}
+
 export async function revisarRespuestaFlora(
   historial: MensajeChat[],
   mensajeCliente: string,

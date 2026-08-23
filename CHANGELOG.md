@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## 2026-08-23 (3)
+
+### Feat — Máscara de números, exclusión de admins y preguntas de seguimiento por WhatsApp (BUG-026)
+
+**Objetivo:** El digest ahora muestra solo los últimos 4 dígitos del celular; el propio admin ya no aparece en las novedades; y se puede preguntar más sobre un chat específico ("¿qué pasó con el 7890?" / "¿y Lizet?") y la IA responde leyendo ese chat.
+
+**Implementación:**
+- **`src/novedades/novedad.detector.ts`**: `mascararTelefono()` (•••• XXXX) y `extraerUltimos4()`.
+- **`src/novedades/novedades.service.ts`**: digest con máscara; exclusión de admins tras fusionar novedades; nueva `consultarChatParaAdmin(pregunta)` — localiza el chat por últimos 4 dígitos (real resuelto o guardado) o por nombre (`pedidos_bot`), lee últimos 60 mensajes, y responde con `responderConsultaAdmin()` (1 llamada IA pequeña solo al preguntar).
+- **`lib/ai.ts`**: `responderConsultaAdmin()` — respuesta breve basada solo en la transcripción, sin inventar datos.
+- **`src/novedades/admin.handler.ts`**: enrutado de intención — "novedades" → digest sin LLM; pregunta de detalle → consulta con IA; fallo → mensaje de ayuda.
+- **`bot.ts`**: demora anti-ban aleatoria 8–15 s con presencia "escribiendo...".
+- **Dashboard**: `GET /api/novedades` devuelve teléfonos enmascarados; hint de uso en `/admin/administradores`.
+
+**Archivos modificados:** `src/novedades/*`, `lib/ai.ts`, `bot.ts`, `app/api/novedades/route.ts`, `app/admin/administradores/page.tsx`, `tests/novedades.test.mts`, `KNOWN_BUGS.md`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `test:novedades` ampliado (máscara, últimos 4, digest sin número completo); suite completa OK.
+
+**Impacto:** Compatible. Los follow-ups gastan 1 llamada IA pequeña por pregunta del admin (uso ocasional).
+
+**Rollback:** Sí.
+
+---
+
 ## 2026-08-23 (2)
 
 ### Fix — Números reales (LID), solo chats de hoy/ayer, cotizaciones completas y respuesta anti-ban (BUG-025)

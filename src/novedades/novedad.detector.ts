@@ -108,6 +108,22 @@ export function coincideAdminPorVariantes(numeroOJid: string, admins: string[]):
   return admins.some(admin => variantesTelefono(admin).some(v => variantesMensaje.has(v)))
 }
 
+// ─── Utilidades de presentación y detección de intención ────────────────────
+
+// BUG-026: el digest muestra solo los últimos 4 dígitos del celular,
+// nunca el número completo.
+export function mascararTelefono(telefono: string): string {
+  const d = String(telefono ?? '').replace(/\D/g, '')
+  return d ? `•••• ${d.slice(-4)}` : '—'
+}
+
+// Extrae los últimos 4 dígitos cuando el admin menciona un número en su
+// pregunta (ej. "¿qué pasó con el 7890?" → "7890").
+export function extraerUltimos4(texto: string): string | null {
+  const m = String(texto ?? '').match(/\d{3,}/)
+  return m ? m[0].slice(-4) : null
+}
+
 // ─── Filtrar novedades a solo los chats activos de la ventana ───────────────
 // BUG-025: el usuario pidió OMITIR chats antiguos. Las reglas del backend
 // (pedidos/casos) pueden señalar teléfonos sin actividad reciente; aquí se

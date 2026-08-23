@@ -178,6 +178,7 @@ export default function AdministradoresPage() {
         <p className="text-xs text-gray-400 mb-4">
           El bot genera automáticamente el resumen a las 3 am (día anterior) y lo envía a las 6 am.
           El botón analiza los últimos 2 días (60 mensajes por chat) y muestra el resultado aquí y a los admins.
+          Tip: también puedes preguntarle al bot por WhatsApp: "¿qué pasó con el 7890?" (últimos 4 dígitos) o "¿y Lizet?".
         </p>
 
         {mensajeNovedades && (

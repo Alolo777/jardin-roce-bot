@@ -6,6 +6,8 @@ import {
   fusionarNovedades,
   coincideAdminPorVariantes,
   filtrarNovedadesDeChatsActivos,
+  mascararTelefono,
+  extraerUltimos4,
 } from '../src/novedades/novedad.detector.ts'
 import { construirMensajeNovedades, ventanaDiaAnteriorCdmx } from '../src/novedades/novedades.service.ts'
 import { TipoNovedad, type Novedad, type NovedadesDiarias } from '../src/novedades/types.ts'
@@ -97,6 +99,16 @@ assert.equal(filtradas.length, 2, 'El chat sin actividad en la ventana se omite'
 assert.ok(!filtradas.some(n => n.telefono === '+521888888888'), 'Chat antiguo excluido')
 assert.equal(filtrarNovedadesDeChatsActivos([regla], []).length, 0, 'Sin chats activos no hay reglas')
 
+// ─── mascararTelefono / extraerUltimos4 (BUG-026) ────────────────
+
+assert.equal(mascararTelefono('+521234567890'), '•••• 7890', 'Máscara muestra solo últimos 4')
+assert.equal(mascararTelefono('521234567890@s.whatsapp.net'), '•••• 7890', 'Máscara tolera jid')
+assert.equal(mascararTelefono(''), '—', 'Vacío → guion')
+
+assert.equal(extraerUltimos4('¿Qué pasó con el 7890?'), '7890', 'Extrae los 4 dígitos mencionados')
+assert.equal(extraerUltimos4('el numero 521234567890 no contesta'), '7890', 'Toma últimos 4 de un número largo')
+assert.equal(extraerUltimos4('¿y Lizet qué?'), null, 'Sin dígitos devuelve null')
+
 // ─── construirMensajeNovedades ───────────────────────────────────
 
 assert.match(construirMensajeNovedades(null), /No hay novedades/, 'Digest nulo -> mensaje de tranquilidad')
@@ -111,10 +123,10 @@ const digest: NovedadesDiarias = {
 }
 const mensaje = construirMensajeNovedades(digest)
 assert.match(mensaje, /Novedades del 19\/08\/2026/, 'Encabezado con fecha analizada')
-assert.match(mensaje, /\+521555555555\* \(Lizet\): tiene una queja/, 'Formato telefono + etiqueta')
-assert.match(mensaje, /\+521234567890\*: intentó cambiar la fecha\/hora/, 'Etiqueta de cambio de fecha')
-const idxAlta = mensaje.indexOf('+521555555555')
-const idxMedia = mensaje.indexOf('+521234567890')
+assert.match(mensaje, /•••• 5555\* \(Lizet\): tiene una queja/, 'Formato máscara + etiqueta')
+assert.match(mensaje, /•••• 7890\*: intentó cambiar la fecha\/hora/, 'Etiqueta de cambio de fecha')
+const idxAlta = mensaje.indexOf('•••• 5555')
+const idxMedia = mensaje.indexOf('•••• 7890')
 assert.ok(idxAlta < idxMedia, 'Prioridad alta aparece primero')
 
 // Encabezado para ventana manual de 48 horas

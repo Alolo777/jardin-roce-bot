@@ -271,3 +271,16 @@
   4. Anti-ban: la respuesta al admin muestra presencia 'composing' ~10 s antes de enviar (wiring en `bot.ts`).
 - **Pruebas:** `npx tsc --noEmit` 0 errores; `test:novedades` con casos del filtro de chats activos; suite completa OK.
 - **Versión donde se corrigió:** 2.3.3
+
+## BUG-026: Digest exponía números completos, incluía al propio admin y no permitía preguntas de seguimiento
+- **Prioridad:** Media
+- **Estado:** ✅ Resuelto (2026-08-23)
+- **Reportado:** 2026-08-23 (feedback del usuario)
+- **Síntomas:** (1) El digest mostraba el número completo de los clientes. (2) El número del PROPIO admin aparecía con una novedad (le había mandado una foto al bot como prueba). (3) Al preguntar más sobre un chat ("¿qué pasó con el 7890?"), el bot no entendía y solo reenviaba el digest.
+- **Corrección:**
+  1. `mascararTelefono()` — digest y dashboard (`GET /api/novedades`) muestran solo `•••• XXXX`.
+  2. Exclusión de admins: tras fusionar novedades, se descartan las que correspondan a cualquier número en `admins_bot` (`coincideAdminPorVariantes`).
+  3. Seguimiento por WhatsApp: nueva `consultarChatParaAdmin(pregunta)` localiza el chat por **últimos 4 dígitos** (del teléfono real resuelto o guardado) o por **nombre** (`pedidos_bot.cliente_nombre` ILIKE), lee sus últimos 60 mensajes y la IA responde con nueva `responderConsultaAdmin()` (1 llamada pequeña solo cuando el admin pregunta). Handler con enrutado: "novedades" → digest sin LLM; pregunta → detalle con IA; si falla → mensaje de ayuda.
+  4. Demora anti-ban ahora aleatoria entre 8–15 s.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; `test:novedades` ampliado (máscara, extracción de últimos 4, digest sin número completo); suite completa OK.
+- **Versión donde se corrigió:** 2.3.4

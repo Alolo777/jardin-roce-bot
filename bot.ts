@@ -1481,11 +1481,12 @@ const messageEntry = createMessageEntry({
   registrarActividad,
   esAdminBot,
   procesarMensajeAdmin: crearAdminHandler({
-    // BUG-025 (anti-ban): no responder instantáneo. Muestra los puntitos de
-    // "escribiendo..." ~10 s y después envía, imitando a una persona.
+    // BUG-025/026 (anti-ban): no responder instantáneo. Muestra los puntitos
+    // de "escribiendo..." y espera entre 8 y 15 s (aleatorio, más humano)
+    // antes de enviar.
     responderAdmin: async (jid: string, texto: string) => {
       try { await sock?.sendPresenceUpdate('composing', jid) } catch { /* no fatal */ }
-      await new Promise(r => setTimeout(r, 10_000))
+      await new Promise(r => setTimeout(r, 8000 + Math.floor(Math.random() * 7000)))
       try { await sock?.sendPresenceUpdate('paused', jid) } catch { /* no fatal */ }
       await sock?.sendMessage(jid, { text: texto })
     },

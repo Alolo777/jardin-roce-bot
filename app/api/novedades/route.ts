@@ -1,9 +1,14 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 
+// BUG-026: muestra solo los últimos 4 dígitos del celular, nunca el completo.
+function mascararTelefono(telefono: string): string {
+  const d = String(telefono ?? '').replace(/\D/g, '')
+  return d ? `•••• ${d.slice(-4)}` : '—'
+}
+
 // DEC-084: devuelve el digest de novedades actual (lectura directa de
-// configuracion_bot). La página /admin/administradores lo muestra y usa
-// generadaEn para detectar cuándo el bot terminó la regeneración manual.
+// configuracion_bot) con los teléfonos enmascarados.
 
 export async function GET() {
   try {
@@ -22,7 +27,10 @@ export async function GET() {
         fechaAnalizada: digest.fechaAnalizada ?? null,
         tipoVentana: digest.tipoVentana ?? 'dia_anterior',
         generadaEn: digest.generadaEn ?? null,
-        novedades: Array.isArray(digest.novedades) ? digest.novedades : [],
+        novedades: (Array.isArray(digest.novedades) ? digest.novedades : []).map((n: Record<string, unknown>) => ({
+          ...n,
+          telefono: mascararTelefono(String(n.telefono ?? '')),
+        })),
       },
     })
   } catch (error) {
