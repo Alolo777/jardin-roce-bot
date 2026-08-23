@@ -795,20 +795,32 @@ export async function resumirNovedadesChats(chats: ChatParaResumen[]): Promise<N
 // LLM responde leyendo la transcripción reciente de ESE chat. Una llamada
 // pequeña SOLO cuando el admin pregunta; nunca en el flujo del cliente.
 
+export interface ImagenVisionAdmin {
+  base64: string
+  mimetype?: string
+  caption?: string
+}
+
 export async function responderConsultaAdmin(
   pregunta: string,
-  chats: ChatParaResumen[]
+  chats: ChatParaResumen[],
+  imagenes: ImagenVisionAdmin[] = []
 ): Promise<string | null> {
   if (chats.length === 0) return null
 
+  const adjuntas = imagenes.slice(0, 2)
   const bloques = chats
     .map(c => `CHAT ${c.telefono}:\n${c.lineas.join('\n').slice(-2400)}`)
     .join('\n\n')
 
   const prompt = [
     'Eres el asistente interno del equipo de una floreria. Un ADMINISTRADOR te pregunta sobre un chat de cliente.',
-    'Con base SOLO en la transcripción, responde su pregunta de forma breve (max 6 lineas), en espanol mexicano.',
+    'Con base SOLO en la transcripción e imágenes, responde su pregunta de forma breve (max 6 lineas), en espanol mexicano.',
     'Incluye: que pidió/hizo el cliente, en qué quedó la conversación y qué falta por hacer del lado del equipo.',
+    ...(adjuntas.length > 0 ? [
+      `Se adjuntan ${adjuntas.length} imagen(es) del chat. Para CADA imagen indica brevemente QUÉ ES — dirección/ubicación, comprobante de pago, foto de referencia de un arreglo para cotizar, u otro — y el dato clave visible (calle y número, banco/monto, tipo de flores...). Ej: "La primera es un comprobante BBVA de $350 y la segunda una dirección en papel".`,
+      `Captions de las imágenes: ${adjuntas.map(i => i.caption).filter(Boolean).join(' | ') || 'sin texto'}`,
+    ] : []),
     'Si la transcripcion no contiene la respuesta, dilo claramente sin inventar datos (no inventes precios ni fechas).',
     'No uses markdown pesado ni listas largas; texto plano amable y directo.',
     '',
@@ -824,13 +836,28 @@ export async function responderConsultaAdmin(
         if (!geminiClient) throw new Error('Gemini no configurado')
         const model = geminiClient.getGenerativeModel({ model: GEMINI_MODEL })
         const result = await conRetry(() => model.generateContent({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          contents: [{
+            role: 'user',
+            parts: [
+              { text: prompt },
+              ...adjuntas.map(img => ({
+                inlineData: { mimeType: img.mimetype || 'image/jpeg', data: img.base64 },
+              })),
+            ],
+          }],
           generationConfig: { maxOutputTokens: 500, temperature: 0.3 },
         }), 2)
         return result.response.text() || ''
       },
       async (provider: OpenAICompatProvider) => {
         if (!provider.client) throw new Error(`${provider.name} no configurado`)
+        const content: ChatCompletionContentPart[] = [
+          { type: 'text', text: prompt },
+          ...adjuntas.map(img => ({
+            type: 'image_url' as const,
+            image_url: { url: `data:${img.mimetype || 'image/jpeg'};base64,${img.base64}` },
+          })),
+        ]
         const completion = await conRetry(async () => {
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 25_000)
@@ -838,7 +865,7 @@ export async function responderConsultaAdmin(
             return await provider.client!.chat.completions.create(
               {
                 model: provider.model,
-                messages: [{ role: 'user', content: prompt }],
+                messages: [{ role: 'user', content }],
                 max_tokens: 500,
                 temperature: 0.3,
               },
@@ -850,7 +877,8 @@ export async function responderConsultaAdmin(
         }, 2)
         return completion.choices[0]?.message?.content?.trim() || ''
       },
-      'responderConsultaAdmin'
+      'responderConsultaAdmin',
+      true
     )
     console.timeEnd('[ai.ts] Consulta admin')
     return texto && texto.length > 0 ? texto.slice(0, 900) : null

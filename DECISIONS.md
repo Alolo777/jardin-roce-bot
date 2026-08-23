@@ -1788,4 +1788,24 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-085: Fotos de contexto en el seguimiento del admin — tabla media_chat (máx 2 por chat) + visión en la consulta
+
+**Fecha:** 2026-08-23
+**Estado:** Aceptada
+
+**Motivo:** Cuando un admin pregunta por un chat ("¿qué pasó con el 7890?"), la respuesta solo se basaba en texto: no sabía si el cliente había mandado una dirección, un comprobante o una foto de referencia. El usuario pidió adjuntar hasta 2 imágenes reales del chat para que un modelo de visión las describa.
+
+**Alternativas consideradas:**
+1. Leer fotos viejas desde WhatsApp/Baileys (rechazada: las URLs de media expiran ~24 h y Baileys no retiene media).
+2. Usar solo `pedidos_bot.foto_referencia_base64` (insuficiente: cubre únicamente la foto elegida como referencia del pedido, no comprobantes ni direcciones).
+3. **Nueva tabla `media_chat` con poda a 2 por chat (elegida):** `procesarMediaAcumulado` persiste cada imagen/documento recibido del cliente (JID, teléfono real, mimetype, caption, base64) y poda automáticamente dejando las últimas 2 por teléfono. `consultarChatParaAdmin` recupera hasta 2 por variantes de teléfono y las pasa a `responderConsultaAdmin`, que ahora acepta imágenes y usa visión (Gemini inlineData / OpenAI-compat image_url, forzando proveedores con soporte de visión), pidiendo clasificar cada imagen (dirección / comprobante / referencia de arreglo / otro) y extraer el dato clave.
+
+**Resultado:** El seguimiento responde cosas como "te mandó una foto que es un comprobante BBVA de $350 y otra con la dirección Calle X #123, falta confirmar el pago".
+
+**Ventajas:** Cobertura real de contexto visual; costo controlado (≤2 imágenes solo cuando el admin pregunta); poda automática evita crecimiento infinito; captura fire-and-forget no toca el flujo de venta.
+
+**Desventajas:** Base64 en Supabase (~100–500 KB/imagen ×2 por chat activo); imágenes anteriores al despliegue no existen; documentos muy pesados podrían requerir compresión futura.
+
+---
+
 

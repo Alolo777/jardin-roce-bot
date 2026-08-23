@@ -18,6 +18,8 @@ import { resolverLidInverso } from '../whatsapp/contact.service'
 import { variantesTelefono } from '../conversation/conversation.service'
 import { detectarCasosAtencion, detectarPedidosAtascos, extraerUltimos4, filtrarNovedadesDeChatsActivos, fusionarNovedades, mascararTelefono, normalizarNovedadIA, coincideAdminPorVariantes } from './novedad.detector'
 import { cargarNovedades, guardarNovedades, obtenerAdminsBot } from './novedades.repository'
+import { obtenerImagenesPorTelefono } from './media-chat.repository'
+import type { ImagenVisionAdmin } from '../../lib/ai'
 import { TipoNovedad, type Novedad, type NovedadesDiarias, type TranscripcionChat } from './types'
 
 const MENSAJES_POR_CHAT = 60
@@ -358,9 +360,22 @@ export async function consultarChatParaAdmin(pregunta: string): Promise<string> 
 
     if (bloques.length === 0) return '🤔 Encontré el chat pero no tiene mensajes guardados recientes.'
 
-    const respuesta = await responderConsultaAdmin(pregunta, bloques)
+    // DEC-085: adjuntar hasta 2 imágenes recientes del chat (dirección,
+    // comprobante, referencia de arreglo...) para que la visión las describa.
+    let imagenes: ImagenVisionAdmin[] = []
+    try {
+      imagenes = await obtenerImagenesPorTelefono(
+        candidatas.flatMap(c => [c.real, c.stored]),
+        2
+      )
+      if (imagenes.length > 0 && bloques[0]) {
+        bloques[0].lineas.push(`[*${imagenes.length} IMAGEN(ES) ADJUNTA(S) EN ESTA CONSULTA*]`)
+      }
+    } catch { /* sin imágenes: se responde solo con texto */ }
+
+    const respuesta = await responderConsultaAdmin(pregunta, bloques, imagenes)
     if (!respuesta) return '🌸 No pude analizar el chat ahorita. Intenta de nuevo en un momento.'
-    logger.info('novedades', `Consulta de admin respondida (${bloques.length} chat(s))`)
+    logger.info('novedades', `Consulta de admin respondida (${bloques.length} chat(s), ${imagenes.length} imagen(es))`)
     return respuesta
   } catch (err) {
     console.error('[novedades] Error en consulta de admin:', err)

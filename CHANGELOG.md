@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## 2026-08-23 (4)
+
+### Feat — Fotos de contexto en el seguimiento del admin (DEC-085)
+
+**Objetivo:** Al preguntar por un chat ("¿qué pasó con el 7890?"), la IA ahora VE hasta 2 imágenes recientes del chat y describe qué son: dirección/ubicación, comprobante de pago, foto de referencia de arreglo para cotizar u otra, con el dato clave visible (calle, banco/monto, tipo de flores).
+
+**Implementación:**
+- **Nueva tabla `media_chat`** (`supabase_migration_media_chat.sql`): guarda las últimas imágenes/documentos que envía el cliente, **podadas automáticamente a 2 por teléfono**. Requiere ejecutar la migración en Supabase.
+- **`src/novedades/media-chat.repository.ts`**: `guardarMediaChat()` (insert + poda) y `obtenerImagenesPorTelefono()` (por variantes 52/521).
+- **`src/whatsapp/message-handler.ts`**: `procesarMediaAcumulado` persiste cada imagen recibida (fire-and-forget, no bloquea la venta).
+- **`lib/ai.ts`**: `responderConsultaAdmin(pregunta, chats, imagenes[])` — adjunta hasta 2 imágenes al modelo de visión (Gemini inlineData; OpenAI-compat image_url solo en proveedores con visión), pide clasificar cada una y extraer el dato clave.
+- **`src/novedades/novedades.service.ts`**: `consultarChatParaAdmin` recupera las imágenes del chat y añade marcador `[*N IMAGEN(ES) ADJUNTA(S)*]` a la transcripción.
+
+**Archivos nuevos:** `supabase_migration_media_chat.sql`, `src/novedades/media-chat.repository.ts`
+**Archivos modificados:** `lib/ai.ts`, `src/novedades/novedades.service.ts`, `src/novedades/index.ts`, `src/whatsapp/message-handler.ts`, `DECISIONS.md`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; suite completa OK (`test:novedades`, `test:validator`, `test:horario`, `test:flows`).
+
+**Impacto:** Compatible. **Requiere ejecutar `supabase_migration_media_chat.sql` en producción.** Las imágenes se capturan desde el momento del despliegue (las anteriores no existen).
+
+**Rollback:** Sí — revertir commit; la tabla queda sin uso (inofensiva).
+
+---
+
 ## 2026-08-23 (3)
 
 ### Feat — Máscara de números, exclusión de admins y preguntas de seguimiento por WhatsApp (BUG-026)

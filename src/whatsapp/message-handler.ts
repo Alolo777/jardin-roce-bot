@@ -33,6 +33,7 @@ import { validarRespuestaIA, sanitizarRespuestaIA } from '../validators/response
 import { evaluarCancelacion } from '../validators/cancelacion.validator'
 import { evaluarQueja } from '../validators/queja.validator'
 import { getAIResponse, clasificarImagenVenta, revisarRespuestaFlora } from '../../lib/ai'
+import { guardarMediaChat } from '../novedades/media-chat.repository'
 import { logger } from '../../lib/logger.service'
 import { PedidoActual, EstadoPedido, OrigenMensaje } from '../models/types'
 
@@ -258,6 +259,11 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
 
     deps.MEDIA_POR_CLIENTE.delete(clienteId)
     const historial = await obtenerHistorial(telefono)
+    // DEC-085: guardar las últimas imágenes del chat (máx 2) para que el
+    // administrador pueda preguntar después "¿qué pasó con el 7890?" y la IA
+    // vea también las fotos. Fire-and-forget: no bloquea el flujo de venta.
+    guardarMediaChat(clienteId, telefono, mediaAcumulado.map(m => ({ base64: m.base64, mimetype: m.mimetype, caption: m.caption })))
+      .catch(err => console.warn('[media-chat] captura fallida:', err))
     const historialRecienteTexto = historial.slice(-8).map(m => m.content).join(' ')
     const captionsTexto = mediaAcumulado.map(m => m.caption).filter(Boolean).join(' ')
     const textoTurno = `${textoCliente} ${captionsTexto}`.trim()
