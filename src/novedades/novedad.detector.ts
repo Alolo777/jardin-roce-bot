@@ -108,6 +108,19 @@ export function coincideAdminPorVariantes(numeroOJid: string, admins: string[]):
   return admins.some(admin => variantesTelefono(admin).some(v => variantesMensaje.has(v)))
 }
 
+// ─── Filtrar novedades a solo los chats activos de la ventana ───────────────
+// BUG-025: el usuario pidió OMITIR chats antiguos. Las reglas del backend
+// (pedidos/casos) pueden señalar teléfonos sin actividad reciente; aquí se
+// descartan si el chat no tuvo mensajes dentro de la ventana analizada.
+export function filtrarNovedadesDeChatsActivos(reglas: Novedad[], telefonosActivos: string[]): Novedad[] {
+  const activos = new Set<string>()
+  for (const t of telefonosActivos) {
+    for (const v of variantesTelefono(t)) activos.add(v)
+  }
+  if (activos.size === 0) return []
+  return reglas.filter(n => variantesTelefono(n.telefono).some(v => activos.has(v)))
+}
+
 export function fusionarNovedades(reglas: Novedad[], ia: Novedad[]): Novedad[] {
   const resultado: Novedad[] = [...reglas]
   for (const n of ia) {

@@ -257,3 +257,17 @@
 - **Adicional en esta corrección:** nuevas categorías de novedad `entrega_programada` (cliente confirmó hora de recogida/entrega — caso reportado) y `esperando_respuesta_equipo`; prompt IA ajustado para NO descartar conversaciones cerradas con datos operativos; 60 mensajes por chat; regeneración manual desde dashboard (botón "Actualizar ahora" → comando `regenerar_novedades` vía `bot_command` → ventana de 48 h); endpoints Express `GET/POST /api/novedades*`; página `/admin/administradores` muestra el digest actual.
 - **Pruebas:** `npx tsc --noEmit` 0 errores; verificación viva `fechaYHoraCdmx()` → `{"fecha":"2026-08-23","hora":12}`; `test:novedades` ampliado (entrega_programada, esperando_respuesta_equipo, encabezado 48h); suite completa OK.
 - **Versión donde se corrigió:** 2.3.2
+
+## BUG-025: Números falsos (LID) en el digest, chats antiguos incluidos y cotizaciones faltantes
+- **Prioridad:** Alta
+- **Estado:** ✅ Resuelto (2026-08-23)
+- **Reportado:** 2026-08-23 (producción)
+- **Síntomas:** (1) El digest mostraba números que no eran el WhatsApp real de los clientes. (2) Aparecían chats antiguos sin actividad reciente. (3) Faltaban cotizaciones pendientes en el resumen. (4) El bot respondía al admin instantáneamente (riesgo de baneo por patrón bot).
+- **Causa raíz:** (1) `clientes.telefono` se guarda desde `remoteJid`: para clientes con LID guarda los dígitos del LID, no el número real. (2) Las reglas backend (pedidos/casos atascos) incluían teléfonos sin actividad en la ventana analizada. (3) El prompt IA permitía solo 1 novedad/chat y descartaba conversaciones "cerradas", perdiendo cotizaciones sin confirmar. (4) La respuesta al admin se enviaba sin demora ni presencia.
+- **Corrección:**
+  1. `contact.service.ts`: nuevo `resolverLidInverso()` que consulta el mapeo LID→PN de Baileys ('lid-mapping', clave `${lidUser}_reverse`). `obtenerTranscripciones` lo usa para sustituir el teléfono LID por el real cuando existe mapeo.
+  2. Nuevo `filtrarNovedadesDeChatsActivos()` en el detector: las reglas backend se descartan si el chat no tuvo mensajes dentro de la ventana analizada (hoy+ayer).
+  3. Prompt IA: reporta TODA cotización sin precio del equipo aunque el chat haya seguido/cerrado; hasta 2 novedades por chat si son temas distintos; transcripción ampliada a 1,600 chars/chat.
+  4. Anti-ban: la respuesta al admin muestra presencia 'composing' ~10 s antes de enviar (wiring en `bot.ts`).
+- **Pruebas:** `npx tsc --noEmit` 0 errores; `test:novedades` con casos del filtro de chats activos; suite completa OK.
+- **Versión donde se corrigió:** 2.3.3

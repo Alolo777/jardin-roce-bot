@@ -722,14 +722,14 @@ export async function resumirNovedadesChats(chats: ChatParaResumen[]): Promise<N
   if (chats.length === 0) return []
 
   const bloques = chats
-    .map(c => `CHAT ${c.telefono}:\n${c.lineas.join('\n').slice(-1200)}`)
+    .map(c => `CHAT ${c.telefono}:\n${c.lineas.join('\n').slice(-1600)}`)
     .join('\n\n')
 
   const prompt = [
     'Analiza las conversaciones de una floreria (Flora es la asistente virtual).',
     'Para CADA chat reporta lo que el equipo humano DEBE SABER, priorizando:',
+    '- cotizacion_pendiente: pidió precio/cotización y el equipo NO le confirmó un precio. REPÓRTALA TODAS LAS VECES QUE APLIQUE aunque después el cliente haya dicho "ok", "gracias" o el chat haya continuado: si nadie del equipo le dio precio, sigue pendiente.',
     '- entrega_programada: el cliente CONFIRMO cuándo recoge su pedido o cuándo se lo entregan (ej. "paso mañana a las 11", "lo recoge hoy a las 11 am"). REPÓRTALO SIEMPRE aunque la venta esté cerrada: el equipo necesita saber esa hora.',
-    '- cotizacion_pendiente: pidio precio/cotizacion y nadie del equipo confirmo.',
     '- pedido_sin_tratar: mostro intencion de comprar/apartar y el pedido no avanzo.',
     '- cambio_fecha: pidio cambiar la fecha o hora de entrega de un pedido ya apartado.',
     '- modificacion_arreglo: pidio cambiar/modificar el arreglo floral (flores, tamano, dedicatoria, envio).',
@@ -738,7 +738,7 @@ export async function resumirNovedadesChats(chats: ChatParaResumen[]): Promise<N
     '- duda_sin_responder: hizo una pregunta que quedo sin respuesta clara.',
     '- queja: molestia, reclamo o cancelacion.',
     '- otro: algo importante pendiente que no encaje arriba.',
-    'REGLAS: Ignora SOLO chats que terminaron en agradecimiento sin nada operativo pendiente. Si un chat tiene varias cosas, elige la mas importante para el equipo. No inventes telefonos: usa EXACTAMENTE los de los bloques CHAT. Maximo 1 novedad por chat. resumen maximo 120 caracteres, espanol mexicano, incluye la fecha/hora cuando aplique (ej. "recoge hoy 11 am").',
+    'REGLAS: Ignora SOLO chats de pura cortesía (saludo/gracias sin ningún tema). Hasta 2 novedades por chat SOLO si son temas distintos; si es el mismo tema, 1 sola con el dato más útil. No inventes telefonos: usa EXACTAMENTE los de los bloques CHAT. resumen maximo 120 caracteres, espanol mexicano, incluye la fecha/hora cuando aplique (ej. "recoge hoy 11 am").',
     `Responde SOLO JSON valido, sin markdown, formato: [{"telefono":"...","tipo":"${TIPOS_NOVEDAD_PERMITIDOS}","resumen":"...","prioridad":"baja|media|alta"}]. Si no hay novedades responde [].`,
     '',
     bloques,

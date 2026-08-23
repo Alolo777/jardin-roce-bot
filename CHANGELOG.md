@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## 2026-08-23 (2)
+
+### Fix — Números reales (LID), solo chats de hoy/ayer, cotizaciones completas y respuesta anti-ban (BUG-025)
+
+**Problema:** (1) El digest mostraba números que no eran el WhatsApp real: `clientes.telefono` guarda los dígitos del LID para clientes con cuenta vinculada. (2) Aparecían chats antiguos sin actividad en la ventana. (3) Faltaban cotizaciones pendientes. (4) La respuesta al admin salía instantánea (patrón bot, riesgo de baneo).
+
+**Solución:**
+- **`src/whatsapp/contact.service.ts`**: `resolverLidInverso()` consulta el mapeo LID→PN de Baileys; las transcripciones sustituyen el teléfono LID por el real cuando hay mapeo.
+- **`src/novedades/novedad.detector.ts`**: `filtrarNovedadesDeChatsActivos()` — las reglas backend solo cuentan si el chat tuvo mensajes dentro de la ventana analizada.
+- **`lib/ai.ts`**: prompt reporta TODA cotización sin confirmar aunque el chat siga o cierre; hasta 2 novedades/chat por temas distintos; transcripción 1,600 chars/chat.
+- **`bot.ts`**: la respuesta al admin muestra "escribiendo..." ('composing') ~10 s antes de enviarse.
+
+**Archivos modificados:** `src/whatsapp/contact.service.ts`, `src/novedades/novedad.detector.ts`, `src/novedades/novedades.service.ts`, `lib/ai.ts`, `bot.ts`, `tests/novedades.test.mts`, `KNOWN_BUGS.md`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `test:novedades` ampliado (filtro de chats activos); suite completa OK.
+
+**Impacto:** Compatible. Nota: los LIDs sin mapeo en Baileys seguirán mostrando sus dígitos internos (no existe fuente del número real); con el uso normal del bot el mapeo se va poblando.
+
+**Rollback:** Sí.
+
+---
+
 ## 2026-08-23
 
 ### Fix — Scheduler diario muerto por Invalid Date + botón de regeneración manual de novedades (BUG-024)

@@ -5,6 +5,7 @@ import {
   normalizarNovedadIA,
   fusionarNovedades,
   coincideAdminPorVariantes,
+  filtrarNovedadesDeChatsActivos,
 } from '../src/novedades/novedad.detector.ts'
 import { construirMensajeNovedades, ventanaDiaAnteriorCdmx } from '../src/novedades/novedades.service.ts'
 import { TipoNovedad, type Novedad, type NovedadesDiarias } from '../src/novedades/types.ts'
@@ -86,6 +87,15 @@ const fusion = fusionarNovedades([regla], [iaDuplicada, iaOtra])
 assert.equal(fusion.length, 2, 'Duplicada telefono+tipo se elimina')
 assert.ok(fusion.every(n => !(n.telefono === '+521234567890' && n.fuente === 'ia')), 'Gana la versión de reglas')
 assert.ok(fusion.some(n => n.telefono === '+521999999999'), 'Distinto teléfono se conserva')
+
+// ─── filtrarNovedadesDeChatsActivos (BUG-025) ────────────────────
+// Solo se conservan novedades cuyo chat tuvo actividad en la ventana.
+const activos = ['+521234567890', '521999999999'] // el tercero NO está activo
+const conViejo: Novedad = { telefono: '+521888888888', tipo: TipoNovedad.PAGO_PENDIENTE, resumen: 'chat viejo', prioridad: 'media', fuente: 'reglas' }
+const filtradas = filtrarNovedadesDeChatsActivos([regla, iaOtra, conViejo], activos)
+assert.equal(filtradas.length, 2, 'El chat sin actividad en la ventana se omite')
+assert.ok(!filtradas.some(n => n.telefono === '+521888888888'), 'Chat antiguo excluido')
+assert.equal(filtrarNovedadesDeChatsActivos([regla], []).length, 0, 'Sin chats activos no hay reglas')
 
 // ─── construirMensajeNovedades ───────────────────────────────────
 

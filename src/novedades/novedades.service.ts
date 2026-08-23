@@ -14,7 +14,8 @@ import { logger } from '../../lib/logger.service'
 import { listarPedidosActivosGlobales } from '../pedidos/pedido.service'
 import { listarCasosRequierenAtencion } from '../casos/caso.service'
 import { enviarTextoANumeros } from '../whatsapp/notification.service'
-import { detectarCasosAtencion, detectarPedidosAtascos, fusionarNovedades, normalizarNovedadIA } from './novedad.detector'
+import { resolverLidInverso } from '../whatsapp/contact.service'
+import { detectarCasosAtencion, detectarPedidosAtascos, filtrarNovedadesDeChatsActivos, fusionarNovedades, normalizarNovedadIA } from './novedad.detector'
 import { cargarNovedades, guardarNovedades, obtenerAdminsBot } from './novedades.repository'
 import { TipoNovedad, type Novedad, type NovedadesDiarias, type TranscripcionChat } from './types'
 
@@ -86,8 +87,14 @@ async function obtenerTranscripciones(inicioIso: string, finIso: string, limiteM
 
   const chats: TranscripcionChat[] = []
   for (const [clienteId, mensajes] of porChat) {
-    const telefono = mapaTelefonos.get(clienteId)
+    let telefono = mapaTelefonos.get(clienteId)
     if (!telefono) continue
+    // BUG-025: clientes.telefono puede contener dígitos de LID (no el número
+    // real). Se intenta resolver contra el mapeo LID→PN que Baileys guarda.
+    try {
+      const real = await resolverLidInverso(telefono)
+      if (real && real.replace(/\D/g, '') !== telefono.replace(/\D/g, '')) telefono = real
+    } catch { /* sin claves o sin mapeo: se usa el teléfono guardado */ }
     const lineas = mensajes.slice(-MENSAJES_POR_CHAT).map(m => {
       let hora = ''
       if (m.creado_en) {
@@ -126,14 +133,14 @@ export async function generarNovedadesDiarias(
 
   console.log(`[novedades] 🌙 Generando digest (${tipoVentana})...`)
   logger.info('novedades', `Generando digest (${tipoVentana}, forzado=${!!opciones.forzar})`)
-  const reglas: Novedad[] = [
-    ...detectarPedidosAtascos(listarPedidosActivosGlobales()),
-    ...detectarCasosAtencion(listarCasosRequierenAtencion()),
-  ]
 
+  // BUG-025: solo chats con actividad DENTRO de la ventana analizada.
+  // Los pedidos/casos antiguos que no escribieron en este período se omiten.
   const novedadesIA: Novedad[] = []
+  let telefonosActivos: string[] = []
   try {
     const chats = await obtenerTranscripciones(inicioIso, finIso)
+    telefonosActivos = chats.map(c => c.telefono)
     console.log(`[novedades] ${chats.length} chat(s) activo(s) en la ventana ${tipoVentana}`)
     logger.info('novedades', `${chats.length} chat(s) activo(s) en la ventana (${tipoVentana})`)
     for (let i = 0; i < chats.length; i += CHATS_POR_LOTE_IA) {
@@ -150,6 +157,14 @@ export async function generarNovedadesDiarias(
     console.error('[novedades] Error en análisis IA (se usan solo reglas):', err)
     logger.warn('novedades', `Análisis IA falló, solo reglas: ${String(err)}`)
   }
+
+  const todasLasReglas: Novedad[] = [
+    ...detectarPedidosAtascos(listarPedidosActivosGlobales()),
+    ...detectarCasosAtencion(listarCasosRequierenAtencion()),
+  ]
+  const reglas = telefonosActivos.length > 0
+    ? filtrarNovedadesDeChatsActivos(todasLasReglas, telefonosActivos)
+    : []
 
   const novedades = fusionarNovedades(reglas, novedadesIA)
   const digest: NovedadesDiarias = {

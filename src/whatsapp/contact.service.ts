@@ -11,6 +11,22 @@ export function limpiarCacheNumeros(): void {
   if (CACHE_NUMEROS.size > 500) CACHE_NUMEROS.clear()
 }
 
+// BUG-025: resuelve un número/jid de LID a su número real (PN) usando el
+// mapeo que Baileys guarda en 'lid-mapping' (clave `${lidUser}_reverse`).
+// Devuelve null si no hay mapeo o no hay claves disponibles.
+export async function resolverLidInverso(lidONumero: string): Promise<string | null> {
+  try {
+    const limpio = String(lidONumero ?? '').replace(/@lid$/, '').replace(/:\d+$/, '').replace(/\D/g, '')
+    if (!limpio) return null
+    const stored = await BAILEYS_KEYS?.get?.('lid-mapping', [`${limpio}_reverse`])
+    const pnUser = stored?.[`${limpio}_reverse`]
+    if (!pnUser) return null
+    return jidANumero(`${pnUser}@s.whatsapp.net`)
+  } catch {
+    return null
+  }
+}
+
 export async function obtenerNumeroReal(msg: any): Promise<string> {
   const jid = msg.key?.remoteJid || ''
   if (CACHE_NUMEROS.has(jid)) return CACHE_NUMEROS.get(jid)!
