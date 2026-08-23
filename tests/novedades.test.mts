@@ -67,6 +67,12 @@ const tipoRaro = normalizarNovedadIA({ telefono: '+521234567890', tipo: 'algo_in
 assert.equal(tipoRaro!.tipo, TipoNovedad.OTRO, 'Tipo desconocido cae en OTRO')
 assert.equal(tipoRaro!.prioridad, 'media', 'Prioridad por defecto es media')
 
+const recogida = normalizarNovedadIA({ telefono: '+521234567890', tipo: 'entrega_programada', resumen: 'recoge hoy 11 am', prioridad: 'media' })
+assert.equal(recogida!.tipo, TipoNovedad.ENTREGA_PROGRAMADA, 'BUG-024: entrega_programada se acepta')
+
+const esperandoEquipo = normalizarNovedadIA({ telefono: '+521555555555', tipo: 'esperando_respuesta_equipo', resumen: 'espera confirmacion de envio' })
+assert.equal(esperandoEquipo!.tipo, TipoNovedad.ESPERANDO_RESPUESTA_EQUIPO, 'esperando_respuesta_equipo se acepta')
+
 assert.equal(normalizarNovedadIA({ telefono: '', tipo: 'otro', resumen: 'x' }), null, 'Sin teléfono se descarta')
 assert.equal(normalizarNovedadIA({ telefono: '+52', tipo: 'otro', resumen: '' }), null, 'Sin resumen se descarta')
 
@@ -100,6 +106,17 @@ assert.match(mensaje, /\+521234567890\*: intentó cambiar la fecha\/hora/, 'Etiq
 const idxAlta = mensaje.indexOf('+521555555555')
 const idxMedia = mensaje.indexOf('+521234567890')
 assert.ok(idxAlta < idxMedia, 'Prioridad alta aparece primero')
+
+// Encabezado para ventana manual de 48 horas
+const mensaje48h = construirMensajeNovedades({ ...digest, tipoVentana: 'reciente' })
+assert.match(mensaje48h, /últimas 48 horas/, 'Digest reciente usa encabezado de 48h')
+const etiquetaRecogida = construirMensajeNovedades({
+  fechaAnalizada: digest.fechaAnalizada,
+  generadaEn: digest.generadaEn,
+  novedades: [recogida!],
+})
+assert.match(etiquetaRecogida, /tiene entrega\/recogida programada/, 'Etiqueta de entrega programada')
+assert.match(etiquetaRecogida, /recoge hoy 11 am/, 'El resumen con hora de recogida se muestra')
 
 // ─── ventanaDiaAnteriorCdmx ──────────────────────────────────────
 

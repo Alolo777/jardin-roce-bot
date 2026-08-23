@@ -244,3 +244,16 @@
   4. Timeout de 150 s por lote IA en `generarNovedadesDiarias` (`Promise.race`): el digest siempre se guarda aunque un proveedor se cuelgue.
 - **Pruebas:** `npx tsc --noEmit` 0 errores; `test:novedades` ampliado con casos 12↔13 dígitos, @c.us, +/espacios y número ajeno; verificación en vivo contra la lista real de producción (`522411933932` y JID `5212411933932@s.whatsapp.net` → ADMIN); suite completa OK.
 - **Versión donde se corrigió:** 2.3.1
+
+## BUG-024: Scheduler diario muerto — `new Date(localeString)` daba Invalid Date y NINGÚN job diario corría
+- **Prioridad:** 🔴 Crítica
+- **Estado:** ✅ Resuelto (2026-08-23)
+- **Reportado:** 2026-08-23 (producción: digest de novedades nunca generado tras 2 días)
+- **Síntomas:** El motor de novedades nunca generaba el digest (`novedades_diarias` no existía) ni enviaba nada a las 6 am, aunque el bot estuviera corriendo. El admin preguntaba y recibía "No hay novedades" (digest inexistente).
+- **Causa raíz:** El bloque de jobs diarios en `bot.ts` calculaba la hora CDMX con `new Date(new Date().toLocaleString('es-MX', { timeZone: ... }))`. En Node, el string `"23/8/2026, 12:28 p.m."` (formato DD/MM/YYYY + sufijo "p.m.") NO es parseable → `Invalid Date` → `getHours()` = NaN → todas las condiciones (`hora === 3`, `hora === 9`, etc.) eran falsas SIEMPRE. Afectaba a TODOS los jobs diarios: alerta 8 am, resumen 9 am a Telegram, verificación Telegram 10 am, generación 3 am y envío 6 am de novedades.
+- **Corrección:**
+  1. Nueva `fechaYHoraCdmx()` en `message-utils.ts` usando `Intl.DateTimeFormat(...).formatToParts()` con `hourCycle: 'h23'` — sin parseo de strings.
+  2. El scheduler de `bot.ts` usa ese helper; además ahora registra en consola Y en la tabla `logs` (visible en /admin/logs) cuándo dispara cada job.
+- **Adicional en esta corrección:** nuevas categorías de novedad `entrega_programada` (cliente confirmó hora de recogida/entrega — caso reportado) y `esperando_respuesta_equipo`; prompt IA ajustado para NO descartar conversaciones cerradas con datos operativos; 60 mensajes por chat; regeneración manual desde dashboard (botón "Actualizar ahora" → comando `regenerar_novedades` vía `bot_command` → ventana de 48 h); endpoints Express `GET/POST /api/novedades*`; página `/admin/administradores` muestra el digest actual.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; verificación viva `fechaYHoraCdmx()` → `{"fecha":"2026-08-23","hora":12}`; `test:novedades` ampliado (entrega_programada, esperando_respuesta_equipo, encabezado 48h); suite completa OK.
+- **Versión donde se corrigió:** 2.3.2

@@ -10,6 +10,8 @@ export enum TipoNovedad {
   CAMBIO_FECHA = 'cambio_fecha',
   MODIFICACION_ARREGLO = 'modificacion_arreglo',
   PAGO_PENDIENTE = 'pago_pendiente',
+  ENTREGA_PROGRAMADA = 'entrega_programada',
+  ESPERANDO_RESPUESTA_EQUIPO = 'esperando_respuesta_equipo',
   DUDA_SIN_RESPONDER = 'duda_sin_responder',
   QUEJA = 'queja',
   OTRO = 'otro',
@@ -34,6 +36,8 @@ export interface Novedad {
 export interface NovedadesDiarias {
   // Fecha CDMX (YYYY-MM-DD) del día ANALIZADO (el día anterior a la generación)
   fechaAnalizada: string
+  // 'dia_anterior' = job automático de las 3 am | 'reciente' = manual, últimas 48 h
+  tipoVentana?: 'dia_anterior' | 'reciente'
   // ISO del momento de generación
   generadaEn: string
   novedades: Novedad[]

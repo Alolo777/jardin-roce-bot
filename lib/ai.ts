@@ -716,7 +716,7 @@ export interface NovedadCrudaIA {
 }
 
 const TIPOS_NOVEDAD_PERMITIDOS =
-  'cotizacion_pendiente|pedido_sin_tratar|cambio_fecha|modificacion_arreglo|pago_pendiente|duda_sin_responder|queja|otro'
+  'cotizacion_pendiente|pedido_sin_tratar|cambio_fecha|modificacion_arreglo|pago_pendiente|entrega_programada|esperando_respuesta_equipo|duda_sin_responder|queja|otro'
 
 export async function resumirNovedadesChats(chats: ChatParaResumen[]): Promise<NovedadCrudaIA[] | null> {
   if (chats.length === 0) return []
@@ -726,17 +726,19 @@ export async function resumirNovedadesChats(chats: ChatParaResumen[]): Promise<N
     .join('\n\n')
 
   const prompt = [
-    'Analiza las conversaciones de ayer de una floreria (Flora es la asistente virtual).',
-    'Detecta SOLO temas que quedaron PENDIENTES de atender por el equipo humano:',
+    'Analiza las conversaciones de una floreria (Flora es la asistente virtual).',
+    'Para CADA chat reporta lo que el equipo humano DEBE SABER, priorizando:',
+    '- entrega_programada: el cliente CONFIRMO cuándo recoge su pedido o cuándo se lo entregan (ej. "paso mañana a las 11", "lo recoge hoy a las 11 am"). REPÓRTALO SIEMPRE aunque la venta esté cerrada: el equipo necesita saber esa hora.',
     '- cotizacion_pendiente: pidio precio/cotizacion y nadie del equipo confirmo.',
     '- pedido_sin_tratar: mostro intencion de comprar/apartar y el pedido no avanzo.',
     '- cambio_fecha: pidio cambiar la fecha o hora de entrega de un pedido ya apartado.',
     '- modificacion_arreglo: pidio cambiar/modificar el arreglo floral (flores, tamano, dedicatoria, envio).',
     '- pago_pendiente: dijo que pagaria/enviaria comprobante y no hay confirmacion de pago.',
+    '- esperando_respuesta_equipo: espera que el equipo le confirme algo (precio, envio, disponibilidad, fotos) y aun no responde.',
     '- duda_sin_responder: hizo una pregunta que quedo sin respuesta clara.',
     '- queja: molestia, reclamo o cancelacion.',
     '- otro: algo importante pendiente que no encaje arriba.',
-    'REGLAS: Ignora conversaciones cerradas con venta completa y agradecimientos finales. No inventes telefonos: usa EXACTAMENTE los de los bloques CHAT. Si un chat no tiene nada pendiente, omitelo. Maximo 1 novedad por chat (la mas importante). resumen maximo 120 caracteres, espanol mexicano, sin emojis.',
+    'REGLAS: Ignora SOLO chats que terminaron en agradecimiento sin nada operativo pendiente. Si un chat tiene varias cosas, elige la mas importante para el equipo. No inventes telefonos: usa EXACTAMENTE los de los bloques CHAT. Maximo 1 novedad por chat. resumen maximo 120 caracteres, espanol mexicano, incluye la fecha/hora cuando aplique (ej. "recoge hoy 11 am").',
     `Responde SOLO JSON valido, sin markdown, formato: [{"telefono":"...","tipo":"${TIPOS_NOVEDAD_PERMITIDOS}","resumen":"...","prioridad":"baja|media|alta"}]. Si no hay novedades responde [].`,
     '',
     bloques,

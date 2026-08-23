@@ -59,6 +59,9 @@ export interface BotContext {
   obtenerDetallePedido: (id: string) => PedidoResumenDTO | null
   actualizarPrecioPedido: (id: string, precio: number) => Promise<{ ok: boolean; error?: string }>
   cambiarEstadoPedido: (id: string, estado: string) => Promise<{ ok: boolean; error?: string }>
+  // DEC-084 / BUG-024: regeneración manual del digest de novedades (48h)
+  regenerarNovedades: () => Promise<{ ok: boolean; total: number; mensaje: string }>
+  obtenerNovedadesMensaje: () => Promise<string>
 }
 
 export function startServer(ctx: BotContext): void {
@@ -225,6 +228,28 @@ export function startServer(ctx: BotContext): void {
     } catch (err) {
       console.error('[server] Error en /api/resumen:', err)
       res.status(500).json({ error: 'Error obteniendo resumen operativo' })
+    }
+  })
+
+  // DEC-084: novedades — ver el digest actual y regenerarlo manualmente
+  app.get('/api/novedades', async (_req, res) => {
+    try {
+      const mensaje = await ctx.obtenerNovedadesMensaje()
+      res.json({ mensaje })
+    } catch (err) {
+      console.error('[server] Error en GET /api/novedades:', err)
+      res.status(500).json({ error: 'Error obteniendo novedades' })
+    }
+  })
+
+  app.post('/api/novedades/regenerar', async (_req, res) => {
+    try {
+      const resultado = await ctx.regenerarNovedades()
+      console.log(`[server] 🔄 Novedades regeneradas vía API: ${resultado.total} novedad(es)`)
+      res.json(resultado)
+    } catch (err) {
+      console.error('[server] Error en POST /api/novedades/regenerar:', err)
+      res.status(500).json({ error: 'Error regenerando novedades' })
     }
   })
 

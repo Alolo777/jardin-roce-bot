@@ -48,7 +48,7 @@ import {
   MENSAJES_PROCESADOS,
 } from './src/conversation/conversation.service'
 import { parseNombre, pareceNombreCliente, esNombrePlausible, parseFecha, extraerFecha, parseHora, extraerHora, parseSucursal, parsePrecio, parseDireccion, limpiarTelefono } from './src/parser'
-import { getContenidoMensaje, getMessageBody, getMensajeTexto, getMessageType, hasQuotedMsg, getQuotedText, descargarMedia, jidANumero, ahoraCdmx, estaEnHorario, getFechaActual } from './src/whatsapp/message-utils'
+import { getContenidoMensaje, getMessageBody, getMensajeTexto, getMessageType, hasQuotedMsg, getQuotedText, descargarMedia, jidANumero, ahoraCdmx, estaEnHorario, getFechaActual, fechaYHoraCdmx } from './src/whatsapp/message-utils'
 import { crearCaso, obtenerCasoActivo, actualizarActividad, detectarCambioTema, clasificarTipoCaso, limpiarCachesCasos, cargarCasosDesdeBD, contarCasosActivos, contarCasosRequierenAtencionHumana, listarCasosRequierenAtencion } from './src/casos/caso.service'
 import { crearPedido, obtenerPedido, transitar, transitarDesdeFlujo, archivarPedido, archivarSilencioso, cancelarPedido, limpiarCachesPedidos, cargarPedidosDesdeBD, persistirPedidosEngine, contarPedidosPorEstado, listarPedidosActivosGlobales, obtenerPedidoPorId, serializarPedidoParaDashboard, cambiarEstado } from './src/pedidos/pedido.service'
 import { analizarIntencion, Decision } from './src/decision/decision.engine'
@@ -72,7 +72,7 @@ import { validarSucursal, obtenerTextoConfirmacionSucursal } from './src/validat
 import { buscarEnvio, pareceConsultaEnvio } from './src/validators/envio.validator'
 import { evaluarCancelacion } from './src/validators/cancelacion.validator'
 import { evaluarQueja } from './src/validators/queja.validator'
-import { esAdminBot, crearAdminHandler, generarNovedadesDiarias, enviarNovedadesProactivo } from './src/novedades/index'
+import { esAdminBot, crearAdminHandler, generarNovedadesDiarias, enviarNovedadesProactivo, construirMensajeNovedades, obtenerNovedadesDelDia } from './src/novedades/index'
 
 // ════════════════════════════════════════════════════════════════
 // PAUSA DEL BOT
@@ -204,37 +204,48 @@ let ultimoDiaVerifTelegram = ''
 let ultimoDiaNovedadesGenerado = ''
 let ultimoDiaNovedadesEnviado = ''
 setInterval(() => {
-  const ahora = new Date().toLocaleString('es-MX', { timeZone: 'America/Mexico_City' })
-  const d     = new Date(ahora)
-  const hora  = d.getHours()
-  const dia   = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  // BUG-024: antes se parseaba toLocaleString('es-MX') con new Date() y daba
+  // Invalid Date (formato DD/MM/YYYY + "p.m.") → hora NaN → NINGÚN job diario
+  // corría jamás. Ahora se usa fechaYHoraCdmx() (formatToParts, robusto).
+  const { fecha: dia, hora } = fechaYHoraCdmx()
 
   if (!BOT_READY && hora === 8 && dia !== ultimoDiaAlertaDiaria) {
     ultimoDiaAlertaDiaria = dia
+    console.log('[bot] ⏰ Job diario 8am: BOT_DAILY_ALERT')
     eventBus.emit(EventType.BOT_DAILY_ALERT, { telefono: 'system' })
   }
 
   if (hora === 9 && dia !== ultimoDiaResumenDiario) {
     ultimoDiaResumenDiario = dia
+    console.log('[bot] ⏰ Job diario 9am: resumen diario a Telegram')
     enviarResumenDiario()
   }
 
   if (hora === 10 && dia !== ultimoDiaVerifTelegram) {
     ultimoDiaVerifTelegram = dia
+    console.log('[bot] ⏰ Job diario 10am: verificación Telegram')
     verificarTelegramDiario()
   }
 
   // DEC-084: digest de novedades — se genera a las 3 am analizando el día
   // anterior (1 pasada de IA máxima, idempotente por fecha) y se envía
-  // proactivamente a los administradores a las 6 am si hay novedades.
-  // Los flags usan >= para recuperar el disparo si el bot estaba apagado.
+  // proactivamente a los administradores a las 6 am. Los flags usan >= para
+  // recuperar el disparo si el bot estaba apagado a la hora exacta.
   if (hora >= 3 && dia !== ultimoDiaNovedadesGenerado) {
     ultimoDiaNovedadesGenerado = dia
-    generarNovedadesDiarias().catch(err => console.error('[bot] Error generando novedades:', err))
+    console.log(`[bot] ⏰ Job diario ${hora}:00 — generando digest de novedades del día anterior`)
+    logger.info('novedades', `Generación automática iniciada (job ${hora}:00, día ${dia})`)
+    generarNovedadesDiarias()
+      .then(d => logger.info('novedades', `Digest generado: ${d?.novedades.length ?? 0} novedad(es) para ${d?.fechaAnalizada ?? '?'}`))
+      .catch(err => { console.error('[bot] Error generando novedades:', err); logger.error('novedades', `Error generando digest: ${String(err)}`) })
   }
   if (hora >= 6 && dia !== ultimoDiaNovedadesEnviado && sock && BOT_READY) {
     ultimoDiaNovedadesEnviado = dia
-    enviarNovedadesProactivo(sock).catch(err => console.error('[bot] Error enviando novedades:', err))
+    console.log(`[bot] ⏰ Job diario ${hora}:00 — envío proactivo de novedades a admins`)
+    logger.info('novedades', 'Envío proactivo a admins iniciado')
+    enviarNovedadesProactivo(sock)
+      .then(() => logger.info('novedades', 'Envío proactivo terminado'))
+      .catch(err => console.error('[bot] Error enviando novedades:', err))
   }
 }, 30 * 60_000)
 
@@ -1110,6 +1121,21 @@ async function revisarComandoRemoto(): Promise<void> {
       reiniciarProceso('Reinicio remoto desde dashboard', false)
     } else if (comando.action === 'recover') {
       reiniciarProceso('Rescate remoto desde dashboard', false)
+    } else if (comando.action === 'regenerar_novedades') {
+      // DEC-084 / BUG-024: botón "Actualizar novedades" del dashboard.
+      // Regenera el digest con ventana de 48 h (hoy + ayer) y 60 msg por chat.
+      console.log('[bot] 🔄 Comando remoto: regenerar novedades (últimas 48h)')
+      logger.info('novedades', 'Regeneración manual solicitada desde el dashboard')
+      generarNovedadesDiarias({ forzar: true, ventana: 'reciente' })
+        .then(d => {
+          const total = d?.novedades.length ?? 0
+          console.log(`[bot] ✅ Novedades regeneradas: ${total} novedad(es)`)
+          logger.info('novedades', `Regeneración manual completada: ${total} novedad(es)`)
+        })
+        .catch(err => {
+          console.error('[bot] Error regenerando novedades:', err)
+          logger.error('novedades', `Error en regeneración manual: ${String(err)}`)
+        })
     }
   } catch (err) {
     console.warn('[bot] No se pudo revisar comando remoto:', err)
@@ -1707,4 +1733,13 @@ startServer({
   },
   actualizarPrecioPedido: (id, precio) => actualizarPrecioDesdeDashboard(id, precio),
   cambiarEstadoPedido: (id, estado) => cambiarEstadoDesdeDashboard(id, estado),
+  regenerarNovedades: async () => {
+    const digest = await generarNovedadesDiarias({ forzar: true, ventana: 'reciente' })
+    return {
+      ok: true,
+      total: digest?.novedades.length ?? 0,
+      mensaje: construirMensajeNovedades(digest),
+    }
+  },
+  obtenerNovedadesMensaje: async () => construirMensajeNovedades(await obtenerNovedadesDelDia()),
 })

@@ -133,6 +133,29 @@ export function formatoHora12(hora: number, minuto: number = 0): string {
   return `${h12}:${String(minuto).padStart(2, '0')} ${ampm}`
 }
 
+// BUG-024: fecha (YYYY-MM-DD) y hora (0-23) actuales en CDMX, calculadas con
+// formatToParts. NUNCA usar `new Date(localeString)` para esto: en Node,
+// `new Date("23/8/2026, 12:28 p.m.")` devuelve Invalid Date (formato DD/MM/YYYY
+// y sufijo "p.m." no son parseables), lo que dejaba muertos TODOS los jobs
+// diarios del scheduler de bot.ts.
+export function fechaYHoraCdmx(ahora: Date = new Date()): { fecha: string; hora: number } {
+  const partes = new Intl.DateTimeFormat('es-MX', {
+    timeZone: 'America/Mexico_City',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(ahora)
+  const valor = (tipo: string) => partes.find(p => p.type === tipo)?.value ?? ''
+  const hora = Number(valor('hour'))
+  return {
+    fecha: `${valor('year')}-${valor('month')}-${valor('day')}`,
+    hora: Number.isFinite(hora) ? hora % 24 : 0,
+  }
+}
+
 export function estaEnHorario(): boolean {
   const ahora = ahoraCdmx()
   const hora  = ahora.hora * 60 + ahora.minuto

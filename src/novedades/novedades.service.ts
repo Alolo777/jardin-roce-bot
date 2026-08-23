@@ -10,6 +10,7 @@
 
 import { supabaseAdmin } from '../../lib/supabase'
 import { resumirNovedadesChats } from '../../lib/ai'
+import { logger } from '../../lib/logger.service'
 import { listarPedidosActivosGlobales } from '../pedidos/pedido.service'
 import { listarCasosRequierenAtencion } from '../casos/caso.service'
 import { enviarTextoANumeros } from '../whatsapp/notification.service'
@@ -17,9 +18,10 @@ import { detectarCasosAtencion, detectarPedidosAtascos, fusionarNovedades, norma
 import { cargarNovedades, guardarNovedades, obtenerAdminsBot } from './novedades.repository'
 import { TipoNovedad, type Novedad, type NovedadesDiarias, type TranscripcionChat } from './types'
 
-const MENSAJES_POR_CHAT = 50
+const MENSAJES_POR_CHAT = 60
 const CHATS_POR_LOTE_IA = 30
 const MAX_NOVEDADES_EN_MENSAJE = 20
+const LIMITE_MENSAJES_CONSULTA = 8000
 
 // ─── Fechas CDMX ─────────────────────────────────────────────────
 
@@ -43,17 +45,25 @@ export function ventanaDiaAnteriorCdmx(): { inicioIso: string; finIso: string; f
   return { inicioIso: inicio.toISOString(), finIso: fin.toISOString(), fechaAnalizada }
 }
 
-// ─── Transcripciones del día anterior ────────────────────────────
+// Ventana de las ÚLTIMAS 48 HORAS (hoy + ayer) para la regeneración manual
+// desde el dashboard. Cubre chats con actividad reciente aunque el job de las
+// 3 am aún no los haya analizado.
+export function ventanaRecienteCdmx(): { inicioIso: string; finIso: string } {
+  const fin = new Date()
+  const inicio = new Date(fin.getTime() - 48 * 60 * 60_000)
+  return { inicioIso: inicio.toISOString(), finIso: fin.toISOString() }
+}
 
-async function obtenerTranscripcionesDeAyer(): Promise<TranscripcionChat[]> {
-  const { inicioIso, finIso } = ventanaDiaAnteriorCdmx()
+// ─── Transcripciones del período analizado ───────────────────────
+
+async function obtenerTranscripciones(inicioIso: string, finIso: string, limiteMensajes: number = LIMITE_MENSAJES_CONSULTA): Promise<TranscripcionChat[]> {
   const { data, error } = await supabaseAdmin
     .from('historial_chat')
     .select('cliente_id, rol, contenido, creado_en, origen')
     .gte('creado_en', inicioIso)
     .lt('creado_en', finIso)
     .order('creado_en', { ascending: true })
-    .limit(5000)
+    .limit(limiteMensajes)
   if (error) throw error
   if (!data?.length) return []
 
@@ -98,14 +108,24 @@ async function obtenerTranscripcionesDeAyer(): Promise<TranscripcionChat[]> {
 // Idempotente: si ya existe un digest del día analizado, no regenera
 // (protege la cuota de la API aunque el bot se reinicie varias veces).
 
-export async function generarNovedadesDiarias(opciones: { forzar?: boolean } = {}): Promise<NovedadesDiarias | null> {
-  const { fechaAnalizada } = ventanaDiaAnteriorCdmx()
-  if (!opciones.forzar) {
+export async function generarNovedadesDiarias(
+  opciones: { forzar?: boolean; ventana?: 'dia_anterior' | 'reciente' } = {}
+): Promise<NovedadesDiarias | null> {
+  const tipoVentana = opciones.ventana ?? 'dia_anterior'
+  const { inicioIso, finIso } = tipoVentana === 'reciente'
+    ? ventanaRecienteCdmx()
+    : ventanaDiaAnteriorCdmx()
+
+  // Idempotencia SOLO para el job automático del día anterior (protege cuota
+  // ante reinicios). La regeneración manual siempre recalcula.
+  const fechaAnalizada = ventanaDiaAnteriorCdmx().fechaAnalizada
+  if (!opciones.forzar && tipoVentana === 'dia_anterior') {
     const existente = await cargarNovedades()
-    if (existente && existente.fechaAnalizada === fechaAnalizada) return existente
+    if (existente && existente.tipoVentana !== 'reciente' && existente.fechaAnalizada === fechaAnalizada) return existente
   }
 
-  console.log(`[novedades] 🌙 Generando digest del día ${fechaAnalizada}...`)
+  console.log(`[novedades] 🌙 Generando digest (${tipoVentana})...`)
+  logger.info('novedades', `Generando digest (${tipoVentana}, forzado=${!!opciones.forzar})`)
   const reglas: Novedad[] = [
     ...detectarPedidosAtascos(listarPedidosActivosGlobales()),
     ...detectarCasosAtencion(listarCasosRequierenAtencion()),
@@ -113,8 +133,9 @@ export async function generarNovedadesDiarias(opciones: { forzar?: boolean } = {
 
   const novedadesIA: Novedad[] = []
   try {
-    const chats = await obtenerTranscripcionesDeAyer()
-    console.log(`[novedades] ${chats.length} chat(s) activo(s) el ${fechaAnalizada}`)
+    const chats = await obtenerTranscripciones(inicioIso, finIso)
+    console.log(`[novedades] ${chats.length} chat(s) activo(s) en la ventana ${tipoVentana}`)
+    logger.info('novedades', `${chats.length} chat(s) activo(s) en la ventana (${tipoVentana})`)
     for (let i = 0; i < chats.length; i += CHATS_POR_LOTE_IA) {
       // BUG-023: tope de tiempo por lote. Si un proveedor se cuelga, seguimos
       // con lo que haya para que el digest SIEMPRE se guarde.
@@ -127,11 +148,13 @@ export async function generarNovedadesDiarias(opciones: { forzar?: boolean } = {
     }
   } catch (err) {
     console.error('[novedades] Error en análisis IA (se usan solo reglas):', err)
+    logger.warn('novedades', `Análisis IA falló, solo reglas: ${String(err)}`)
   }
 
   const novedades = fusionarNovedades(reglas, novedadesIA)
   const digest: NovedadesDiarias = {
     fechaAnalizada,
+    tipoVentana,
     generadaEn: new Date().toISOString(),
     novedades,
   }
@@ -154,6 +177,8 @@ const ETIQUETA_TIPO: Record<TipoNovedad, string> = {
   [TipoNovedad.CAMBIO_FECHA]: 'intentó cambiar la fecha/hora de entrega',
   [TipoNovedad.MODIFICACION_ARREGLO]: 'quiere modificar su arreglo floral',
   [TipoNovedad.PAGO_PENDIENTE]: 'queda pendiente su comprobante de pago',
+  [TipoNovedad.ENTREGA_PROGRAMADA]: 'tiene entrega/recogida programada',
+  [TipoNovedad.ESPERANDO_RESPUESTA_EQUIPO]: 'espera respuesta del equipo',
   [TipoNovedad.DUDA_SIN_RESPONDER]: 'tiene una duda sin responder',
   [TipoNovedad.QUEJA]: 'tiene una queja o reclamo',
   [TipoNovedad.OTRO]: 'tiene un tema pendiente',
@@ -163,7 +188,6 @@ export function construirMensajeNovedades(digest: NovedadesDiarias | null): stri
   if (!digest || digest.novedades.length === 0) {
     return '🌸 No hay novedades pendientes. Todo en orden.'
   }
-  const [y, m, d] = digest.fechaAnalizada.split('-')
   const ordenPrioridad = { alta: 0, media: 1, baja: 2 } as const
   const ordenadas = [...digest.novedades].sort((a, b) => ordenPrioridad[a.prioridad] - ordenPrioridad[b.prioridad])
 
@@ -175,8 +199,14 @@ export function construirMensajeNovedades(digest: NovedadesDiarias | null): stri
   })
 
   const restantes = ordenadas.length - Math.min(ordenadas.length, MAX_NOVEDADES_EN_MENSAJE)
+  const encabezado = digest.tipoVentana === 'reciente'
+    ? '📋 *Novedades — últimas 48 horas*'
+    : (() => {
+      const [y, m, d] = digest.fechaAnalizada.split('-')
+      return `📋 *Novedades del ${d}/${m}/${y}*`
+    })()
   return [
-    `📋 *Novedades del ${d}/${m}/${y}*`,
+    encabezado,
     '',
     ...lineas,
     ...(restantes > 0 ? ['', `_...y ${restantes} más._`] : []),

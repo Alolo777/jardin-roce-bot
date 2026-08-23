@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## 2026-08-23
+
+### Fix — Scheduler diario muerto por Invalid Date + botón de regeneración manual de novedades (BUG-024)
+
+**Problema:** Tras 2 días en producción, el motor de novedades nunca había generado el digest ni enviado nada a las 6 am. Causa raíz: el bloque de jobs diarios de `bot.ts` parseaba `toLocaleString('es-MX')` con `new Date()`, y ese formato ("23/8/2026, 12:28 p.m.") produce **Invalid Date** en Node → `getHours()` = NaN → ninguna condición se cumplía jamás. Estaban muertos TODOS los jobs diarios: alerta 8 am, resumen 9 am a Telegram, check Telegram 10 am, generación 3 am y envío 6 am. Además, aunque el digest hubiera existido, la conversación "recoge su pedido hoy a las 11" no habría aparecido: el prompt descartaba ventas cerradas.
+
+**Solución:**
+- **`src/whatsapp/message-utils.ts`**: nueva `fechaYHoraCdmx()` con `Intl.DateTimeFormat.formatToParts()` (`hourCycle: 'h23'`) — cero parseo de strings.
+- **`bot.ts`**: scheduler usa el helper; cada job ahora deja log en consola Y en la tabla `logs` (visible en /admin/logs). Nuevo comando remoto `regenerar_novedades` en `revisarComandoRemoto` (polling cada 5 s, mismo canal que reconnect/recover). Nuevos métodos `regenerarNovedades()`/`obtenerNovedadesMensaje()` en el ctx del server.
+- **`src/api/server.ts`**: endpoints `GET /api/novedades` (digest actual) y `POST /api/novedades/regenerar` (regenera con ventana de 48 h).
+- **Dashboard**: rutas `/api/novedades` (GET) y `/api/novedades/regenerar` (POST vía `bot_command`); la página `/admin/administradores` muestra el digest actual y un botón **"🔄 Actualizar ahora"** que envía el comando y espera el resultado (polling de `generadaEn`, máx 90 s).
+- **Motor de novedades**: 60 mensajes por chat (antes 50); ventana `reciente` (últimas 48 h) para regeneración manual; nuevas categorías `entrega_programada` y `esperando_respuesta_equipo`; prompt IA ya NO descarta ventas cerradas con datos operativos (reporta horas de recogida/entrega confirmadas); encabezado del mensaje adapta según ventana.
+- **`lib/ai.ts`**: prompt actualizado con las categorías nuevas.
+
+**Archivos modificados:** `src/whatsapp/message-utils.ts`, `bot.ts`, `src/api/server.ts`, `lib/ai.ts`, `src/novedades/types.ts`, `src/novedades/novedades.service.ts`, `app/api/novedades/route.ts` (nuevo), `app/api/novedades/regenerar/route.ts` (nuevo), `app/admin/administradores/page.tsx`, `tests/novedades.test.mts`, `KNOWN_BUGS.md`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; verificación viva `fechaYHoraCdmx()` → `{"fecha":"2026-08-23","hora":12}`; `test:novedades` ampliado; suite completa OK.
+
+**Impacto:** Compatible y correctivo — además de novedades, REVIVE los jobs diarios preexistentes (resumen 9 am, heartbeat Telegram) que llevaban tiempo sin ejecutarse.
+
+**Rollback:** Sí.
+
+---
+
 ## 2026-08-22
 
 ### Fix — Admins atendidos por Flora y digest proactivo que nunca llegaba (BUG-023)
