@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## 2026-08-23 (7)
+
+### Feat — Comando "Flora" del admin = regenerar novedades al instante (DEC-087)
+
+**Objetivo:** Cuando el admin incluye la palabra **"Flora"** en un mensaje al bot, se dispara la regeneración completa de novedades (igual que el botón "Actualizar ahora": últimas 48 h, 60 mensajes por chat, fotos incluidas) y recibe el resumen fresco en el chat.
+
+**Comportamiento:**
+1. Responde primero "🌸 Dale, actualizo todo ahorita…" (con demora anti-ban).
+2. Regenera el digest (`forzar:true`, ventana `reciente`) directamente en el proceso del bot (sin vuelta por Supabase).
+3. Envía el resumen nuevo como segundo mensaje.
+4. Guardia anti-doble-disparo: si ya está regenerando, avisa y no duplica.
+5. `AYUDA` actualizada con el comando.
+
+**Archivos modificados:** `src/novedades/admin.handler.ts`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `test:novedades` y `test:validator` OK.
+
+**Impacto:** Compatible. Solo aplica a números en `admins_bot`.
+
+**Rollback:** Sí.
+
+---
+
 ## 2026-08-23 (6)
 
 ### Feat — Digest con estado de TODOS los chats + día de la semana contextual + resumen más corto (DEC-086)
