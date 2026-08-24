@@ -16,6 +16,7 @@ interface DigestNovedades {
   tipoVentana: 'dia_anterior' | 'reciente'
   generadaEn: string | null
   novedades: NovedadItem[]
+  estadosChats?: { telefono: string; cliente?: string; estado: string }[]
 }
 
 const ETIQUETAS_TIPO: Record<string, string> = {
@@ -216,6 +217,20 @@ export default function AdministradoresPage() {
                 )
               })}
             </div>
+            {(digest.estadosChats?.length ?? 0) > 0 && (
+              <div className="mt-5">
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">💬 Estado de todos los chats</h3>
+                <div className="space-y-1.5">
+                  {digest.estadosChats!.map((e, i) => (
+                    <div key={i} className="rounded-lg bg-gray-50/60 px-3 py-2 text-xs text-gray-600">
+                      <span className="font-mono font-semibold text-gray-700">{e.telefono}</span>
+                      {e.cliente && <span className="text-gray-400"> ({e.cliente})</span>}
+                      <span> — {e.estado}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

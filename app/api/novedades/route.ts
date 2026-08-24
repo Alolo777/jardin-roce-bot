@@ -31,6 +31,10 @@ export async function GET() {
           ...n,
           telefono: mascararTelefono(String(n.telefono ?? '')),
         })),
+        estadosChats: (Array.isArray(digest.estadosChats) ? digest.estadosChats : []).map((e: Record<string, unknown>) => ({
+          ...e,
+          telefono: mascararTelefono(String(e.telefono ?? '')),
+        })),
       },
     })
   } catch (error) {

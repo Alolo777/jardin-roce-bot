@@ -41,6 +41,17 @@ export interface NovedadesDiarias {
   // ISO del momento de generación
   generadaEn: string
   novedades: Novedad[]
+  // DEC-086: estado breve de TODOS los chats analizados (incluso cerrados),
+  // para que el admin vea qué se hablo en cada conversación.
+  estadosChats?: EstadoChatDia[]
+}
+
+// Resumen de una conversación analizada (aunque no tenga novedad)
+export interface EstadoChatDia {
+  telefono: string
+  cliente?: string
+  // Qué se hablo y en qué quedó (máx ~100 caracteres)
+  estado: string
 }
 
 // Entrada compacta de un chat para el análisis IA diario

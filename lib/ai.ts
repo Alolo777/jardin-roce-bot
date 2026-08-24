@@ -526,10 +526,10 @@ export async function clasificarConversacion(
   }
 }
 
-// ─── Novedades diarias para administradores (DEC-084) ────────────────────────
-// Un único análisis al día (3 am CDMX) sobre los chats del día anterior.
-// El LLM SOLO clasifica dentro de categorías del backend y redacta el resumen;
-// nunca decide qué notificar ni toca la base de datos.
+// ─── Novedades diarias para administradores (DEC-084/086) ────────────────────
+// Un único análisis al día (3 am CDMX) o manual (botón, últimas 48 h).
+// El LLM SOLO clasifica dentro de categorías del backend y redacta; nunca
+// decide qué notificar ni toca la base de datos.
 
 function extraerJsonArray(texto: string): string {
   const limpio = texto.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
@@ -543,17 +543,23 @@ export interface ChatParaResumen {
   lineas: string[]
 }
 
-export interface NovedadCrudaIA {
+// DEC-086: por cada chat la IA devuelve el ESTADO (qué se habló y en qué
+// quedó — SIEMPRE, incluso ventas cerradas) y una NOVEDAD opcional si hay
+// algo pendiente para el equipo humano.
+export interface AnalisisChatItem {
   telefono: string
-  tipo: string
-  resumen: string
-  prioridad?: string
+  estado: string
+  novedad?: {
+    tipo: string
+    prioridad?: string
+    resumen: string
+  }
 }
 
 const TIPOS_NOVEDAD_PERMITIDOS =
   'cotizacion_pendiente|pedido_sin_tratar|cambio_fecha|modificacion_arreglo|pago_pendiente|entrega_programada|esperando_respuesta_equipo|duda_sin_responder|queja|otro'
 
-export async function resumirNovedadesChats(chats: ChatParaResumen[]): Promise<NovedadCrudaIA[] | null> {
+export async function resumirNovedadesChats(chats: ChatParaResumen[]): Promise<AnalisisChatItem[] | null> {
   if (chats.length === 0) return []
 
   const bloques = chats
@@ -562,19 +568,15 @@ export async function resumirNovedadesChats(chats: ChatParaResumen[]): Promise<N
 
   const prompt = [
     'Analiza las conversaciones de una floreria (Flora es la asistente virtual).',
-    'Para CADA chat reporta lo que el equipo humano DEBE SABER, priorizando:',
-    '- cotizacion_pendiente: pidió precio/cotización y el equipo NO le confirmó un precio. REPÓRTALA TODAS LAS VECES QUE APLIQUE aunque después el cliente haya dicho "ok", "gracias" o el chat haya continuado: si nadie del equipo le dio precio, sigue pendiente.',
-    '- entrega_programada: el cliente CONFIRMO cuándo recoge su pedido o cuándo se lo entregan (ej. "paso mañana a las 11", "lo recoge hoy a las 11 am"). REPÓRTALO SIEMPRE aunque la venta esté cerrada: el equipo necesita saber esa hora.',
-    '- pedido_sin_tratar: mostro intencion de comprar/apartar y el pedido no avanzo.',
-    '- cambio_fecha: pidio cambiar la fecha o hora de entrega de un pedido ya apartado.',
-    '- modificacion_arreglo: pidio cambiar/modificar el arreglo floral (flores, tamano, dedicatoria, envio).',
-    '- pago_pendiente: dijo que pagaria/enviaria comprobante y no hay confirmacion de pago.',
-    '- esperando_respuesta_equipo: espera que el equipo le confirme algo (precio, envio, disponibilidad, fotos) y aun no responde.',
-    '- duda_sin_responder: hizo una pregunta que quedo sin respuesta clara.',
-    '- queja: molestia, reclamo o cancelacion.',
-    '- otro: algo importante pendiente que no encaje arriba.',
-    'REGLAS: Ignora SOLO chats de pura cortesía (saludo/gracias sin ningún tema). Hasta 2 novedades por chat SOLO si son temas distintos; si es el mismo tema, 1 sola con el dato más útil. No inventes telefonos: usa EXACTAMENTE los de los bloques CHAT. resumen maximo 120 caracteres, espanol mexicano, incluye la fecha/hora cuando aplique (ej. "recoge hoy 11 am").',
-    `Responde SOLO JSON valido, sin markdown, formato: [{"telefono":"...","tipo":"${TIPOS_NOVEDAD_PERMITIDOS}","resumen":"...","prioridad":"baja|media|alta"}]. Si no hay novedades responde [].`,
+    'DIA DE LA SEMANA: cada bloque o marca 📅 indica la fecha real en que se escribieron esos mensajes. Interpreta palabras relativas ("hoy", "mañana", "el viernes") segun EL DIA DEL MENSAJE, no segun hoy. Ej: si un SABADO dice "mañana paso por el ramo", se refiere al DOMINGO.',
+    'Para CADA chat devuelve SIEMPRE un objeto con:',
+    '- estado (OBLIGATORIO, max 90 caracteres): que se hablo y en que quedo, INCLUYENDO conversaciones cerradas (ej: "cotizo girasoles; quedo de mandar foto" / "venta cerrada ramo $300; recoge domingo 11 am").',
+    '- novedad (SOLO si hay algo pendiente para el equipo humano): { tipo, prioridad, resumen } donde tipo es una de:',
+    `    ${TIPOS_NOVEDAD_PERMITIDOS}`,
+    '  Reglas de novedad: cotizacion_pendiente reportala aunque luego diga ok/gracias si nadie del equipo confirmo precio; entrega_programada SIEMPRE aunque la venta este cerrada; pago_pendiente si prometio comprobante y no hay confirmacion.',
+    '  prioridad: baja|media|alta · resumen: max 90 caracteres, con fecha/hora cuando aplique ("recoge domingo 11 am").',
+    'REGLAS: Ignora SOLO chats de pura cortesia (saludo/gracias sin tema alguno). No inventes telefonos: usa EXACTAMENTE los de los bloques CHAT. Hasta 2 novedades por chat SOLO si son temas distintos (duplica el objeto). espanol mexicano.',
+    `Responde SOLO JSON valido, sin markdown, formato: [{"telefono":"...","estado":"...","novedad":{"tipo":"cotizacion_pendiente","prioridad":"baja|media|alta","resumen":"..."}}]. El campo novedad se omite si no aplica. Si ningun chat tiene contenido responde [].`,
     '',
     bloques,
   ].join('\n')
@@ -616,9 +618,9 @@ export async function resumirNovedadesChats(chats: ChatParaResumen[]): Promise<N
     )
     console.timeEnd('[ai.ts] Novedades diarias')
 
-    const parsed = JSON.parse(extraerJsonArray(rawTexto)) as NovedadCrudaIA[]
+    const parsed = JSON.parse(extraerJsonArray(rawTexto)) as AnalisisChatItem[]
     if (!Array.isArray(parsed)) return null
-    return parsed.filter(n => n && typeof n.telefono === 'string' && typeof n.resumen === 'string')
+    return parsed.filter(n => n && typeof n.telefono === 'string' && typeof n.estado === 'string')
   } catch (error) {
     console.warn('[ai.ts] Error generando novedades diarias:', error instanceof Error ? error.message : error)
     return null

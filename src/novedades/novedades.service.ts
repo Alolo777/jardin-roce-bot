@@ -9,7 +9,7 @@
 //   cualquier hora → un admin escribe al bot y recibe el digest guardado
 
 import { supabaseAdmin } from '../../lib/supabase'
-import { resumirNovedadesChats, responderConsultaAdmin, type ChatParaResumen } from '../../lib/ai'
+import { resumirNovedadesChats, responderConsultaAdmin, type ChatParaResumen, type AnalisisChatItem } from '../../lib/ai'
 import { logger } from '../../lib/logger.service'
 import { listarPedidosActivosGlobales } from '../pedidos/pedido.service'
 import { listarCasosRequierenAtencion } from '../casos/caso.service'
@@ -20,12 +20,42 @@ import { detectarCasosAtencion, detectarPedidosAtascos, extraerUltimos4, filtrar
 import { cargarNovedades, guardarNovedades, obtenerAdminsBot } from './novedades.repository'
 import { obtenerImagenesPorTelefono } from './media-chat.repository'
 import type { ImagenVisionAdmin } from '../../lib/ai'
-import { TipoNovedad, type Novedad, type NovedadesDiarias, type TranscripcionChat } from './types'
+import { TipoNovedad, type EstadoChatDia, type Novedad, type NovedadesDiarias, type TranscripcionChat } from './types'
 
 const MENSAJES_POR_CHAT = 60
 const CHATS_POR_LOTE_IA = 30
-const MAX_NOVEDADES_EN_MENSAJE = 20
+const MAX_NOVEDADES_EN_MENSAJE = 8
+const MAX_ESTADOS_EN_MENSAJE = 12
 const LIMITE_MENSAJES_CONSULTA = 8000
+
+// ─── Transcripción de mensajes (compartida) ──────────────────────
+
+const fmtHoraMsg = new Intl.DateTimeFormat('es-MX', { timeZone: 'America/Mexico_City', hour: 'numeric', minute: '2-digit', hour12: true })
+const fmtDiaMsg = new Intl.DateTimeFormat('es-MX', { timeZone: 'America/Mexico_City', weekday: 'long', day: '2-digit', month: '2-digit' })
+
+// Convierte mensajes de historial a líneas compactas para la IA.
+// DEC-086: inserta marcador [📅 sábado 22/08] cuando cambia el día calendario,
+// para que la IA resuelva "mañana"/"hoy" según EL DÍA DEL MENSAJE.
+function mensajesALineas(mensajes: any[]): string[] {
+  const lineas: string[] = []
+  let diaActual = ''
+  for (const m of mensajes) {
+    let hora = ''
+    if (m.creado_en) {
+      const d = new Date(m.creado_en)
+      hora = fmtHoraMsg.format(d).replace('a. m.', 'am').replace('p. m.', 'pm')
+      const dia = fmtDiaMsg.format(d)
+      if (dia !== diaActual) {
+        diaActual = dia
+        lineas.push(`[📅 ${dia}]`)
+      }
+    }
+    const origen = m.origen === 'equipo' ? 'equipo' : m.origen === 'sistema' ? 'sistema' : m.rol === 'user' ? 'cliente' : 'flora'
+    const contenido = String(m.contenido ?? '').replace(/\s+/g, ' ').slice(0, 200)
+    lineas.push(`[${hora}] ${origen}: ${contenido}`)
+  }
+  return lineas
+}
 
 // ─── Fechas CDMX ─────────────────────────────────────────────────
 
@@ -98,17 +128,7 @@ async function obtenerTranscripciones(inicioIso: string, finIso: string, limiteM
       const real = await resolverLidInverso(telefono)
       if (real && real.replace(/\D/g, '') !== telefono.replace(/\D/g, '')) telefono = real
     } catch { /* sin claves o sin mapeo: se usa el teléfono guardado */ }
-    const lineas = mensajes.slice(-MENSAJES_POR_CHAT).map(m => {
-      let hora = ''
-      if (m.creado_en) {
-        hora = new Date(m.creado_en)
-          .toLocaleString('es-MX', { timeZone: 'America/Mexico_City', hour: 'numeric', minute: '2-digit', hour12: true })
-          .replace('a. m.', 'am').replace('p. m.', 'pm')
-      }
-      const origen = m.origen === 'equipo' ? 'equipo' : m.origen === 'sistema' ? 'sistema' : m.rol === 'user' ? 'cliente' : 'flora'
-      const contenido = String(m.contenido ?? '').replace(/\s+/g, ' ').slice(0, 200)
-      return `[${hora}] ${origen}: ${contenido}`
-    })
+    const lineas = mensajesALineas(mensajes.slice(-MENSAJES_POR_CHAT))
     chats.push({ telefono, lineas })
   }
   return chats
@@ -140,6 +160,7 @@ export async function generarNovedadesDiarias(
   // BUG-025: solo chats con actividad DENTRO de la ventana analizada.
   // Los pedidos/casos antiguos que no escribieron en este período se omiten.
   const novedadesIA: Novedad[] = []
+  const estadosChats: EstadoChatDia[] = []
   let telefonosActivos: string[] = []
   try {
     const chats = await obtenerTranscripciones(inicioIso, finIso)
@@ -149,12 +170,29 @@ export async function generarNovedadesDiarias(
     for (let i = 0; i < chats.length; i += CHATS_POR_LOTE_IA) {
       // BUG-023: tope de tiempo por lote. Si un proveedor se cuelga, seguimos
       // con lo que haya para que el digest SIEMPRE se guarde.
-      const crudas = await Promise.race([
+      const crudas: AnalisisChatItem[] | null = await Promise.race([
         resumirNovedadesChats(chats.slice(i, i + CHATS_POR_LOTE_IA)),
         new Promise<null>(resolve => setTimeout(() => resolve(null), 150_000)),
       ])
       if (!crudas) break // proveedor caído o lento: no insistir (protege cuota)
-      novedadesIA.push(...crudas.map(normalizarNovedadIA).filter((n): n is Novedad => n !== null))
+      for (const item of crudas) {
+        const telefono = String(item.telefono ?? '').trim()
+        if (!telefono) continue
+        // DEC-086: estado de TODOS los chats (incluso cerrados)
+        if (item.estado) {
+          estadosChats.push({ telefono, estado: String(item.estado).slice(0, 120) })
+        }
+        // Novedad opcional del mismo item
+        if (item.novedad?.resumen) {
+          const n = normalizarNovedadIA({
+            telefono,
+            tipo: String(item.novedad.tipo ?? 'otro'),
+            resumen: String(item.novedad.resumen),
+            prioridad: item.novedad.prioridad,
+          })
+          if (n) novedadesIA.push(n)
+        }
+      }
     }
   } catch (err) {
     console.error('[novedades] Error en análisis IA (se usan solo reglas):', err)
@@ -181,9 +219,10 @@ export async function generarNovedadesDiarias(
     tipoVentana,
     generadaEn: new Date().toISOString(),
     novedades: finales,
+    estadosChats: estadosChats.slice(0, 40),
   }
   await guardarNovedades(digest)
-  console.log(`[novedades] ✅ Digest guardado: ${finales.length} novedad(es) (${reglas.length} reglas + ${novedadesIA.length} IA)`)
+  console.log(`[novedades] ✅ Digest guardado: ${finales.length} novedad(es) + estado de ${estadosChats.length} chat(s)`)
   return digest
 }
 
@@ -209,34 +248,46 @@ const ETIQUETA_TIPO: Record<TipoNovedad, string> = {
 }
 
 export function construirMensajeNovedades(digest: NovedadesDiarias | null): string {
-  if (!digest || digest.novedades.length === 0) {
+  if (!digest || (digest.novedades.length === 0 && !(digest.estadosChats?.length))) {
     return '🌸 No hay novedades pendientes. Todo en orden.'
   }
   const ordenPrioridad = { alta: 0, media: 1, baja: 2 } as const
   const ordenadas = [...digest.novedades].sort((a, b) => ordenPrioridad[a.prioridad] - ordenPrioridad[b.prioridad])
 
+  // Sección 1: novedades pendientes (máx 8, prioridad primero)
   const lineas = ordenadas.slice(0, MAX_NOVEDADES_EN_MENSAJE).map((n, i) => {
     const etiqueta = ETIQUETA_TIPO[n.tipo] ?? ETIQUETA_TIPO[TipoNovedad.OTRO]
     const cliente = n.cliente ? ` (${n.cliente})` : ''
     const marca = n.prioridad === 'alta' ? '🔴' : n.prioridad === 'media' ? '🟡' : '⚪'
-    return `${marca} ${i + 1}. *${mascararTelefono(n.telefono)}*${cliente}: ${etiqueta}${n.resumen ? ` — ${n.resumen}` : ''}`
+    return `${marca} *${mascararTelefono(n.telefono)}*${cliente}: ${etiqueta}${n.resumen ? ` — ${n.resumen}` : ''}`
   })
 
-  const restantes = ordenadas.length - Math.min(ordenadas.length, MAX_NOVEDADES_EN_MENSAJE)
+  const restantesNov = ordenadas.length - Math.min(ordenadas.length, MAX_NOVEDADES_EN_MENSAJE)
+
+  // DEC-086: sección 2 — estado de TODOS los chats analizados
+  const estados = digest.estadosChats ?? []
+  const lineasEstados = estados.slice(0, MAX_ESTADOS_EN_MENSAJE).map(e =>
+    `• *${mascararTelefono(e.telefono)}*${e.cliente ? ` (${e.cliente})` : ''}: ${e.estado}`
+  )
+  const restantesEstados = estados.length - Math.min(estados.length, MAX_ESTADOS_EN_MENSAJE)
+
   const encabezado = digest.tipoVentana === 'reciente'
     ? '📋 *Novedades — últimas 48 horas*'
     : (() => {
       const [y, m, d] = digest.fechaAnalizada.split('-')
       return `📋 *Novedades del ${d}/${m}/${y}*`
     })()
-  return [
-    encabezado,
-    '',
-    ...lineas,
-    ...(restantes > 0 ? ['', `_...y ${restantes} más._`] : []),
-    '',
-    '_Resumen generado automáticamente a las 3 am._',
-  ].join('\n')
+
+  const partes: string[] = [encabezado]
+  if (lineas.length > 0) {
+    partes.push('', ...lineas)
+    if (restantesNov > 0) partes.push(`_…y ${restantesNov} más._`)
+  }
+  if (lineasEstados.length > 0) {
+    partes.push('', '💬 *Todos los chats:*', ...lineasEstados)
+    if (restantesEstados > 0) partes.push(`_…y ${restantesEstados} más._`)
+  }
+  return partes.join('\n')
 }
 
 // ─── Envío proactivo (6 am) ──────────────────────────────────────
@@ -344,17 +395,7 @@ export async function consultarChatParaAdmin(pregunta: string): Promise<string> 
         .limit(MENSAJES_POR_CHAT)
       const mensajes = (data ?? []).reverse()
       if (mensajes.length === 0) continue
-      const lineas = mensajes.map(m => {
-        let hora = ''
-        if (m.creado_en) {
-          hora = new Date(m.creado_en)
-            .toLocaleString('es-MX', { timeZone: 'America/Mexico_City', hour: 'numeric', minute: '2-digit', hour12: true })
-            .replace('a. m.', 'am').replace('p. m.', 'pm')
-        }
-        const origen = m.origen === 'equipo' ? 'equipo' : m.origen === 'sistema' ? 'sistema' : m.rol === 'user' ? 'cliente' : 'flora'
-        const contenido = String(m.contenido ?? '').replace(/\s+/g, ' ').slice(0, 200)
-        return `[${hora}] ${origen}: ${contenido}`
-      })
+      const lineas = mensajesALineas(mensajes)
       bloques.push({ telefono: mascararTelefono(cand.real), lineas })
     }
 

@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## 2026-08-23 (6)
+
+### Feat — Digest con estado de TODOS los chats + día de la semana contextual + resumen más corto (DEC-086)
+
+**Objetivo:** El admin ahora ve qué se habló en TODAS las conversaciones analizadas (incluso finalizadas), el mensaje es más corto, y la IA interpreta correctamente los días relativos ("mañana" dicho un sábado = domingo del mensaje).
+
+**Implementación:**
+- **`lib/ai.ts`**: nuevo contrato `AnalisisChatItem { telefono, estado (siempre), novedad? }`; prompt con regla DIA DE LA SEMANA (marcas 📅 por día calendario) y estados de máx 90 caracteres incluyendo ventas cerradas.
+- **`src/novedades/novedades.service.ts`**: helper compartido `mensajesALineas()` que inserta marcadores `[📅 sábado 22/08]` al cambiar de día; digest guarda `estadosChats[]` (máx 40); `construirMensajeNovedades` v2 — sección novedades (máx 8) + sección "💬 Todos los chats" (máx 12), sin pie decorativo.
+- **Dashboard**: `GET /api/novedades` devuelve `estadosChats` enmascarado; `/admin/administradores` muestra la sección "Estado de todos los chats".
+
+**Archivos modificados:** `lib/ai.ts`, `src/novedades/types.ts`, `src/novedades/novedades.service.ts`, `app/api/novedades/route.ts`, `app/admin/administradores/page.tsx`, `DECISIONS.md`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; suite completa OK (`test:novedades`, `test:validator`, `test:horario`, `test:flows`).
+
+**Impacto:** Compatible. `estadosChats` es campo nuevo opcional; digests viejos siguen leyéndose.
+
+**Rollback:** Sí.
+
+---
+
 ## 2026-08-23 (5)
 
 ### Fix — Fallback del system prompt alineado + logs visibles + tono de Flora en la revisora (BUG-027)

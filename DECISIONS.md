@@ -1808,4 +1808,27 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-086: Digest con estado de TODOS los chats + día de la semana contextual + resumen más corto
+
+**Fecha:** 2026-08-23
+**Estado:** Aceptada
+
+**Motivo:** El admin quería ver qué se habló en TODAS las conversaciones analizadas (incluso cerradas), no solo pendientes; el mensaje era largo; y la IA confundía días relativos ("mañana" dicho un sábado lo tomaba como el lunes siguiente al análisis, no el domingo del mensaje).
+
+**Alternativas consideradas:**
+1. Dos llamadas IA (novedades + estados) — rechazada: duplica costo.
+2. Un solo JSON por chat con `estado` obligatorio + `novedad` opcional (elegida): mismo costo, digest completo.
+3. Resolver días relativos en backend con parser propio — rechazada: ambigüedad lingüística alta; basta inyectar la fecha/día real por segmento.
+
+**Resultado:**
+- Nuevo contrato IA (`AnalisisChatItem`): `{ telefono, estado (siempre), novedad? }`. El digest guarda `estadosChats[]` además de `novedades[]`.
+- Transcripciones con marcador `[📅 sábado 22/08]` al cambiar el día calendario (helper compartido `mensajesALineas`) + regla explícita en el prompt: interpretar relativos según EL DÍA DEL MENSAJE.
+- Mensaje más corto: novedades máx 8, estados máx 12, sin pie decorativo. WhatsApp y dashboard muestran ambas secciones.
+
+**Ventajas:** Mismo costo de IA; visibilidad total de conversaciones; fechas relativas correctas; retrocompatible (estadosChats es campo nuevo opcional).
+
+**Desventajas:** El prompt creció ligeramente; si la IA omite `estado`, ese chat no aparece en la sección de estados (no afecta novedades).
+
+---
+
 
