@@ -50,6 +50,30 @@ export function limpiarFotosPendientesApertura(): void {
   onFotosPendientesCambiaron?.()
 }
 
+// ─── Recordatorios de apartados (DEC-090) ────────────────────────
+// La poda diaria encola aquí los APARTADO/ESPERANDO_PAGO con 5–10 días sin
+// actividad; bot.ts los envía al cliente cuando abre el negocio.
+
+export interface RecordatorioApartado {
+  telefono: string
+  nombre?: string
+  ts: number
+}
+
+export const RECORDATORIOS_APARTADO = new Map<string, RecordatorioApartado>()
+
+export function encolarRecordatorioApartado(telefono: string, dato: Omit<RecordatorioApartado, 'ts'>): void {
+  RECORDATORIOS_APARTADO.set(telefono, { ...dato, telefono, ts: Date.now() })
+}
+
+export function obtenerRecordatoriosApartado(): RecordatorioApartado[] {
+  return [...RECORDATORIOS_APARTADO.values()]
+}
+
+export function limpiarRecordatoriosApartado(): void {
+  RECORDATORIOS_APARTADO.clear()
+}
+
 export const FOTOS_DISPONIBLES_TTL_MS = 2 * 60 * 60_000
 export const INTERVENCION_HUMANA_TTL_MS = 10 * 60_000
 

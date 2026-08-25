@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## 2026-08-23 (10)
+
+### Feat — Poda automática diaria de pedidos estancados (DEC-090)
+
+**Diagnóstico:** 123 pedidos "activos" en producción (65 apartados, varios de 24+ días sin pago) y CERO archivo automático — el mapa crecía indefinidamente.
+
+**Implementación:**
+- **`src/pedidos/poda.service.ts`** (nuevo): `decidirPoda()` pura (cotización 7d · apartado recordatorio 5d/archivo 10d · listo 30d · entregado 7d · huérfanos directo · EN_PRODUCCION nunca) + `ejecutarPodaPedidos()` que archiva vía `archivarPedido` y sincroniza a pedidos_bot.
+- **`bot.ts`**: job diario 2 am; recordatorios día-5 encolados y enviados al cliente en horario de apertura (demora anti-ban); línea "🗄️ Poda: N archivados" en el resumen diario.
+- **`bot-state.ts` / `bot-state-persistence.ts`**: cola persistente `RECORDATORIOS_APARTADO`.
+- Sin migraciones: la inactividad se mide con `actualizadoEn` del engine (solo cambia con actividad real).
+
+**Archivos nuevos:** `src/pedidos/poda.service.ts`, `tests/poda.test.mts`
+**Archivos modificados:** `bot.ts`, `src/whatsapp/bot-state.ts`, `src/whatsapp/bot-state-persistence.ts`, `package.json`, `DECISIONS.md`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `test:poda` nuevo (13 aserciones de política); suite completa OK.
+
+**Impacto:** Compatible. La primera poda archivará silenciosamente los estancados históricos (se registrará en /admin/logs módulo 'poda').
+
+**Rollback:** Sí.
+
+---
+
 ## 2026-08-23 (9)
 
 ### Feat — Filtro anti-ruido pre-IA, solo-IA decide novedades, última foto adjunta en seguimiento (DEC-089)

@@ -1871,4 +1871,33 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-090: Poda automática diaria de pedidos estancados
+
+**Fecha:** 2026-08-23
+**Estado:** Aceptada
+
+**Motivo:** Producción acumulaba **123 pedidos "activos"** (57 cotización, 65 apartado, 1 pagado) con apartados de 24+ días sin pago. `cargarPedidos()` carga todo desde bot_cache y NO existía archivo automático para pedidos (solo casos, 72 h). El usuario aprobó poda con umbrales estándar y archivado silencioso.
+
+**Política aprobada:**
+| Estado | Acción |
+|---|---|
+| NUEVO/COTIZANDO/PRECIO_CONFIRMADO/ESPERANDO_DATOS | archivo a los **7 d** |
+| ESPERANDO_PAGO/APARTADO | recordatorio al cliente día **5** · archivo día **10** (silencioso) |
+| LISTO | archivo a los **30 d** |
+| ENTREGADO | archivo a los **7 d** |
+| sin teléfono | archivo directo |
+| EN_PRODUCCION/QUEJA/POSTVENTA | nunca automático |
+
+**Alternativas consideradas:**
+1. Columna nueva `actividad_en` + migración — innecesario: `actualizadoEn` del engine ya solo cambia con actividad real y persiste en bot_cache.
+2. Preguntar al cliente antes de archivar — descartada por el usuario (silencioso).
+
+**Resultado:** `src/pedidos/poda.service.ts` con `decidirPoda()` (pura, testeable) y `ejecutarPodaPedidos()`; job diario a las 2 am (fechaYHoraCdmx robusto); recordatorios día-5 encolados en `RECORDATORIOS_APARTADO` (persistido en bot_cache) y enviados al cliente en horario de apertura con demora anti-ban; línea "🗄️ Poda: N archivados" en el resumen diario de Telegram; logs en /admin/logs módulo 'poda'.
+
+**Ventajas:** El mapa PEDIDOS deja de crecer indefinidamente; pedidos_bot se sincroniza (ARCHIVADO→'entregado' en el mapeo existente); cero migraciones.
+
+**Desventajas:** Los recordatorios son mensajes automáticos al cliente (demorados y limitados a 1 por ciclo de poda); si Baileys no resolvió el JID el envío puede fallar silenciosamente (queda en log).
+
+---
+
 
