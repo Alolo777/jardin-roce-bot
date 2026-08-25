@@ -298,3 +298,17 @@
   4. Aclarado en auditoría: NO existe cruce cliente↔admin — el Cerebro solo alimenta `getAIResponse`; novedades/seguimiento usan prompts internos propios.
 - **Pruebas:** `npx tsc --noEmit` 0 errores; suite completa OK; grep confirma 0 referencias al prompt eliminado.
 - **Versión donde se corrigió:** 2.3.6
+
+## BUG-028: "Flora" respondía vacío habiendo 14 chats con actividad — filtro anti-ruido demasiado estricto
+- **Prioridad:** 🔴 Crítica
+- **Estado:** ✅ Resuelto (2026-08-25)
+- **Reportado:** 2026-08-25 (logs de VM: "0 chat(s) relevantes" tras comando Flora)
+- **Síntomas:** Admin envió "Flora"; el digest guardó "0 novedades + 0 estados" y el análisis profundo se saltó por completo, aunque había 14 chats con 287 mensajes en las últimas 48 h.
+- **Causa raíz:** El filtro anti-ruido (DEC-089) exigía que un chat equipo-último matcheara UN pedido pendiente por variantes de teléfono. En producción: (1) NINGÚN chat terminaba en mensaje de cliente (0/14 — el equipo contesta siempre al final), (2) el match de teléfono fallaba cuando `clientes.telefono` guarda LID sin resolver o el pedido no está en el mapa en memoria, y (3) los chats cuyo último mensaje era una anotación del sistema quedaban fuera. Resultado: 14→0.
+- **Corrección (DEC-090b):**
+  1. `filtrarChatsRuido` ahora devuelve `{pasan, omitidos}` y trata origen 'sistema' como neutro (pasa).
+  2. `obtenerTranscripciones` calcula explícitamente `tienePedidoAbierto` contra el set de variantes de pedidos pendientes.
+  3. Guardia NUNCA-VACÍO: si el filtro deja 0 pero había chats crudos, se rescatan los 10 más activos (con warning en logs) para que "Flora" jamás responda vacío habiendo conversaciones reales.
+  4. Log de desglose `crudos → pasan (omitidos)` siempre que haya omitidos o resultado vacío.
+- **Pruebas:** `npx tsc --noEmit` 0 errores; `test:novedades` ampliado (sistema pasa, conteo omitidos); verificación con datos reales: 12/14 pasarían hoy; suite completa OK.
+- **Versión donde se corrigió:** 2.4.3

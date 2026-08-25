@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 2026-08-25
+
+### Fix — "Flora" respondía vacío habiendo 14 chats activos (BUG-028, DEC-090b)
+
+**Diagnóstico con datos reales:** 287 mensajes / 14 chats en 48 h, pero el filtro anti-ruido los redujo a 0 (ningún chat terminaba en mensaje de cliente y el match de teléfono fallaba por LIDs sin resolver).
+
+**Solución:** origen 'sistema' es neutro; `tienePedidoAbierto` se calcula explícitamente contra variantes de pedidos pendientes; **guardia NUNCA-VACÍO** rescata los 10 chats más activos si el filtro dejara 0; log de desglose crudos→pasan.
+
+**Archivos modificados:** `src/novedades/novedad.detector.ts`, `src/novedades/novedades.service.ts`, `tests/novedades.test.mts`, `KNOWN_BUGS.md`
+
+**Pruebas:** tsc 0 errores; suite completa OK; simulación con datos reales → 12/14 pasan hoy.
+
+**Rollback:** Sí. — v2.4.3
+
+---
+
 ## 2026-08-23 (11)
 
 ### Fix — Poda 100 % silenciosa: eliminados los recordatorios al cliente (DEC-090a)

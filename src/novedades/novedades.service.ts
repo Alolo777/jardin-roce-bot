@@ -15,7 +15,7 @@ import { listarPedidosActivosGlobales } from '../pedidos/pedido.service'
 import { enviarTextoANumeros } from '../whatsapp/notification.service'
 import { resolverLidInverso } from '../whatsapp/contact.service'
 import { variantesTelefono } from '../conversation/conversation.service'
-import { extraerUltimos4, filtrarChatsRuido, mascararTelefono, normalizarNovedadIA, coincideAdminPorVariantes, type PedidoConCliente } from './novedad.detector'
+import { extraerUltimos4, esPedidoPendiente, filtrarChatsRuido, mascararTelefono, normalizarNovedadIA, coincideAdminPorVariantes, type PedidoConCliente } from './novedad.detector'
 import { cargarNovedades, guardarNovedades, obtenerAdminsBot } from './novedades.repository'
 import { obtenerImagenesPorTelefono } from './media-chat.repository'
 import type { ImagenVisionAdmin } from '../../lib/ai'
@@ -106,6 +106,14 @@ async function obtenerTranscripciones(
   if (error) throw error
   if (!data?.length) return []
 
+  // DEC-090b: variantes de teléfono con pedido pendiente (para tienePedidoAbierto)
+  const pedidosPendientes = new Set<string>()
+  for (const { pedido } of pedidos) {
+    if (!esPedidoPendiente(pedido)) continue
+    const tel = String(pedido.telefono ?? '')
+    if (tel) for (const v of variantesTelefono(tel)) pedidosPendientes.add(v)
+  }
+
   // Mapa cliente_id -> teléfono (consulta por lotes)
   const clienteIds = [...new Set(data.map((m: any) => m.cliente_id))] as string[]
   const mapaTelefonos = new Map<string, string>()
@@ -135,16 +143,37 @@ async function obtenerTranscripciones(
     } catch { /* sin claves o sin mapeo: se usa el teléfono guardado */ }
     const recortados = mensajes.slice(-MENSAJES_POR_CHAT)
     const lineas = mensajesALineas(recortados)
-    // DEC-089: origen del último mensaje + si tiene pedido pendiente
+    // DEC-089: origen del último mensaje
     const ultimo = recortados[recortados.length - 1]
     const ultimoOrigen = ultimo
       ? (ultimo.origen === 'equipo' ? 'equipo' : ultimo.origen === 'sistema' ? 'sistema' : ultimo.rol === 'user' ? 'cliente' : 'flora')
       : undefined
-    chats.push({ telefono, lineas, ultimoOrigen })
+
+    // DEC-090b: tienePedidoAbierto por variantes de teléfono contra pedidos
+    let tienePedidoAbierto = false
+    if (pedidosPendientes.size > 0) {
+      tienePedidoAbierto = variantesTelefono(telefono).some(v => pedidosPendientes.has(v))
+    }
+
+    chats.push({ telefono, lineas, ultimoOrigen, tienePedidoAbierto })
   }
 
   // DEC-089: omitir chats ruidosos (equipo habló último sin pedido pendiente)
-  return filtrarChatsRuido(chats, pedidos)
+  const { pasan, omitidos } = filtrarChatsRuido(chats, pedidos)
+  if (omitidos > 0 || chats.length === 0) {
+    console.log(`[novedades] 🔎 Filtro ruido: ${chats.length} crudos → ${pasan.length} pasan (${omitidos} omitidos)`)
+    logger.info('novedades', `Filtro ruido: ${chats.length} crudos → ${pasan.length} pasan, ${omitidos} omitidos`)
+  }
+  // DEC-090b guardia NUNCA-VACÍO: si había chats con actividad y el filtro se
+  // llevó todos (p. ej. LIDs sin resolver), se analizan los más activos para
+  // que "Flora" jamás responda vacío habiendo conversaciones reales.
+  if (pasan.length === 0 && chats.length > 0) {
+    const rescate = [...chats].sort((a, b) => b.lineas.length - a.lineas.length).slice(0, 10)
+    console.warn(`[novedades] ⚠️ Filtro dejó 0 de ${chats.length} — rescatando los ${rescate.length} más activos`)
+    logger.warn('novedades', `Filtro anti-ruido dejó 0 de ${chats.length}; rescatando top-${rescate.length} activos`)
+    return rescate
+  }
+  return pasan
 }
 
 // ─── Generación del digest (3 am) ────────────────────────────────

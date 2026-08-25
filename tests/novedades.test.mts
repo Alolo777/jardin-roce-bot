@@ -113,13 +113,19 @@ const filtradosRuido = filtrarChatsRuido(
   [chatRuido, chatClienteUltimo, chatConPedido],
   [{ clienteId: 'x', pedido: { telefono: '+521333333333', estadoFlujo: 'esperando_nombre' } }]
 )
-assert.equal(filtradosRuido.length, 2, 'El chat ruidoso (equipo último, sin pedido) se omite')
-assert.ok(!filtradosRuido.some(c => c.telefono === '+521111111111'), 'Confirmado: ruido fuera')
-assert.ok(filtradosRuido.some(c => c.telefono === '+521333333333'), 'Pedido pendiente se rescata aunque equipo habló último')
+assert.equal(filtradosRuido.pasan.length, 2, 'El chat ruidoso (equipo último, sin pedido) se omite')
+assert.ok(!filtradosRuido.pasan.some(c => c.telefono === '+521111111111'), 'Confirmado: ruido fuera')
+assert.ok(filtradosRuido.pasan.some(c => c.telefono === '+521333333333'), 'Pedido pendiente se rescata aunque equipo habló último')
+assert.equal(filtradosRuido.omitidos, 1, 'Conteo de omitidos')
 
 // Sin pedidos listados, solo pasan los de cliente-último o flag abierto
 const soloClientes = filtrarChatsRuido([chatRuido, chatClienteUltimo], [])
-assert.equal(soloClientes.length, 1, 'Sin pedidos, equipo-último se omite')
+assert.equal(soloClientes.pasan.length, 1, 'Sin pedidos, equipo-último se omite')
+
+// DEC-090b: sistema-último es neutro y pasa
+const chatSistema: TranscripcionChat = { telefono: '+521444444444', lineas: [], ultimoOrigen: 'sistema' }
+const conSistema = filtrarChatsRuido([chatSistema], [])
+assert.ok(conSistema.pasan.some(c => c.telefono === '+521444444444'), 'Anotación de sistema no filtra el chat')
 
 // ─── mascararTelefono / extraerUltimos4 (BUG-026) ────────────────
 

@@ -125,7 +125,7 @@ export function esPedidoPendiente(pedido: PedidoActual): boolean {
 export function filtrarChatsRuido(
   chats: TranscripcionChat[],
   pedidos: PedidoConCliente[]
-): TranscripcionChat[] {
+): { pasan: TranscripcionChat[]; omitidos: number } {
   // Teléfonos con pedido pendiente (todas las variantes)
   const pendientes = new Set<string>()
   for (const { pedido } of pedidos) {
@@ -134,12 +134,17 @@ export function filtrarChatsRuido(
     if (!tel) continue
     for (const v of variantesTelefono(tel)) pendientes.add(v)
   }
-  return chats.filter(c => {
-    if (c.ultimoOrigen === 'cliente') return true
-    if (c.tienePedidoAbierto) return true
-    const variantes = variantesTelefono(c.telefono)
-    return variantes.some(v => pendientes.has(v))
-  })
+  const pasan: TranscripcionChat[] = []
+  let omitidos = 0
+  for (const c of chats) {
+    // Cliente último → siempre pasa. Sistema último → anotación interna, neutro.
+    if (c.ultimoOrigen === 'cliente' || c.ultimoOrigen === 'sistema') { pasan.push(c); continue }
+    if (c.tienePedidoAbierto) { pasan.push(c); continue }
+    const matchPend = variantesTelefono(c.telefono).some(v => pendientes.has(v))
+    if (matchPend) { pasan.push(c); continue }
+    omitidos++
+  }
+  return { pasan, omitidos }
 }
 
 // ─── Utilidades de presentación y detección de intención ────────────────────
