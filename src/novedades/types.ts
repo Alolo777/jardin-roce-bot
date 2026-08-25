@@ -44,6 +44,8 @@ export interface NovedadesDiarias {
   // DEC-086: estado breve de TODOS los chats analizados (incluso cerrados),
   // para que el admin vea qué se hablo en cada conversación.
   estadosChats?: EstadoChatDia[]
+  // DEC-088: análisis profundo por conversación (opcional, corrida posterior)
+  profundo?: AnalisisProfundo
 }
 
 // Resumen de una conversación analizada (aunque no tenga novedad)
@@ -52,6 +54,28 @@ export interface EstadoChatDia {
   cliente?: string
   // Qué se hablo y en qué quedó (máx ~100 caracteres)
   estado: string
+}
+
+// DEC-088: análisis PROFUNDO por conversación (1 llamada IA por chat,
+// espaciadas 15–25 s). Vive dentro del digest como `profundo`.
+export interface DetalleChatDia {
+  telefono: string
+  categoria: string // venta_cerrada | cotizacion | pedido_en_proceso | duda | queja | postventa | saludo | otro
+  resumen: string // 2–4 líneas detalladas
+  puntosClave: string[]
+  requiereRevision: boolean
+  motivoRevision?: string
+  preguntasAbiertas: string[] // ej: "¿Ya recogió su pedido del sábado 11 am?"
+  fechasMencionadas?: string[]
+}
+
+export interface AnalisisProfundo {
+  generadoEn: string
+  tipoVentana: 'dia_anterior' | 'reciente'
+  totalChats: number
+  // Compuesto sin IA: "10 chats: 4 ventas cerradas, 2 cotizaciones…"
+  resumenGlobal: string
+  detalleChats: DetalleChatDia[]
 }
 
 // Entrada compacta de un chat para el análisis IA diario

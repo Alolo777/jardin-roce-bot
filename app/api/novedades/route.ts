@@ -35,6 +35,18 @@ export async function GET() {
           ...e,
           telefono: mascararTelefono(String(e.telefono ?? '')),
         })),
+        profundo: digest.profundo
+          ? {
+              generadoEn: digest.profundo.generadoEn,
+              tipoVentana: digest.profundo.tipoVentana,
+              totalChats: digest.profundo.totalChats ?? 0,
+              resumenGlobal: digest.profundo.resumenGlobal ?? '',
+              detalleChats: (Array.isArray(digest.profundo.detalleChats) ? digest.profundo.detalleChats : []).map((d: Record<string, unknown>) => ({
+                ...d,
+                telefono: mascararTelefono(String(d.telefono ?? '')),
+              })),
+            }
+          : null,
       },
     })
   } catch (error) {

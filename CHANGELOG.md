@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## 2026-08-23 (8)
+
+### Feat — Análisis profundo por conversación con razonamiento temporal (DEC-088)
+
+**Objetivo:** Clasificación DETALLADA de cada conversación atendida (~10/día): 1 llamada IA por chat, espaciadas 15–25 s (~3 min total), indicando cuáles valen la pena revisar y generando preguntas abiertas con razonamiento temporal ("¿Ya recogió su pedido del sábado 11 am?").
+
+**Implementación:**
+- **`lib/ai.ts`**: `analizarChatDetalle(chat, {fecha, diaSemana, hora})` — JSON estricto: categoria (venta_cerrada|cotizacion|pedido_en_proceso|duda|queja|postventa|saludo|otro), resumen 2–4 líneas, puntosClave, requiereRevision+motivo, preguntasAbiertas, fechasMencionadas. Razona fechas relativas con las marcas 📅 del transcript + contexto HOY.
+- **`src/novedades/novedades.service.ts`**: `ejecutarAnalisisProfundo(ventana)` — secuencial, espera aleatoria 15–25 s entre chats, timeout 90 s/chat, guardia anti-solapamiento, resumen global compuesto sin IA; persiste en `digest.profundo`. `construirMensajeInteresantes()` → compacto WhatsApp (solo interesantes + preguntas).
+- **Integraciones**: job 3 am encadena el profundo; comando remoto del botón también y avisa a admins; comando "Flora" manda digest rápido + luego mensaje 🔍 (o "nada urgente 👌").
+- **Dashboard**: sección "🔬 Análisis profundo" con tarjeta por chat (categoría, badge revisar, resumen, preguntas).
+
+**Archivos modificados:** `lib/ai.ts`, `src/novedades/types.ts`, `src/novedades/novedades.service.ts`, `src/novedades/admin.handler.ts`, `bot.ts`, `app/api/novedades/route.ts`, `app/admin/administradores/page.tsx`, `DECISIONS.md`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; suite completa OK.
+
+**Impacto:** Compatible. ~10 llamadas IA extra/día aceptadas explícitamente. Corridas simultáneas se ignoran con log.
+
+**Rollback:** Sí.
+
+---
+
 ## 2026-08-23 (7)
 
 ### Feat — Comando "Flora" del admin = regenerar novedades al instante (DEC-087)

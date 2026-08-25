@@ -1831,4 +1831,24 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-088: Análisis profundo por conversación — 1 llamada IA por chat espaciada 15–25 s
+
+**Fecha:** 2026-08-23
+**Estado:** Aceptada
+
+**Motivo:** El digest rápido (1 llamada por lote) da estados breves, pero el admin quería clasificación DETALLADA de cada conversación atendida (~10/día), saber cuáles valen realmente la pena revisar, y que el sistema razone tiempo: hoy es domingo 2 pm; si quedó "recoge sábado 11 am", preguntar "¿ya recogió su pedido?".
+
+**Alternativas consideradas:**
+1. Más chats por lote en la llamada única (rechazado: resúmenes superficiales, sin razonamiento temporal fino).
+2. Llamadas paralelas (rechazado: ráfaga al proveedor; riesgo 429).
+3. **Secuencial con espera aleatoria 15–25 s entre chats (elegida):** 10 chats ≈ 3.3 min, patrón humano ante el proveedor. Timeout 90 s por chat; fallo individual no aborta la corrida.
+
+**Resultado:** `ejecutarAnalisisProfundo(ventana)` — corre tras el digest de las 3 am (ventana día_anterior) y encadenada a "Flora"/botón (ventana reciente). Nueva IA `analizarChatDetalle(chat, ctxTiempo)` devuelve JSON: categoria, resumen (2–4 líneas), puntosClave, requiereRevision+motivo, preguntasAbiertas ("¿Ya recogió su pedido del sábado 11 am?"), fechasMencionadas. Se guarda como `digest.profundo`. WhatsApp recibe SOLO compacto 🔍 (interesantes + preguntas); dashboard muestra el detalle completo por chat.
+
+**Ventajas:** Profundidad real por conversación; razonamiento temporal correcto (marcas 📅 + contexto HOY); costo predecible (~10 llamadas/día); guardia anti-solapamiento.
+
+**Desventajas:** ~3 min de corrida; ~10 llamadas extra/día (aceptado explícitamente por el usuario).
+
+---
+
 

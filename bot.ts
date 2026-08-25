@@ -72,7 +72,8 @@ import { validarSucursal, obtenerTextoConfirmacionSucursal } from './src/validat
 import { buscarEnvio, pareceConsultaEnvio } from './src/validators/envio.validator'
 import { evaluarCancelacion } from './src/validators/cancelacion.validator'
 import { evaluarQueja } from './src/validators/queja.validator'
-import { esAdminBot, crearAdminHandler, generarNovedadesDiarias, enviarNovedadesProactivo, construirMensajeNovedades, obtenerNovedadesDelDia } from './src/novedades/index'
+import { esAdminBot, crearAdminHandler, generarNovedadesDiarias, enviarNovedadesProactivo, construirMensajeNovedades, obtenerNovedadesDelDia, ejecutarAnalisisProfundo, construirMensajeInteresantes, obtenerAdminsBot } from './src/novedades/index'
+import { enviarTextoANumeros } from './src/whatsapp/notification.service'
 
 // ════════════════════════════════════════════════════════════════
 // PAUSA DEL BOT
@@ -236,7 +237,12 @@ setInterval(() => {
     console.log(`[bot] ⏰ Job diario ${hora}:00 — generando digest de novedades del día anterior`)
     logger.info('novedades', `Generación automática iniciada (job ${hora}:00, día ${dia})`)
     generarNovedadesDiarias()
-      .then(d => logger.info('novedades', `Digest generado: ${d?.novedades.length ?? 0} novedad(es) para ${d?.fechaAnalizada ?? '?'}`))
+      .then(d => {
+        logger.info('novedades', `Digest generado: ${d?.novedades.length ?? 0} novedad(es) para ${d?.fechaAnalizada ?? '?'}`)
+        // DEC-088: encadenar análisis profundo (1 llamada IA por chat, ~3 min)
+        return ejecutarAnalisisProfundo('dia_anterior')
+      })
+      .then(p => { if (p) logger.info('novedades', `Profundo listo: ${p.resumenGlobal}`) })
       .catch(err => { console.error('[bot] Error generando novedades:', err); logger.error('novedades', `Error generando digest: ${String(err)}`) })
   }
   if (hora >= 6 && dia !== ultimoDiaNovedadesEnviado && sock && BOT_READY) {
@@ -1123,7 +1129,8 @@ async function revisarComandoRemoto(): Promise<void> {
       reiniciarProceso('Rescate remoto desde dashboard', false)
     } else if (comando.action === 'regenerar_novedades') {
       // DEC-084 / BUG-024: botón "Actualizar novedades" del dashboard.
-      // Regenera el digest con ventana de 48 h (hoy + ayer) y 60 msg por chat.
+      // Regenera el digest con ventana de 48 h (hoy + ayer) y 60 msg por chat,
+      // y luego encadena el análisis profundo (DEC-088).
       console.log('[bot] 🔄 Comando remoto: regenerar novedades (últimas 48h)')
       logger.info('novedades', 'Regeneración manual solicitada desde el dashboard')
       generarNovedadesDiarias({ forzar: true, ventana: 'reciente' })
@@ -1131,6 +1138,11 @@ async function revisarComandoRemoto(): Promise<void> {
           const total = d?.novedades.length ?? 0
           console.log(`[bot] ✅ Novedades regeneradas: ${total} novedad(es)`)
           logger.info('novedades', `Regeneración manual completada: ${total} novedad(es)`)
+          // DEC-088: análisis profundo encadenado + aviso compacto a admins
+          return ejecutarAnalisisProfundo('reciente').then(async profundo => {
+            const msg = construirMensajeInteresantes(profundo)
+            if (msg && sock && BOT_READY) await enviarTextoANumeros(sock, await obtenerAdminsBot(), msg)
+          })
         })
         .catch(err => {
           console.error('[bot] Error regenerando novedades:', err)

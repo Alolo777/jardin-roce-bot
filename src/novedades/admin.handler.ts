@@ -7,7 +7,7 @@
 //      últimos 60 mensajes y la IA responde la pregunta del admin.
 // La demora anti-ban ("escribiendo..." + espera aleatoria) la aplica bot.ts.
 
-import { construirMensajeNovedades, consultarChatParaAdmin, generarNovedadesDiarias, obtenerNovedadesDelDia } from './novedades.service'
+import { construirMensajeNovedades, construirMensajeInteresantes, consultarChatParaAdmin, ejecutarAnalisisProfundo, generarNovedadesDiarias, obtenerNovedadesDelDia } from './novedades.service'
 import { extraerUltimos4 } from './novedad.detector'
 import { logger } from '../../lib/logger.service'
 
@@ -46,6 +46,14 @@ export function crearAdminHandler(deps: AdminHandlerDeps) {
           await deps.responderAdmin(remoteJid, '🌸 Dale, actualizo todo ahorita… te paso el resumen en un momentito 🌷')
           const digest = await generarNovedadesDiarias({ forzar: true, ventana: 'reciente' })
           await deps.responderAdmin(remoteJid, construirMensajeNovedades(digest))
+          // DEC-088: análisis profundo encadenado (~3 min) + mensaje 🔍
+          const profundo = await ejecutarAnalisisProfundo('reciente')
+          const msgInteresantes = construirMensajeInteresantes(profundo)
+          if (msgInteresantes) {
+            await deps.responderAdmin(remoteJid, msgInteresantes)
+          } else {
+            await deps.responderAdmin(remoteJid, '🔬 Análisis detallado listo: nada urgente que revisar 👌')
+          }
         } catch (err) {
           console.error('[novedades] Error regenerando por "Flora":', err)
           logger.error('novedades', `Error en regeneración por "Flora": ${String(err)}`)

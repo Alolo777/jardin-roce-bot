@@ -627,6 +627,101 @@ export async function resumirNovedadesChats(chats: ChatParaResumen[]): Promise<A
   }
 }
 
+// ─── Análisis PROFUNDO de UNA conversación (DEC-088) ─────────────────────────
+// 1 llamada por chat, espaciadas 15–25 s desde el servicio. Conoce la fecha,
+// día de la semana y hora actuales + las marcas 📅/hora del transcript para
+// razonar fechas relativas ("mañana" dicho sábado = domingo) y detectar si un
+// pedido con recogida programada ya debió entregarse.
+
+export interface DetalleChatIA {
+  categoria: string
+  resumen: string
+  puntosClave: string[]
+  requiereRevision: boolean
+  motivoRevision?: string
+  preguntasAbiertas: string[]
+  fechasMencionadas?: string[]
+}
+
+const CATEGORIAS_CHAT =
+  'venta_cerrada|cotizacion|pedido_en_proceso|duda|queja|postventa|saludo|otro'
+
+export async function analizarChatDetalle(
+  chat: ChatParaResumen,
+  ahora: { fecha: string; diaSemana: string; hora: string }
+): Promise<DetalleChatIA | null> {
+  const prompt = [
+    'Eres analista interno de una floreria. Analiza ESTA conversacion atendida y responde SOLO JSON valido, sin markdown.',
+    `HOY es ${ahora.diaSemana} ${ahora.fecha} y son las ${ahora.hora} (CDMX). El transcript tiene marcas [📅 dia fecha] (cuando cambio el dia) y [hora] por mensaje.`,
+    'FECHAS RELATIVAS: interpreta "hoy/mañana/el viernes" segun EL DIA DEL MENSAJE (la marca 📅 vigente), no segun hoy. Ej: sabado dice "mañana paso" → domingo.',
+    'Con eso, razona el estado temporal: ej. si quedo de recoger el sabado 11 am y ya paso, marca que falta confirmar si se lo llevaron.',
+    '',
+    'Devuelve exactamente:',
+    `{ "categoria": "${CATEGORIAS_CHAT}",`,
+    '  "resumen": "2-4 lineas detalladas de como se dio la conversacion",',
+    '  "puntosClave": ["dato importante", "..."],',
+    '  "requiereRevision": true|false,   // true SOLO si vale la pena que el admin la lea: dinero pendiente, queja, promesa sin confirmar, cambio de fecha, entrega que ya debio ocurrir',
+    '  "motivoRevision": "porque (solo si requiereRevision=true)",',
+    '  "preguntasAbiertas": ["pregunta concreta que el equipo debe verificar, ej: ¿Ya recogio su pedido del sabado 11 am?"],',
+    '  "fechasMencionadas": ["sabado 22/08 11 am"] }',
+    'Si algo no aplica, usa array vacio. No inventes datos que no esten en el transcript.',
+    '',
+    `CHAT ${chat.telefono}:`,
+    chat.lineas.join('\n').slice(-2400),
+  ].join('\n')
+
+  try {
+    const rawTexto = await callWithFallback(
+      async () => {
+        if (!geminiClient) throw new Error('Gemini no configurado')
+        const model = geminiClient.getGenerativeModel({ model: GEMINI_MODEL })
+        const result = await conRetry(() => model.generateContent({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 700, temperature: 0.2 },
+        }), 2)
+        return result.response.text() || ''
+      },
+      async (provider: OpenAICompatProvider) => {
+        if (!provider.client) throw new Error(`${provider.name} no configurado`)
+        const completion = await conRetry(async () => {
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 30_000)
+          try {
+            return await provider.client!.chat.completions.create(
+              {
+                model: provider.model,
+                messages: [{ role: 'user', content: prompt }],
+                max_tokens: 700,
+                temperature: 0.2,
+              },
+              { signal: controller.signal }
+            )
+          } finally {
+            clearTimeout(timeoutId)
+          }
+        }, 2)
+        return completion.choices[0]?.message?.content?.trim() || ''
+      },
+      'analizarChatDetalle'
+    )
+
+    const parsed = JSON.parse(extraerJsonObjeto(rawTexto)) as DetalleChatIA
+    if (!parsed || typeof parsed.resumen !== 'string') return null
+    return {
+      categoria: CATEGORIAS_CHAT.split('|').includes(parsed.categoria) ? parsed.categoria : 'otro',
+      resumen: String(parsed.resumen).slice(0, 600),
+      puntosClave: Array.isArray(parsed.puntosClave) ? parsed.puntosClave.slice(0, 5).map(String) : [],
+      requiereRevision: !!parsed.requiereRevision,
+      motivoRevision: parsed.motivoRevision ? String(parsed.motivoRevision).slice(0, 200) : undefined,
+      preguntasAbiertas: Array.isArray(parsed.preguntasAbiertas) ? parsed.preguntasAbiertas.slice(0, 4).map(String) : [],
+      fechasMencionadas: Array.isArray(parsed.fechasMencionadas) ? parsed.fechasMencionadas.slice(0, 6).map(String) : undefined,
+    }
+  } catch (error) {
+    console.warn('[ai.ts] Error analizando chat detalle:', error instanceof Error ? error.message : error)
+    return null
+  }
+}
+
 // ─── Consulta de seguimiento de un admin sobre un chat concreto (BUG-026) ────
 // El administrador pregunta algo específico ("¿qué pasó con el 7890?") y el
 // LLM responde leyendo la transcripción reciente de ESE chat. Una llamada

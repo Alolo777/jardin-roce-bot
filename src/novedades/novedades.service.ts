@@ -9,7 +9,7 @@
 //   cualquier hora → un admin escribe al bot y recibe el digest guardado
 
 import { supabaseAdmin } from '../../lib/supabase'
-import { resumirNovedadesChats, responderConsultaAdmin, type ChatParaResumen, type AnalisisChatItem } from '../../lib/ai'
+import { resumirNovedadesChats, responderConsultaAdmin, analizarChatDetalle, type ChatParaResumen, type AnalisisChatItem, type DetalleChatIA } from '../../lib/ai'
 import { logger } from '../../lib/logger.service'
 import { listarPedidosActivosGlobales } from '../pedidos/pedido.service'
 import { listarCasosRequierenAtencion } from '../casos/caso.service'
@@ -20,7 +20,8 @@ import { detectarCasosAtencion, detectarPedidosAtascos, extraerUltimos4, filtrar
 import { cargarNovedades, guardarNovedades, obtenerAdminsBot } from './novedades.repository'
 import { obtenerImagenesPorTelefono } from './media-chat.repository'
 import type { ImagenVisionAdmin } from '../../lib/ai'
-import { TipoNovedad, type EstadoChatDia, type Novedad, type NovedadesDiarias, type TranscripcionChat } from './types'
+import { TipoNovedad, type AnalisisProfundo, type DetalleChatDia, type EstadoChatDia, type Novedad, type NovedadesDiarias, type TranscripcionChat } from './types'
+import { fechaYHoraCdmx } from '../whatsapp/message-utils'
 
 const MENSAJES_POR_CHAT = 60
 const CHATS_POR_LOTE_IA = 30
@@ -287,6 +288,20 @@ export function construirMensajeNovedades(digest: NovedadesDiarias | null): stri
     partes.push('', '💬 *Todos los chats:*', ...lineasEstados)
     if (restantesEstados > 0) partes.push(`_…y ${restantesEstados} más._`)
   }
+
+  // DEC-088: sección compacta del análisis profundo (si ya corrió)
+  const profundo = digest.profundo
+  if (profundo) {
+    const aRevisar = profundo.detalleChats.filter(d => d.requiereRevision)
+    const preguntas = profundo.detalleChats.flatMap(d => d.preguntasAbiertas.slice(0, 1)).slice(0, 5)
+    if (aRevisar.length > 0 || preguntas.length > 0) {
+      partes.push('', `🔬 *Revisar (${profundo.totalChats} chats analizados):*`)
+      for (const d of aRevisar.slice(0, 5)) {
+        partes.push(`• *${mascararTelefono(d.telefono)}*${d.motivoRevision ? ` — ${d.motivoRevision}` : ''}`)
+      }
+      for (const p of preguntas) partes.push(`❓ ${p}`)
+    }
+  }
   return partes.join('\n')
 }
 
@@ -422,4 +437,112 @@ export async function consultarChatParaAdmin(pregunta: string): Promise<string> 
     console.error('[novedades] Error en consulta de admin:', err)
     return ''
   }
+}
+
+// ─── Análisis PROFUNDO por conversación (DEC-088) ────────────────
+// 1 llamada IA POR CHAT, espaciadas 15–25 s (≈3 min con 10 chats) para no
+// saturar al proveedor. Guardia anti-solapamiento.
+
+let analisisProfundoEnCurso = false
+
+function esperarMs(ms: number): Promise<void> {
+  return new Promise(r => setTimeout(r, ms))
+}
+
+export async function ejecutarAnalisisProfundo(
+  ventana: 'dia_anterior' | 'reciente' = 'reciente'
+): Promise<AnalisisProfundo | null> {
+  if (analisisProfundoEnCurso) {
+    logger.info('novedades', 'Análisis profundo ya en curso — se omite')
+    return null
+  }
+  analisisProfundoEnCurso = true
+  try {
+    const { inicioIso, finIso } = ventana === 'reciente' ? ventanaRecienteCdmx() : ventanaDiaAnteriorCdmx()
+    const chats = await obtenerTranscripciones(inicioIso, finIso)
+    if (chats.length === 0) {
+      logger.info('novedades', 'Análisis profundo: sin chats en la ventana')
+      return null
+    }
+
+    // Contexto temporal para que la IA razone fechas relativas
+    const ahora = fechaYHoraCdmx()
+    const diaSemana = new Intl.DateTimeFormat('es-MX', { timeZone: 'America/Mexico_City', weekday: 'long' }).format(new Date())
+    const hora12 = new Intl.DateTimeFormat('es-MX', { timeZone: 'America/Mexico_City', hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date()).replace('a. m.', 'am').replace('p. m.', 'pm')
+    const ctxTiempo = { fecha: ahora.fecha, diaSemana, hora: hora12 }
+
+    console.log(`[novedades] 🔬 Análisis profundo (${ventana}): ${chats.length} chat(s), espaciado 15–25 s`)
+    logger.info('novedades', `Análisis profundo iniciado (${ventana}, ${chats.length} chats)`)
+
+    const detalleChats: DetalleChatDia[] = []
+    for (let i = 0; i < chats.length; i++) {
+      const chat = chats[i]
+      let det: DetalleChatIA | null = null
+      try {
+        det = await Promise.race([
+          analizarChatDetalle(chat, ctxTiempo),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 90_000)),
+        ])
+      } catch { /* cuenta como fallo individual */ }
+      if (det) {
+        detalleChats.push({ telefono: chat.telefono, ...det })
+      }
+      logger.info('novedades', `Análisis profundo ${i + 1}/${chats.length} ${det ? 'ok' : 'sin resultado'}`)
+      if (i < chats.length - 1) {
+        await esperarMs(15_000 + Math.floor(Math.random() * 10_000))
+      }
+    }
+
+    // Resumen global compuesto SIN IA (conteo por categoría)
+    const conteo = new Map<string, number>()
+    for (const d of detalleChats) conteo.set(d.categoria, (conteo.get(d.categoria) ?? 0) + 1)
+    const partes = [...conteo.entries()].map(([cat, n]) => `${n} ${cat.replace(/_/g, ' ')}`)
+    const resumenGlobal = `${detalleChats.length} chats analizados: ${partes.join(', ') || 'sin contenido'}`
+
+    const profundo: AnalisisProfundo = {
+      generadoEn: new Date().toISOString(),
+      tipoVentana: ventana,
+      totalChats: detalleChats.length,
+      resumenGlobal,
+      detalleChats,
+    }
+
+    // Fusionar con el digest actual y persistir
+    const digestActual = await cargarNovedades()
+    if (digestActual) {
+      digestActual.profundo = profundo
+      await guardarNovedades(digestActual)
+    }
+    const aRevisar = detalleChats.filter(d => d.requiereRevision).length
+    console.log(`[novedades] 🔬 Análisis profundo listo: ${detalleChats.length} chat(s), ${aRevisar} requieren revisión`)
+    logger.info('novedades', `Análisis profundo completado: ${resumenGlobal} — ${aRevisar} requieren revisión`)
+    return profundo
+  } catch (err) {
+    console.error('[novedades] Error en análisis profundo:', err)
+    logger.error('novedades', `Error análisis profundo: ${String(err)}`)
+    return null
+  } finally {
+    analisisProfundoEnCurso = false
+  }
+}
+
+// Mensaje compacto de WhatsApp: SOLO los chats interesantes + preguntas abiertas
+export function construirMensajeInteresantes(profundo: AnalisisProfundo | null): string | null {
+  if (!profundo) return null
+  const aRevisar = profundo.detalleChats.filter(d => d.requiereRevision)
+  const preguntas = profundo.detalleChats.flatMap(d => d.preguntasAbiertas.slice(0, 2)).slice(0, 5)
+  if (aRevisar.length === 0 && preguntas.length === 0) return null
+
+  const lineas: string[] = [`🔬 *Análisis detallado* (${profundo.resumenGlobal})`]
+  if (aRevisar.length > 0) {
+    lineas.push('', '👀 *Vale la pena revisar:*')
+    for (const d of aRevisar.slice(0, 6)) {
+      lineas.push(`• *${mascararTelefono(d.telefono)}*${d.motivoRevision ? ` — ${d.motivoRevision}` : ''}`)
+    }
+  }
+  if (preguntas.length > 0) {
+    lineas.push('', '❓ *Por confirmar:*')
+    for (const p of preguntas) lineas.push(`• ${p}`)
+  }
+  return lineas.join('\n')
 }

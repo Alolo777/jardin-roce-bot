@@ -11,12 +11,28 @@ interface NovedadItem {
   fuente: 'reglas' | 'ia'
 }
 
+interface DetalleChat {
+  telefono: string
+  categoria: string
+  resumen: string
+  puntosClave: string[]
+  requiereRevision: boolean
+  motivoRevision?: string
+  preguntasAbiertas: string[]
+}
+
 interface DigestNovedades {
   fechaAnalizada: string | null
   tipoVentana: 'dia_anterior' | 'reciente'
   generadaEn: string | null
   novedades: NovedadItem[]
   estadosChats?: { telefono: string; cliente?: string; estado: string }[]
+  profundo?: {
+    generadoEn: string
+    totalChats: number
+    resumenGlobal: string
+    detalleChats: DetalleChat[]
+  } | null
 }
 
 const ETIQUETAS_TIPO: Record<string, string> = {
@@ -226,6 +242,33 @@ export default function AdministradoresPage() {
                       <span className="font-mono font-semibold text-gray-700">{e.telefono}</span>
                       {e.cliente && <span className="text-gray-400"> ({e.cliente})</span>}
                       <span> — {e.estado}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {digest.profundo && digest.profundo.detalleChats.length > 0 && (
+              <div className="mt-5">
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                  🔬 Análisis profundo ({digest.profundo.resumenGlobal})
+                </h3>
+                <div className="space-y-2.5">
+                  {digest.profundo.detalleChats.map((d, i) => (
+                    <div key={i} className={`rounded-xl px-4 py-3 text-xs border ${d.requiereRevision ? 'bg-amber-50/80 border-amber-200' : 'bg-gray-50/60 border-transparent'}`}>
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className="font-mono font-semibold text-gray-800">{d.telefono}</span>
+                        <span className="px-2 py-0.5 rounded-full bg-white/70 text-[10px] uppercase tracking-wide text-gray-500">{d.categoria.replace(/_/g, ' ')}</span>
+                        {d.requiereRevision && (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-200/80 text-[10px] font-semibold text-amber-900">revisar{d.motivoRevision ? `: ${d.motivoRevision}` : ''}</span>
+                        )}
+                      </div>
+                      <p className="text-gray-600 leading-relaxed">{d.resumen}</p>
+                      {d.preguntasAbiertas.length > 0 && (
+                        <ul className="mt-1.5 list-disc list-inside text-gray-500">
+                          {d.preguntasAbiertas.map((p, j) => <li key={j}>{p}</li>)}
+                        </ul>
+                      )}
                     </div>
                   ))}
                 </div>
