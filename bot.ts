@@ -61,7 +61,7 @@ import { cargarIgnorados, MENSAJES_RESCATADOS } from './src/whatsapp/preferences
 import { obtenerNumeroReal, setBaileysKeys, limpiarCacheNumeros } from './src/whatsapp/contact.service'
 import { notificarEmpleadosWhatsApp, enviarFotoEmpleadosWhatsApp } from './src/whatsapp/notification.service'
 import { detectarCancelacion, detectarQueja, detectarEvento, detectarInteresCompra } from './src/decision/intent-detector'
-import { FRUSTRACION_NOTIFICADA, ATENCION_HUMANA_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, RECLAMACION_NOTIFICADA, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, ALERTAS_DEDUP, ULTIMA_INTERVENCION_HUMANA, RATE_TIMESTAMPS, FOTOS_DISPONIBLES_TTL_MS, INTERVENCION_HUMANA_TTL_MS, limpiarCachesEstado, debeNotificarAtencionHumana, debeNotificarReclamacion, debeEnviarAlertaDedup, registrarIntervencionHumana, obtenerIntervencionHumanaReciente, extraerPrecioRespuesta, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, RATE_AVISADOS, estaRateLimited, obtenerFotosPendientesApertura, limpiarFotosPendientesApertura, setOnFotosPendientesCambiaron, encolarRecordatorioApartado, obtenerRecordatoriosApartado, limpiarRecordatoriosApartado } from './src/whatsapp/bot-state'
+import { FRUSTRACION_NOTIFICADA, ATENCION_HUMANA_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, RECLAMACION_NOTIFICADA, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, ALERTAS_DEDUP, ULTIMA_INTERVENCION_HUMANA, RATE_TIMESTAMPS, FOTOS_DISPONIBLES_TTL_MS, INTERVENCION_HUMANA_TTL_MS, limpiarCachesEstado, debeNotificarAtencionHumana, debeNotificarReclamacion, debeEnviarAlertaDedup, registrarIntervencionHumana, obtenerIntervencionHumanaReciente, extraerPrecioRespuesta, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, RATE_AVISADOS, estaRateLimited, obtenerFotosPendientesApertura, limpiarFotosPendientesApertura, setOnFotosPendientesCambiaron } from './src/whatsapp/bot-state'
 import { cargarEstado, guardarEstado, iniciarPersistenciaPeriodica, limpiarClavesVacias } from './src/whatsapp/bot-state-persistence'
 import { validarHorario, esHorarioAnticipado, HORARIO_APERTURA } from './src/validators/horario.validator'
 import { refrescarConfiguracion, obtenerHorarios } from './src/config/configuracion.service'
@@ -207,30 +207,6 @@ let ultimoDiaNovedadesGenerado = ''
 let ultimoDiaNovedadesEnviado = ''
 let ultimoDiaPodaPedidos = ''
 
-// DEC-090: envía los recordatorios de apartados encolados por la poda
-// (solo en horario de atención, con demora entre cada uno).
-async function enviarRecordatoriosApartado(): Promise<void> {
-  const recordatorios = obtenerRecordatoriosApartado()
-  if (recordatorios.length === 0 || !sock?.user) return
-  limpiarRecordatoriosApartado()
-  console.log(`[poda] ⏰ Enviando ${recordatorios.length} recordatorio(s) de apartado`)
-  for (const rec of recordatorios) {
-    try {
-      const jid = `${String(rec.telefono).replace(/\D/g, '')}@s.whatsapp.net`
-      try { await sock.sendPresenceUpdate('composing', jid) } catch { /* no fatal */ }
-      await new Promise(r => setTimeout(r, 5000 + Math.floor(Math.random() * 5000)))
-      try { await sock.sendPresenceUpdate('paused', jid) } catch { /* no fatal */ }
-      const saludo = rec.nombre ? `¡Hola ${rec.nombre}!` : '¡Hola!'
-      await sock.sendMessage(jid, {
-        text: `${saludo} 🌸 Tu pedido sigue apartado con nosotros 🌷 ¿Lo confirmamos para continuar con la preparación?`,
-      })
-    } catch (err) {
-      console.warn(`[poda] Error enviando recordatorio a ${rec.telefono}:`, err)
-    }
-    await new Promise(r => setTimeout(r, 15_000 + Math.floor(Math.random() * 10_000)))
-  }
-}
-
 setInterval(() => {
   // BUG-024: antes se parseaba toLocaleString('es-MX') con new Date() y daba
   // Invalid Date (formato DD/MM/YYYY + "p.m.") → hora NaN → NINGÚN job diario
@@ -281,21 +257,14 @@ setInterval(() => {
       .catch(err => console.error('[bot] Error enviando novedades:', err))
   }
 
-  // DEC-090: poda automática de pedidos estancados (2 am, silenciosa).
-  // Los recordatorios de apartados (día 5) se encolan y se envían en horario.
+  // DEC-090 (enmienda): poda automática de pedidos estancados (2 am) —
+  // 100 % silenciosa, sin mensajes al cliente.
   if (hora >= 2 && dia !== ultimoDiaPodaPedidos) {
     ultimoDiaPodaPedidos = dia
     console.log('[bot] ⏰ Job diario: poda de pedidos antiguos')
     logger.info('poda', 'Poda diaria iniciada')
     ejecutarPodaPedidos()
-      .then(async r => {
-        logger.info('poda', `Poda completada: ${r.archivados} archivado(s), ${r.recordatorios.length} recordatorio(s)`)
-        for (const rec of r.recordatorios) {
-          encolarRecordatorioApartado(rec.telefono, { telefono: rec.telefono, nombre: rec.nombre })
-        }
-        if (r.recordatorios.length > 0) await guardarEstado().catch(() => {})
-        if (estaEnHorario()) await enviarRecordatoriosApartado().catch(() => {})
-      })
+      .then(r => logger.info('poda', `Poda completada: ${r.archivados} archivado(s)`))
       .catch(err => logger.error('poda', `Error en poda diaria: ${String(err)}`))
   }
 }, 30 * 60_000)
@@ -385,12 +354,8 @@ function programarFlushApertura(): void {
   if (timerFlushApertura) clearTimeout(timerFlushApertura)
   const espera = Math.max(msHastaProximaApertura(), 30_000)
   timerFlushApertura = setTimeout(() => {
-    if (sock && BOT_READY && estaEnHorario()) {
-      if (obtenerFotosPendientesApertura().length > 0) {
-        flushearFotosPendientesApertura().catch(err => console.error('[bot] Error flush fotos apertura:', err))
-      }
-      // DEC-090: recordatorios de apartados pendientes (poda día 5)
-      enviarRecordatoriosApartado().catch(err => console.error('[bot] Error enviando recordatorios:', err))
+    if (sock && BOT_READY && estaEnHorario() && obtenerFotosPendientesApertura().length > 0) {
+      flushearFotosPendientesApertura().catch(err => console.error('[bot] Error flush fotos apertura:', err))
     }
     programarFlushApertura()
   }, espera)
@@ -403,10 +368,8 @@ programarFlushApertura()
 setInterval(() => {
   if (!sock || !BOT_READY) return
   if (!estaEnHorario()) return
-  if (obtenerFotosPendientesApertura().length > 0) {
-    flushearFotosPendientesApertura().catch(err => console.error('[bot] Error flush fotos apertura:', err))
-  }
-  enviarRecordatoriosApartado().catch(() => {})
+  if (obtenerFotosPendientesApertura().length === 0) return
+  flushearFotosPendientesApertura().catch(err => console.error('[bot] Error flush fotos apertura:', err))
 }, 5 * 60_000)
 
 // ════════════════════════════════════════════════════════════════

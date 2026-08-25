@@ -1898,6 +1898,8 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 **Desventajas:** Los recordatorios son mensajes automáticos al cliente (demorados y limitados a 1 por ciclo de poda); si Baileys no resolvió el JID el envío puede fallar silenciosamente (queda en log).
 
+**ENMIENDA (2026-08-23, DEC-090a):** El usuario prohibió los recordatorios al cliente ("sería spam; ya no les interesa o ya los atendimos"). Se ELIMINA por completo la cola `RECORDATORIOS_APARTADO` y su envío; la política final es **100 % silenciosa**: APARTADO/ESPERANDO_PAGO se archivan directamente a los 10 días sin ningún mensaje. Cotizaciones 7d, LISTO 30d, ENTREGADO 7d y huérfanos se mantienen igual.
+
 ---
 
 

@@ -22,10 +22,10 @@ assert.equal(decidirPoda(pedido({ estado: EstadoPedido.NUEVO, _dias: 7 })), 'arc
 assert.equal(decidirPoda(pedido({ estado: EstadoPedido.PRECIO_CONFIRMADO, _dias: 20 })), 'archivar', 'PRECIO_CONFIRMADO viejo se archiva')
 assert.equal(decidirPoda(pedido({ estado: EstadoPedido.ESPERANDO_DATOS, _dias: 7 })), 'archivar', 'ESPERANDO_DATOS 7d se archiva')
 
-// Apartado / esperando pago: recordatorio día 5, archivo día 10
+// Apartado / esperando pago: archivo a los 10 días, SIN recordatorios (enmienda DEC-090a)
 assert.equal(decidirPoda(pedido({ estado: EstadoPedido.APARTADO, _dias: 4 })), null, 'Apartado 4d tranquilo')
-assert.equal(decidirPoda(pedido({ estado: EstadoPedido.APARTADO, _dias: 5 })), 'recordar', 'Apartado 5d genera recordatorio')
-assert.equal(decidirPoda(pedido({ estado: EstadoPedido.ESPERANDO_PAGO, _dias: 9 })), 'recordar', 'Esperando pago 9d recuerda')
+assert.equal(decidirPoda(pedido({ estado: EstadoPedido.APARTADO, _dias: 5 })), null, 'Apartado 5d NO genera recordatorio (silencioso)')
+assert.equal(decidirPoda(pedido({ estado: EstadoPedido.ESPERANDO_PAGO, _dias: 9 })), null, 'Esperando pago 9d tranquilo')
 assert.equal(decidirPoda(pedido({ estado: EstadoPedido.APARTADO, _dias: 10 })), 'archivar', 'Apartado 10d se archiva')
 
 // LISTO y ENTREGADO

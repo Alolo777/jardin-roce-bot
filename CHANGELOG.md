@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 2026-08-23 (11)
+
+### Fix — Poda 100 % silenciosa: eliminados los recordatorios al cliente (DEC-090a)
+
+**Corrección pedida:** El usuario aclaró que el bot NO debe enviar mensajes automáticos tipo "tu pedido sigue apartado" — sería spam (ya no les interesa o ya los atendieron manualmente).
+
+**Eliminado:** cola `RECORDATORIOS_APARTADO` (bot-state + persistencia), función `enviarRecordatoriosApartado` y sus llamadas en apertura/ciclo de 5 min, y la decisión 'recordar' de `decidirPoda`. La poda ahora es **100 % silenciosa**: apartado/esperando-pago → archivo directo a los 10 días.
+
+**Archivos modificados:** `src/pedidos/poda.service.ts`, `src/whatsapp/bot-state.ts`, `src/whatsapp/bot-state-persistence.ts`, `bot.ts`, `tests/poda.test.mts`, `DECISIONS.md`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `test:poda` actualizado (5d/9d ya no generan recordatorio); suite completa OK.
+
+**Rollback:** Sí.
+
+---
+
 ## 2026-08-23 (10)
 
 ### Feat — Poda automática diaria de pedidos estancados (DEC-090)

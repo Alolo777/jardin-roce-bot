@@ -1,26 +1,26 @@
 // src/pedidos/poda.service.ts
-// PODA AUTOMÁTICA de pedidos estancados (DEC-090).
+// PODA AUTOMÁTICA de pedidos estancados (DEC-090, enmienda DEC-090a).
 // Sin poda, el mapa PEDIDOS crece para siempre: había 123 "activos" con
-// apartados de 24+ días sin pago. Política aprobada por el usuario:
+// apartados de 24+ días sin pago. Política FINAL aprobada por el usuario:
 //
 //   cotización/NUEVO/COTIZANDO/PRECIO_CONFIRMADO/ESPERANDO_DATOS → archivo a los 7 días
-//   ESPERANDO_PAGO / APARTADO                                    → recordatorio día 5, archivo día 10
+//   ESPERANDO_PAGO / APARTADO                                    → archivo a los 10 días
 //   LISTO                                                        → archivo a los 30 días
 //   ENTREGADO                                                    → archivo a los 7 días
 //   sin teléfono (huérfano)                                      → archivo directo
 //   EN_PRODUCCION / QUEJA / POSTVENTA                            → nunca automático
 //
-// Silencioso: no se le escribe al cliente al archivar. Los recordatorios del
-// día 5 se encolan y se envían en horario de atención (bot.ts).
+// 100 % SILENCIOSA: no se le envía NINGÚN mensaje al cliente (el usuario lo
+// prohibió explícitamente — sería spam; esos clientes ya no interesan o ya
+// fueron atendidos manualmente por el equipo).
 
 import { EstadoPedido, type PedidoActual } from '../models/types'
 import { archivarPedido, listarPedidosActivosGlobales, persistirPedidosEngine } from './pedido.service'
 import { logger } from '../../lib/logger.service'
 
-export type DecisionPoda = 'archivar' | 'recordar' | null
+export type DecisionPoda = 'archivar' | null
 
 const DIAS_ARCHIVO_COTIZACION = 7
-const DIAS_RECORDATORIO_APARTADO = 5
 const DIAS_ARCHIVO_APARTADO = 10
 const DIAS_ARCHIVO_LISTO = 30
 const DIAS_ARCHIVO_ENTREGADO = 7
@@ -44,9 +44,7 @@ export function decidirPoda(p: PedidoActual): DecisionPoda {
       return dias >= DIAS_ARCHIVO_COTIZACION ? 'archivar' : null
     case EstadoPedido.ESPERANDO_PAGO:
     case EstadoPedido.APARTADO:
-      if (dias >= DIAS_ARCHIVO_APARTADO) return 'archivar'
-      if (dias >= DIAS_RECORDATORIO_APARTADO) return 'recordar'
-      return null
+      return dias >= DIAS_ARCHIVO_APARTADO ? 'archivar' : null
     case EstadoPedido.LISTO:
       return dias >= DIAS_ARCHIVO_LISTO ? 'archivar' : null
     case EstadoPedido.ENTREGADO:
@@ -63,7 +61,6 @@ function mascara(t?: string): string {
 
 export interface ResultadoPoda {
   archivados: number
-  recordatorios: { telefono: string; nombre?: string }[]
   detalles: string[]
 }
 
@@ -74,20 +71,14 @@ export function obtenerUltimaPodaResumen(): string {
 
 // Ejecuta la poda sobre TODOS los pedidos activos del Order Engine.
 export async function ejecutarPodaPedidos(): Promise<ResultadoPoda> {
-  const resultado: ResultadoPoda = { archivados: 0, recordatorios: [], detalles: [] }
+  const resultado: ResultadoPoda = { archivados: 0, detalles: [] }
 
   for (const { clienteId, pedido } of listarPedidosActivosGlobales()) {
     const decision = decidirPoda(pedido)
-    if (!decision) continue
+    if (decision !== 'archivar') continue
     const tel = mascara(pedido.telefono)
     const base = pedido.actualizadoEn || pedido.creadoEn
     const dias = base ? Math.floor((Date.now() - new Date(base).getTime()) / 86_400_000) : -1
-
-    if (decision === 'recordar') {
-      resultado.recordatorios.push({ telefono: String(pedido.telefono ?? ''), nombre: pedido.nombre })
-      resultado.detalles.push(`⏰ ${tel} apartado ${dias}d — recordatorio`)
-      continue
-    }
 
     const motivo = `Poda automática: ${pedido.estado} sin actividad ${dias}d`
     const ok = archivarPedido(clienteId, motivo)
@@ -102,6 +93,6 @@ export async function ejecutarPodaPedidos(): Promise<ResultadoPoda> {
     await persistirPedidosEngine()
   }
   ultimaPodaResumen = `🗄️ Poda: ${resultado.archivados} archivado(s)`
-  console.log(`[poda] 🗄️ ${resultado.archivados} archivado(s), ${resultado.recordatorios.length} recordatorio(s) pendiente(s) de envío en horario`)
+  console.log(`[poda] 🗄️ ${resultado.archivados} archivado(s)`)
   return resultado
 }
