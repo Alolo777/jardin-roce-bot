@@ -568,16 +568,18 @@ export async function resumirNovedadesChats(chats: ChatParaResumen[]): Promise<A
 
   const prompt = [
     'Analiza las conversaciones de una floreria (Flora es la asistente virtual).',
+    'COBERTURA TOTAL (DEC-091): devuelve EXACTAMENTE un objeto por CADA bloque "CHAT <telefono>" listado, usando su telefono EXACTO. PROHIBIDO omitir bloques; si un chat es trivial, igual devuelve su objeto con estado breve y sin novedad.',
     'DIA DE LA SEMANA: cada bloque o marca 📅 indica la fecha real en que se escribieron esos mensajes. Interpreta palabras relativas ("hoy", "mañana", "el viernes") segun EL DIA DEL MENSAJE, no segun hoy. Ej: si un SABADO dice "mañana paso por el ramo", se refiere al DOMINGO.',
     'Para CADA chat devuelve SIEMPRE un objeto con:',
     '- estado (OBLIGATORIO, max 90 caracteres): que se hablo y en que quedo, INCLUYENDO conversaciones cerradas (ej: "cotizo girasoles; quedo de mandar foto" / "venta cerrada ramo $300; recoge domingo 11 am").',
     '- novedad (SOLO si hay algo pendiente para el equipo humano): { tipo, prioridad, resumen } donde tipo es una de:',
     `    ${TIPOS_NOVEDAD_PERMITIDOS}`,
+    '  PRIORIDADES DE ALERTA a detectar: (1) comprobante que prometio y falta → pago_pendiente; (2) ramo/arreglo por COTIZAR sin precio del equipo → cotizacion_pendiente; (3) arreglo PENDIENTE DE ENTREGA o recogida confirmada → entrega_programada; (4) duda que quedo SIN RESPONDER en el chat → duda_sin_responder.',
     '  Reglas de novedad: cotizacion_pendiente reportala aunque luego diga ok/gracias si nadie del equipo confirmo precio; entrega_programada SIEMPRE aunque la venta este cerrada; pago_pendiente si prometio comprobante y no hay confirmacion.',
     '  prioridad: baja|media|alta · resumen: max 90 caracteres, con fecha/hora cuando aplique ("recoge domingo 11 am").',
-    'REGLAS: Ignora SOLO chats de pura cortesia (saludo/gracias sin tema alguno). No inventes telefonos: usa EXACTAMENTE los de los bloques CHAT. Hasta 2 novedades por chat SOLO si son temas distintos (duplica el objeto). espanol mexicano.',
-    'RUIDO (DEC-089): si el ULTIMO mensaje es de equipo/flora y NO hay pedido pendiente (nombre, fecha/hora, pago, comprobante) ni entrega futura, OMITE ese chat por completo: ya fue atendido y sin respuesta significa que no le interesó. Tampoco incluyas chats inconclusos donde el cliente dejo de contestar sin pedir nada.',
-    `Responde SOLO JSON valido, sin markdown, formato: [{"telefono":"...","estado":"...","novedad":{"tipo":"cotizacion_pendiente","prioridad":"baja|media|alta","resumen":"..."}}]. El campo novedad se omite si no aplica. Si ningun chat tiene contenido responde [].`,
+    'SIN NOVEDAD (pero CON estado) cuando: el ULTIMO mensaje es de equipo/flora y no hay pedido pendiente ni entrega futura ("...esperando respuesta del cliente"), o el chat fue solo saludo/cortesia.',
+    'REGLAS: No inventes telefonos: usa EXACTAMENTE los de los bloques CHAT. Hasta 2 novedades por chat SOLO si son temas distintos (duplica el objeto). espanol mexicano.',
+    `Responde SOLO JSON valido, sin markdown, formato: [{"telefono":"...","estado":"...","novedad":{"tipo":"cotizacion_pendiente","prioridad":"baja|media|alta","resumen":"..."}}]. El campo novedad se omite si no aplica.`,
     '',
     bloques,
   ].join('\n')

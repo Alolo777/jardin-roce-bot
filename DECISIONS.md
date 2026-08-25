@@ -1851,6 +1851,25 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-091: Cobertura total garantizada — un objeto por chat, reconciliación y síntesis
+
+**Fecha:** 2026-08-25
+**Estado:** Aceptada
+
+**Motivo:** El usuario probó "Flora" y notó que la IA leía solo ALGUNOS chats: el prompt permitía omitir bloques y nadie verificaba la cobertura. Pidió leer TODOS los chats atendidos en 48 h clasificando si requieren avisar al admin (comprobante pendiente, cotización faltante, entrega pendiente, duda sin responder) y luego el detalle por chat bajo demanda.
+
+**Alternativas consideradas:**
+1. Confiar solo en el prompt reforzado — insuficiente (los LLM omiten bloques ocasionalmente).
+2. **Prompt de cobertura + reconciliación con reintento + síntesis determinística (elegida):** el prompt exige EXACTAMENTE un objeto por bloque CHAT (prohibido omitir); el servicio detecta faltantes comparando teléfonos de entrada vs salida, reintenta UNA vez solo con los faltantes, y lo que siga faltante se sintetiza como estado `(auto) última interacción: …` con warn en logs.
+
+**Resultado:** Cobertura 1:1 garantizada. Las 4 alertas prioritarias del usuario quedaron explícitas en el prompt (pago_pendiente / cotizacion_pendiente / entrega_programada / duda_sin_responder). Los chats equipo-último sin pendientes ahora SÍ aparecen (estado "…esperando respuesta del cliente") pero SIN novedad — registro sin ruido de alertas. Esto sustituye la omisión total de DEC-089 para estados (la novedad sigue filtrada igual).
+
+**Ventajas:** Nada se pierde silenciosamente; el admin distingue "atendido, esperando réplica" de "pendiente real"; costo acotado (reintento único ≤30 chats).
+
+**Desventajas:** Estados puede incluir chats triviales con nota "(auto)" cuando la IA falla dos veces en ese chat.
+
+---
+
 ## DEC-089: Filtro anti-ruido pre-IA + solo IA decide novedades + última foto siempre adjunta
 
 **Fecha:** 2026-08-23

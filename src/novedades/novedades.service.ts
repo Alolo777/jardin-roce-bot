@@ -209,32 +209,61 @@ export async function generarNovedadesDiarias(
     const chats = await obtenerTranscripciones(inicioIso, finIso, pedidosGlobales)
     console.log(`[novedades] ${chats.length} chat(s) relevantes en la ventana ${tipoVentana}`)
     logger.info('novedades', `${chats.length} chat(s) relevantes en la ventana (${tipoVentana})`)
-    for (let i = 0; i < chats.length; i += CHATS_POR_LOTE_IA) {
-      // BUG-023: tope de tiempo por lote. Si un proveedor se cuelga, seguimos
-      // con lo que haya para que el digest SIEMPRE se guarde.
-      const crudas: AnalisisChatItem[] | null = await Promise.race([
-        resumirNovedadesChats(chats.slice(i, i + CHATS_POR_LOTE_IA)),
-        new Promise<null>(resolve => setTimeout(() => resolve(null), 150_000)),
-      ])
-      if (!crudas) break // proveedor caído o lento: no insistir (protege cuota)
-      for (const item of crudas) {
-        const telefono = String(item.telefono ?? '').trim()
-        if (!telefono) continue
-        // DEC-086: estado de TODOS los chats (incluso cerrados)
-        if (item.estado) {
-          estadosChats.push({ telefono, estado: String(item.estado).slice(0, 120) })
-        }
-        // Novedad opcional del mismo item
-        if (item.novedad?.resumen) {
-          const n = normalizarNovedadIA({
-            telefono,
-            tipo: String(item.novedad.tipo ?? 'otro'),
-            resumen: String(item.novedad.resumen),
-            prioridad: item.novedad.prioridad,
-          })
-          if (n) novedadesIA.push(n)
+
+    // DEC-091: procesa lotes y devuelve items + chats que la IA NO clasificó
+    const procesarLotes = async (lista: TranscripcionChat[]): Promise<{ items: AnalisisChatItem[]; telefonosVistos: Set<string> }> => {
+      const items: AnalisisChatItem[] = []
+      const telefonosVistos = new Set<string>()
+      for (let i = 0; i < lista.length; i += CHATS_POR_LOTE_IA) {
+        const crudas: AnalisisChatItem[] | null = await Promise.race([
+          resumirNovedadesChats(lista.slice(i, i + CHATS_POR_LOTE_IA)),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 150_000)),
+        ])
+        if (!crudas) break
+        for (const item of crudas) {
+          const telefono = String(item.telefono ?? '').trim()
+          if (!telefono || telefonosVistos.has(telefono)) continue
+          telefonosVistos.add(telefono)
+          items.push(item)
         }
       }
+      return { items, telefonosVistos }
+    }
+
+    const { items, telefonosVistos } = await procesarLotes(chats)
+
+    // DEC-091: reconciliación — reintento UNA vez con los chats faltantes
+    let faltantes = chats.filter(c => !telefonosVistos.has(c.telefono))
+    if (faltantes.length > 0 && faltantes.length <= CHATS_POR_LOTE_IA) {
+      console.log(`[novedades] 🔁 Reconciliación: ${faltantes.length} chat(s) sin clasificar, reintentando…`)
+      const segundo = await procesarLotes(faltantes)
+      items.push(...segundo.items)
+      faltantes = faltantes.filter(c => !segundo.telefonosVistos.has(c.telefono))
+    }
+
+    for (const item of items) {
+      const telefono = String(item.telefono ?? '').trim()
+      if (!telefono) continue
+      if (item.estado) {
+        estadosChats.push({ telefono, estado: String(item.estado).slice(0, 120) })
+      }
+      if (item.novedad?.resumen) {
+        const n = normalizarNovedadIA({
+          telefono,
+          tipo: String(item.novedad.tipo ?? 'otro'),
+          resumen: String(item.novedad.resumen),
+          prioridad: item.novedad.prioridad,
+        })
+        if (n) novedadesIA.push(n)
+      }
+    }
+
+    // DEC-091: síntesis determinística para lo que la IA aún no devolvió
+    for (const chat of faltantes) {
+      const ultimaLinea = [...chat.lineas].reverse().find(l => /^\[.*?\] (cliente|equipo|flora|sistema):/.test(l)) ?? ''
+      const contenido = ultimaLinea.replace(/^\[.*?\]\s*/, '').slice(0, 80)
+      estadosChats.push({ telefono: chat.telefono, estado: `(auto) ${contenido || 'sin contenido legible'}` })
+      logger.warn('novedades', `Chat sin clasificación IA tras reintento: ${mascararTelefono(chat.telefono)} — sintetizado`)
     }
   } catch (err) {
     console.error('[novedades] Error en análisis IA:', err)

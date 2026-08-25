@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## 2026-08-25 (2)
+
+### Feat — Cobertura total: la IA clasifica TODOS los chats de 48 h, sin omisiones (DEC-091)
+
+**Pedido:** Que la IA lea TODOS los chats atendidos en las últimas 48 horas (no solo algunos), clasificando si requieren avisar al admin: comprobante pendiente, ramo por cotizar, arreglo pendiente de entrega o duda sin responder. El detalle específico queda para la pregunta por chat.
+
+**Implementación:**
+- **`lib/ai.ts`**: prompt exige EXACTAMENTE un objeto por bloque CHAT (prohibido omitir; trivial → estado breve sin novedad) + las 4 PRIORIDADES DE ALERTA explícitas. Chats equipo-último sin pendientes → estado "…esperando respuesta del cliente" SIN novedad.
+- **`src/novedades/novedades.service.ts`**: reconciliación post-lotes — detecta chats sin clasificar comparando teléfonos entrada/salida, reintenta UNA vez solo con faltantes, y sintetiza estado `(auto) última interacción…` con warn en logs lo que siga faltando.
+
+**Archivos modificados:** `lib/ai.ts`, `src/novedades/novedades.service.ts`, `DECISIONS.md`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; suite completa OK.
+
+**Impacto:** Compatible. Costo: +1 llamada extra solo cuando hay faltantes.
+
+**Rollback:** Sí.
+
+---
+
 ## 2026-08-25
 
 ### Fix — "Flora" respondía vacío habiendo 14 chats activos (BUG-028, DEC-090b)
