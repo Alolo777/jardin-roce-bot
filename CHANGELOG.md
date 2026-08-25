@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## 2026-08-23 (9)
+
+### Feat — Filtro anti-ruido pre-IA, solo-IA decide novedades, última foto adjunta en seguimiento (DEC-089)
+
+**Objetivo:** Resúmenes más limpios: fuera los chats inconclusos donde el EQUIPO habló último sin pedido pendiente (sin respuesta = no interesó). Solo la IA decide novedades. El seguimiento de un chat ahora SIEMPRE adjunta la última foto disponible además de la descripción.
+
+**Implementación:**
+- **`src/novedades/novedad.detector.ts`**: `esPedidoPendiente()` + `filtrarChatsRuido(chats, pedidos)` — descarta chats equipo-último sin pedido pendiente ANTES de gastar IA. Detector de reglas queda DORMIDO (exportado con tests, fuera del flujo).
+- **`src/novedades/types.ts`**: `TranscripcionChat.ultimoOrigen/ tienePedidoAbierto`.
+- **`src/novedades/novedades.service.ts`**: `obtenerTranscripciones` calcula flags y aplica filtro; `generarNovedadesDiarias` ya no suma reglas (solo IA); análisis profundo usa el mismo filtro; prompts reforzados (segunda capa anti-ruido); `consultarChatParaAdmin` devuelve `{ texto, ultimaFoto }`.
+- **`src/novedades/admin.handler.ts` + `bot.ts`**: nuevo `responderAdminFoto` (imagen al admin con demora anti-ban 3–6 s).
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `test:novedades` ampliado con casos de `filtrarChatsRuido`; suite completa OK.
+
+**Impacto:** Compatible. Menos llamadas IA (los ruidosos ni se analizan).
+
+**Rollback:** Sí.
+
+---
+
 ## 2026-08-23 (8)
 
 ### Feat — Análisis profundo por conversación con razonamiento temporal (DEC-088)

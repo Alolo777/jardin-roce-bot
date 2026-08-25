@@ -82,6 +82,10 @@ export interface AnalisisProfundo {
 export interface TranscripcionChat {
   telefono: string
   lineas: string[]
+  // DEC-089: quién escribió el ÚLTIMO mensaje ('cliente' | 'equipo' | 'flora' | 'sistema')
+  ultimoOrigen?: string
+  // DEC-089: true si el chat tiene pedido pendiente (datos/pago/apartado)
+  tienePedidoAbierto?: boolean
 }
 
 // Resultado crudo que devuelve el LLM por chat

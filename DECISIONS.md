@@ -1851,4 +1851,24 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-089: Filtro anti-ruido pre-IA + solo IA decide novedades + última foto siempre adjunta
+
+**Fecha:** 2026-08-23
+**Estado:** Aceptada
+
+**Motivo:** El resumen se saturaba con chats inconclusos que ya no se atienden. Regla del usuario: si el EQUIPO fue el último en escribir y NO hay pedido pendiente, el chat ya fue atendido — sin respuesta del cliente = no interesó → debe omitirse por completo (novedades Y estados). Excepción: pedido pendiente de datos/pago/comprobante o apartado sigue siendo relevante aunque el equipo haya hablado último.
+
+**Alternativas consideradas:**
+1. Dejar que la IA decida el filtro con reglas en prompt (insuficiente sola: gastaba llamadas IA analizando ruido).
+2. **Pre-filtro determinístico ANTES de la IA (elegida):** cada transcripción lleva `ultimoOrigen` y `tienePedidoAbierto`; `filtrarChatsRuido()` descarta los ruidosos ANTES de gastar llamadas — más ágil y barato. Regla también reforzada en ambos prompts como segunda capa.
+3. Mantener detector de reglas sumando novedades — eliminado del flujo por petición del usuario: SOLO la IA decide novedades; las funciones quedan dormidas con sus tests.
+
+**Resultado:** Digests más limpios y cortos; menos llamadas IA (los ruidosos ni se analizan); seguimiento de un chat adjunta SIEMPRE la última foto disponible (`RespuestaAdminChat.ultimaFoto` → `responderAdminFoto` en bot.ts, con demora anti-ban propia) además de la descripción de la visión.
+
+**Ventajas:** Menos tokens/costo; resúmenes accionables; foto física + descripción juntos.
+
+**Desventajas:** Si Baileys aún no mapeó un LID→teléfono, un pedido pendiente podría no rescatarese un chat equipo-último (mitigable: el cliente suele escribir de nuevo).
+
+---
+
 

@@ -1502,6 +1502,14 @@ const messageEntry = createMessageEntry({
       try { await sock?.sendPresenceUpdate('paused', jid) } catch { /* no fatal */ }
       await sock?.sendMessage(jid, { text: texto })
     },
+    // DEC-089: adjuntar la última foto del chat al seguimiento del admin
+    responderAdminFoto: async (jid: string, base64: string, mimetype?: string, caption?: string) => {
+      try { await sock?.sendPresenceUpdate('composing', jid) } catch { /* no fatal */ }
+      await new Promise(r => setTimeout(r, 3000 + Math.floor(Math.random() * 3000)))
+      try { await sock?.sendPresenceUpdate('paused', jid) } catch { /* no fatal */ }
+      const buf = Buffer.from(base64, 'base64')
+      await sock?.sendMessage(jid, { image: buf, caption, mimetype: mimetype || 'image/jpeg' })
+    },
   }),
 })
 cargarEstado().then(() => {

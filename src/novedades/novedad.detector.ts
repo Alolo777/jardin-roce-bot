@@ -5,7 +5,7 @@
 
 import { EstadoPedido, Prioridad, TipoCaso, type Caso, type PedidoActual } from '../models/types'
 import { variantesTelefono } from '../conversation/conversation.service'
-import { TipoNovedad, type Novedad, type NovedadIA } from './types'
+import { TipoNovedad, type Novedad, type NovedadIA, type TranscripcionChat } from './types'
 
 export interface PedidoConCliente {
   clienteId: string
@@ -106,6 +106,40 @@ export function coincideAdminPorVariantes(numeroOJid: string, admins: string[]):
   const variantesMensaje = new Set(variantesTelefono(String(numeroOJid ?? '')))
   if (variantesMensaje.size === 0) return false
   return admins.some(admin => variantesTelefono(admin).some(v => variantesMensaje.has(v)))
+}
+
+// ─── Filtro de ruido (DEC-089) ───────────────────────────────────
+// Regla del usuario: si el ÚLTIMO mensaje fue del EQUIPO y no hay pedido
+// pendiente, el chat ya fue atendido — sin respuesta = no interesó. Se OMITE
+// del resumen (novedades Y estados) para no saturar. Los chats donde el
+// CLIENTE habló último siempre pasan; y los que tienen pedido pendiente
+// (esperando nombre/fecha/pago o apartados) pasan aunque el equipo haya
+// hablado último.
+
+export function esPedidoPendiente(pedido: PedidoActual): boolean {
+  const flujo = pedido.estadoFlujo ?? ''
+  if (FLUJOS_ATASCADOS[flujo]) return true
+  return pedido.estado === EstadoPedido.APARTADO || pedido.estado === EstadoPedido.EN_PRODUCCION
+}
+
+export function filtrarChatsRuido(
+  chats: TranscripcionChat[],
+  pedidos: PedidoConCliente[]
+): TranscripcionChat[] {
+  // Teléfonos con pedido pendiente (todas las variantes)
+  const pendientes = new Set<string>()
+  for (const { pedido } of pedidos) {
+    if (!esPedidoPendiente(pedido)) continue
+    const tel = String(pedido.telefono ?? '')
+    if (!tel) continue
+    for (const v of variantesTelefono(tel)) pendientes.add(v)
+  }
+  return chats.filter(c => {
+    if (c.ultimoOrigen === 'cliente') return true
+    if (c.tienePedidoAbierto) return true
+    const variantes = variantesTelefono(c.telefono)
+    return variantes.some(v => pendientes.has(v))
+  })
 }
 
 // ─── Utilidades de presentación y detección de intención ────────────────────

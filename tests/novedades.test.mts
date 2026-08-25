@@ -6,9 +6,11 @@ import {
   fusionarNovedades,
   coincideAdminPorVariantes,
   filtrarNovedadesDeChatsActivos,
+  filtrarChatsRuido,
   mascararTelefono,
   extraerUltimos4,
 } from '../src/novedades/novedad.detector.ts'
+import type { TranscripcionChat } from '../src/novedades/types.ts'
 import { construirMensajeNovedades, ventanaDiaAnteriorCdmx } from '../src/novedades/novedades.service.ts'
 import { TipoNovedad, type Novedad, type NovedadesDiarias } from '../src/novedades/types.ts'
 import { EstadoPedido, Prioridad, TipoCaso, type Caso, type PedidoActual } from '../src/models/types.ts'
@@ -98,6 +100,26 @@ const filtradas = filtrarNovedadesDeChatsActivos([regla, iaOtra, conViejo], acti
 assert.equal(filtradas.length, 2, 'El chat sin actividad en la ventana se omite')
 assert.ok(!filtradas.some(n => n.telefono === '+521888888888'), 'Chat antiguo excluido')
 assert.equal(filtrarNovedadesDeChatsActivos([regla], []).length, 0, 'Sin chats activos no hay reglas')
+
+// ─── filtrarChatsRuido (DEC-089) ─────────────────────────────────
+// Equipo habló último sin pedido pendiente → se omite.
+// Cliente habló último → pasa. Pedido pendiente → pasa aunque el equipo haya hablado último.
+
+const chatRuido: TranscripcionChat = { telefono: '+521111111111', lineas: [], ultimoOrigen: 'equipo', tienePedidoAbierto: false }
+const chatClienteUltimo: TranscripcionChat = { telefono: '+521222222222', lineas: [], ultimoOrigen: 'cliente' }
+const chatConPedido: TranscripcionChat = { telefono: '+521333333333', lineas: [], ultimoOrigen: 'equipo', tienePedidoAbierto: true }
+
+const filtradosRuido = filtrarChatsRuido(
+  [chatRuido, chatClienteUltimo, chatConPedido],
+  [{ clienteId: 'x', pedido: { telefono: '+521333333333', estadoFlujo: 'esperando_nombre' } }]
+)
+assert.equal(filtradosRuido.length, 2, 'El chat ruidoso (equipo último, sin pedido) se omite')
+assert.ok(!filtradosRuido.some(c => c.telefono === '+521111111111'), 'Confirmado: ruido fuera')
+assert.ok(filtradosRuido.some(c => c.telefono === '+521333333333'), 'Pedido pendiente se rescata aunque equipo habló último')
+
+// Sin pedidos listados, solo pasan los de cliente-último o flag abierto
+const soloClientes = filtrarChatsRuido([chatRuido, chatClienteUltimo], [])
+assert.equal(soloClientes.length, 1, 'Sin pedidos, equipo-último se omite')
 
 // ─── mascararTelefono / extraerUltimos4 (BUG-026) ────────────────
 

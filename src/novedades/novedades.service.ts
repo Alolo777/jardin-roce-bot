@@ -12,11 +12,10 @@ import { supabaseAdmin } from '../../lib/supabase'
 import { resumirNovedadesChats, responderConsultaAdmin, analizarChatDetalle, type ChatParaResumen, type AnalisisChatItem, type DetalleChatIA } from '../../lib/ai'
 import { logger } from '../../lib/logger.service'
 import { listarPedidosActivosGlobales } from '../pedidos/pedido.service'
-import { listarCasosRequierenAtencion } from '../casos/caso.service'
 import { enviarTextoANumeros } from '../whatsapp/notification.service'
 import { resolverLidInverso } from '../whatsapp/contact.service'
 import { variantesTelefono } from '../conversation/conversation.service'
-import { detectarCasosAtencion, detectarPedidosAtascos, extraerUltimos4, filtrarNovedadesDeChatsActivos, fusionarNovedades, mascararTelefono, normalizarNovedadIA, coincideAdminPorVariantes } from './novedad.detector'
+import { extraerUltimos4, filtrarChatsRuido, mascararTelefono, normalizarNovedadIA, coincideAdminPorVariantes, type PedidoConCliente } from './novedad.detector'
 import { cargarNovedades, guardarNovedades, obtenerAdminsBot } from './novedades.repository'
 import { obtenerImagenesPorTelefono } from './media-chat.repository'
 import type { ImagenVisionAdmin } from '../../lib/ai'
@@ -91,7 +90,12 @@ export function ventanaRecienteCdmx(): { inicioIso: string; finIso: string } {
 
 // ─── Transcripciones del período analizado ───────────────────────
 
-async function obtenerTranscripciones(inicioIso: string, finIso: string, limiteMensajes: number = LIMITE_MENSAJES_CONSULTA): Promise<TranscripcionChat[]> {
+async function obtenerTranscripciones(
+  inicioIso: string,
+  finIso: string,
+  pedidos: PedidoConCliente[] = [],
+  limiteMensajes: number = LIMITE_MENSAJES_CONSULTA
+): Promise<TranscripcionChat[]> {
   const { data, error } = await supabaseAdmin
     .from('historial_chat')
     .select('cliente_id, rol, contenido, creado_en, origen')
@@ -129,10 +133,18 @@ async function obtenerTranscripciones(inicioIso: string, finIso: string, limiteM
       const real = await resolverLidInverso(telefono)
       if (real && real.replace(/\D/g, '') !== telefono.replace(/\D/g, '')) telefono = real
     } catch { /* sin claves o sin mapeo: se usa el teléfono guardado */ }
-    const lineas = mensajesALineas(mensajes.slice(-MENSAJES_POR_CHAT))
-    chats.push({ telefono, lineas })
+    const recortados = mensajes.slice(-MENSAJES_POR_CHAT)
+    const lineas = mensajesALineas(recortados)
+    // DEC-089: origen del último mensaje + si tiene pedido pendiente
+    const ultimo = recortados[recortados.length - 1]
+    const ultimoOrigen = ultimo
+      ? (ultimo.origen === 'equipo' ? 'equipo' : ultimo.origen === 'sistema' ? 'sistema' : ultimo.rol === 'user' ? 'cliente' : 'flora')
+      : undefined
+    chats.push({ telefono, lineas, ultimoOrigen })
   }
-  return chats
+
+  // DEC-089: omitir chats ruidosos (equipo habló último sin pedido pendiente)
+  return filtrarChatsRuido(chats, pedidos)
 }
 
 // ─── Generación del digest (3 am) ────────────────────────────────
@@ -158,16 +170,16 @@ export async function generarNovedadesDiarias(
   console.log(`[novedades] 🌙 Generando digest (${tipoVentana})...`)
   logger.info('novedades', `Generando digest (${tipoVentana}, forzado=${!!opciones.forzar})`)
 
-  // BUG-025: solo chats con actividad DENTRO de la ventana analizada.
-  // Los pedidos/casos antiguos que no escribieron en este período se omiten.
+  // DEC-089: pre-filtro de ruido ANTES de gastar IA — chats donde el equipo
+  // habló último sin pedido pendiente ni siquiera se analizan.
+  const pedidosGlobales = listarPedidosActivosGlobales()
+
   const novedadesIA: Novedad[] = []
   const estadosChats: EstadoChatDia[] = []
-  let telefonosActivos: string[] = []
   try {
-    const chats = await obtenerTranscripciones(inicioIso, finIso)
-    telefonosActivos = chats.map(c => c.telefono)
-    console.log(`[novedades] ${chats.length} chat(s) activo(s) en la ventana ${tipoVentana}`)
-    logger.info('novedades', `${chats.length} chat(s) activo(s) en la ventana (${tipoVentana})`)
+    const chats = await obtenerTranscripciones(inicioIso, finIso, pedidosGlobales)
+    console.log(`[novedades] ${chats.length} chat(s) relevantes en la ventana ${tipoVentana}`)
+    logger.info('novedades', `${chats.length} chat(s) relevantes en la ventana (${tipoVentana})`)
     for (let i = 0; i < chats.length; i += CHATS_POR_LOTE_IA) {
       // BUG-023: tope de tiempo por lote. Si un proveedor se cuelga, seguimos
       // con lo que haya para que el digest SIEMPRE se guarde.
@@ -196,19 +208,13 @@ export async function generarNovedadesDiarias(
       }
     }
   } catch (err) {
-    console.error('[novedades] Error en análisis IA (se usan solo reglas):', err)
-    logger.warn('novedades', `Análisis IA falló, solo reglas: ${String(err)}`)
+    console.error('[novedades] Error en análisis IA:', err)
+    logger.warn('novedades', `Análisis IA falló: ${String(err)}`)
   }
 
-  const todasLasReglas: Novedad[] = [
-    ...detectarPedidosAtascos(listarPedidosActivosGlobales()),
-    ...detectarCasosAtencion(listarCasosRequierenAtencion()),
-  ]
-  const reglas = telefonosActivos.length > 0
-    ? filtrarNovedadesDeChatsActivos(todasLasReglas, telefonosActivos)
-    : []
-
-  const novedades = fusionarNovedades(reglas, novedadesIA)
+  // DEC-089: el detector de reglas queda DORMIDO — solo la IA decide qué es
+  // novedad (ver DEC-084/DEC-089).
+  const novedades = novedadesIA
   // BUG-026: los administradores son internos — si alguno disparó una novedad
   // (p. ej. mandó una foto de prueba al bot), se omite del digest.
   const admins = await obtenerAdminsBot()
@@ -356,11 +362,18 @@ function coincideEnVariantes(numero: string, lista: string[]): boolean {
   return lista.some(t => variantesTelefono(t).some(v => variantes.has(v)))
 }
 
-export async function consultarChatParaAdmin(pregunta: string): Promise<string> {
+export interface RespuestaAdminChat {
+  texto: string
+  // DEC-089: última foto disponible del chat para adjuntar al admin
+  ultimaFoto?: { base64: string; mimetype?: string; caption?: string }
+}
+
+export async function consultarChatParaAdmin(pregunta: string): Promise<RespuestaAdminChat> {
+  const vacio = (texto: string): RespuestaAdminChat => ({ texto })
   try {
     const ult4 = extraerUltimos4(pregunta)
     const nombres = ult4 ? [] : candidatosNombre(pregunta)
-    if (!ult4 && nombres.length === 0) return ''
+    if (!ult4 && nombres.length === 0) return vacio('')
 
     // Cargar clientes y resolver número real (cache LID→PN de Baileys)
     const { data: clientesRows } = await supabaseAdmin.from('clientes').select('id, telefono').limit(2000)
@@ -396,7 +409,7 @@ export async function consultarChatParaAdmin(pregunta: string): Promise<string> 
     }
 
     if (candidatas.length === 0) {
-      return '🤔 No encontré un chat que coincida. Prueba con otros 4 dígitos del número o el nombre del pedido.'
+      return vacio('🤔 No encontré un chat que coincida. Prueba con otros 4 dígitos del número o el nombre del pedido.')
     }
     candidatas = candidatas.slice(0, 3)
 
@@ -414,10 +427,10 @@ export async function consultarChatParaAdmin(pregunta: string): Promise<string> 
       bloques.push({ telefono: mascararTelefono(cand.real), lineas })
     }
 
-    if (bloques.length === 0) return '🤔 Encontré el chat pero no tiene mensajes guardados recientes.'
+    if (bloques.length === 0) return vacio('🤔 Encontré el chat pero no tiene mensajes guardados recientes.')
 
-    // DEC-085: adjuntar hasta 2 imágenes recientes del chat (dirección,
-    // comprobante, referencia de arreglo...) para que la visión las describa.
+    // DEC-085/089: hasta 2 imágenes para visión + la MÁS RECIENTE se adjunta
+    // al admin en WhatsApp (además de la descripción de la IA).
     let imagenes: ImagenVisionAdmin[] = []
     try {
       imagenes = await obtenerImagenesPorTelefono(
@@ -430,12 +443,15 @@ export async function consultarChatParaAdmin(pregunta: string): Promise<string> 
     } catch { /* sin imágenes: se responde solo con texto */ }
 
     const respuesta = await responderConsultaAdmin(pregunta, bloques, imagenes)
-    if (!respuesta) return '🌸 No pude analizar el chat ahorita. Intenta de nuevo en un momento.'
+    if (!respuesta) return vacio('🌸 No pude analizar el chat ahorita. Intenta de nuevo en un momento.')
     logger.info('novedades', `Consulta de admin respondida (${bloques.length} chat(s), ${imagenes.length} imagen(es))`)
-    return respuesta
+    const ultimaFoto = imagenes[0]
+      ? { base64: imagenes[0].base64, mimetype: imagenes[0].mimetype, caption: imagenes[0].caption }
+      : undefined
+    return { texto: respuesta, ultimaFoto }
   } catch (err) {
     console.error('[novedades] Error en consulta de admin:', err)
-    return ''
+    return vacio('')
   }
 }
 
@@ -459,7 +475,7 @@ export async function ejecutarAnalisisProfundo(
   analisisProfundoEnCurso = true
   try {
     const { inicioIso, finIso } = ventana === 'reciente' ? ventanaRecienteCdmx() : ventanaDiaAnteriorCdmx()
-    const chats = await obtenerTranscripciones(inicioIso, finIso)
+    const chats = await obtenerTranscripciones(inicioIso, finIso, listarPedidosActivosGlobales())
     if (chats.length === 0) {
       logger.info('novedades', 'Análisis profundo: sin chats en la ventana')
       return null

@@ -27,6 +27,8 @@ let regeneracionEnCurso = false
 export interface AdminHandlerDeps {
   // Envía un texto de vuelta al chat del administrador (lo provee bot.ts con el sock)
   responderAdmin: (jid: string, texto: string) => Promise<void>
+  // DEC-089: adjunta una imagen al chat del admin (opcional)
+  responderAdminFoto?: (jid: string, base64: string, mimetype?: string, caption?: string) => Promise<void>
 }
 
 export function crearAdminHandler(deps: AdminHandlerDeps) {
@@ -71,8 +73,17 @@ export function crearAdminHandler(deps: AdminHandlerDeps) {
       const quiereDetalle = !!ult4 || (!RE_NOVEDADES.test(texto) && texto.split(/\s+/).length >= 3)
       if (quiereDetalle) {
         const detalle = await consultarChatParaAdmin(texto)
-        if (detalle) {
-          await deps.responderAdmin(remoteJid, detalle)
+        if (detalle.texto) {
+          await deps.responderAdmin(remoteJid, detalle.texto)
+          // DEC-089: adjuntar SIEMPRE la última foto disponible del chat
+          if (detalle.ultimaFoto && deps.responderAdminFoto) {
+            await deps.responderAdminFoto(
+              remoteJid,
+              detalle.ultimaFoto.base64,
+              detalle.ultimaFoto.mimetype,
+              detalle.ultimaFoto.caption
+            ).catch(err => console.warn('[novedades] Error adjuntando foto al admin:', err))
+          }
           return
         }
         await deps.responderAdmin(remoteJid, `🌸 No pude identificar ese chat.\n\n${AYUDA}`)
