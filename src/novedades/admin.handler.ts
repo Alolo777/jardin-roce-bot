@@ -15,11 +15,15 @@ const AYUDA = [
   '🌸 Te puedo ayudar así:',
   '• Escribe "novedades" → resumen de pendientes de hoy y ayer.',
   '• Escribe "Flora" → actualiza TODO y te manda el resumen fresco.',
+  '• Escribe "habla" → activa Flora para que responda clientes.',
+  '• Escribe "duerme" → pausa Flora para que no responda.',
   '• O pregunta por un chat: "¿qué pasó con el 7890?" o "¿y Lizet?".',
 ].join('\n')
 
 const RE_NOVEDADES = /novedad|pendientes?\b|resumen|que hay|qué hay|como van|cómo van|estado de|reporte/i
 const RE_FLORA = /\bflora\b/i
+const RE_HABLA = /\bhabla\b/i
+const RE_DUERME = /\bduerme\b/i
 
 // Guardia anti-doble-disparo si el admin manda varios "Flora" seguidos
 let regeneracionEnCurso = false
@@ -29,12 +33,26 @@ export interface AdminHandlerDeps {
   responderAdmin: (jid: string, texto: string) => Promise<void>
   // DEC-089: adjunta una imagen al chat del admin (opcional)
   responderAdminFoto?: (jid: string, base64: string, mimetype?: string, caption?: string) => Promise<void>
+  // Activar/desactivar Flora desde WhatsApp
+  setBotPausado?: (valor: boolean) => void
 }
 
 export function crearAdminHandler(deps: AdminHandlerDeps) {
   return async function procesarMensajeAdmin(remoteJid: string, body: string): Promise<void> {
     const texto = body.trim()
     try {
+      // Comandos para activar/desactivar Flora desde WhatsApp
+      if (RE_DUERME.test(texto) && deps.setBotPausado) {
+        deps.setBotPausado(true)
+        await deps.responderAdmin(remoteJid, 'Flora dormida 💤')
+        return
+      }
+      if (RE_HABLA.test(texto) && deps.setBotPausado) {
+        deps.setBotPausado(false)
+        await deps.responderAdmin(remoteJid, 'Flora activa 🌸')
+        return
+      }
+
       // DEC-087: "Flora" en el mensaje = regenerar todo (como el botón del
       // dashboard) y mandar el resumen fresco de las últimas 48 horas.
       if (RE_FLORA.test(texto)) {

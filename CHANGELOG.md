@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## 2026-08-30
+
+### Feat — Comandos "habla"/"duerme" y resumen diario filtra ignorados/empleados
+
+**Pedido:** 
+1. Admins pueden activar/desactivar Flora desde WhatsApp con comandos "habla" y "duerme"
+2. El resumen diario (9am) debe ignorar números silenciados y de empleados en el conteo de "Clientes atendidos hoy"
+
+**Implementación:**
+- **`src/novedades/admin.handler.ts`**: nuevos regex `RE_HABLA` y `RE_DUERME`; interfaz `AdminHandlerDeps` con `setBotPausado?`; manejo de comandos al inicio de `procesarMensajeAdmin` con respuesta simple ("Flora dormida 💤" / "Flora activa 🌸"); ayuda actualizada.
+- **`bot.ts`**: nueva función export `setBotPausado(valor)` para controlar el estado de pausa; `obtenerClientesAtendidosHoy()` ahora carga ignorados (`cargarIgnorados`) y empleados (`obtenerEmpleadosANotificar`), consulta clientes únicos del historial y filtra los que coincidan con esas listas; se pasa `setBotPausado` al admin handler.
+
+**Archivos modificados:** `bot.ts`, `src/novedades/admin.handler.ts`, `tests/admin-commands.test.mts`, `package.json`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `test:admin-commands` OK (7 asserts: duerme, Duerme, habla, Habla, con texto extra, case insensitive, texto normal).
+
+**Impacto:** Compatible. Solo agrega funcionalidad; no cambia comportamiento existente.
+
+**Rollback:** Sí.
+
+---
+
 ## 2026-08-25 (2)
 
 ### Feat — Cobertura total: la IA clasifica TODOS los chats de 48 h, sin omisiones (DEC-091)

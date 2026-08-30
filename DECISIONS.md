@@ -1921,4 +1921,24 @@ Integrado en `message-handler.ts`: tras `getAIResponse` y antes de enviar al cli
 
 ---
 
+## DEC-091: Comandos WhatsApp "habla"/"duerme" y resumen diario filtra ignorados/empleados
 
+**Fecha:** 2026-08-30
+**Estado:** Aceptada
+
+**Motivo:** Los admins necesitan controlar Flora directamente desde WhatsApp sin abrir el dashboard. El resumen diario contaba clientes ignorados y empleados como "clientes atendidos", distorsionando las métricas.
+
+**Alternativas consideradas:**
+1. Comandos por dashboard únicamente — descartada: los admins están en WhatsApp y el dashboard no siempre está abierto.
+2. Solo filtrar en el resumen de Telegram — insuficiente: el conteo de clientes también se muestra en el dashboard.
+3. Filtrar a nivel de entrada de mensajes — descartada: los mensajes de empleados/ignorados aún se procesan para otros fines (logs, historial).
+
+**Resultado:**
+- `src/novedades/admin.handler.ts`: comandos "habla" y "duerme" detectados con regex, ejecutan `setBotPausado()` del bot, respuesta simple.
+- `bot.ts`: `obtenerClientesAtendidosHoy()` consulta clientes únicos del historial, cruza con tabla `clientes` para obtener teléfonos, filtra contra `cargarIgnorados()` y `obtenerEmpleadosANotificar()`.
+
+**Ventajas:** Control inmediato desde WhatsApp. Métricas más precisas. Sin dependencia del dashboard.
+
+**Desventajas:** Los comandos son texto libre (un admin podría escribir "duerme" accidentalmente). mitigado: el admin handler solo procesa mensajes de números autorizados.
+
+---

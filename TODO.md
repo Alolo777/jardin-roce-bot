@@ -25,6 +25,7 @@
 **Nota 2026-08-10:** Flora se presenta como asistente virtual y atiende fuera de horario. Fotos/media recibidas con el negocio cerrado se encolan en `FOTOS_PENDIENTES_APERTURA` (bot-state.ts), se persisten en `bot_cache` (DEC-081) y se reenvían al equipo automáticamente a la hora exacta de apertura (`programarFlushApertura()` en bot.ts) + red de seguridad cada 5 min. DEC-080/DEC-081.
 **Nota 2026-08-14:** Historial con `origen` estructurado (DEC-082): `historial_chat.origen` distingue `cliente | flora | equipo | sistema`. Las respuestas del equipo se leen desde Supabase (`obtenerUltimosMensajesEquipo`) y se inyectan como `[RESPUESTAS VERIFICADAS DEL EQUIPO]` con precio confirmado; el historial enviado al LLM se etiqueta con el origen real. Pendiente: aplicar `ALTER TABLE historial_chat ADD COLUMN IF NOT EXISTS origen TEXT;` en producción.
 **Nota 2026-08-21:** Motor de Novedades (DEC-084): digest diario a las 3 am (reglas backend + 1 pasada IA sobre últimos 50 msg/chat del día anterior), guardado en `configuracion_bot` clave `novedades_diarias`; envío proactivo a admins a las 6 am; respuesta bajo demanda sin LLM cuando un admin de la lista `admins_bot` escribe al bot. Nueva sección `/admin/administradores` en el dashboard.
+**Nota 2026-08-30:** Comandos WhatsApp "habla"/"duerme" para activar/desactivar Flora desde el chat del admin (DEC-091). Resumen diario (9am) ahora filtra números ignorados y de empleados del conteo de "Clientes atendidos hoy".
 
 ## Errores de la Versión Anterior
 

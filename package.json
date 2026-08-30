@@ -19,6 +19,7 @@
     "test:template": "tsx --env-file=.env.test tests/template-payment.test.mts",
     "test:novedades": "tsx --env-file=.env.test tests/novedades.test.mts",
     "test:poda": "tsx --env-file=.env.test tests/poda.test.mts",
+    "test:admin-commands": "tsx --env-file=.env.test tests/admin-commands.test.mts",
     "check:apis": "tsx --env-file=.env.local scripts/check-apis.mts",
     "start": "next start",
     "bot": "tsx --env-file=.env.local bot.ts",

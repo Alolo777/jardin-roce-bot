@@ -59,7 +59,7 @@ import { createMessageEntry, type MessageEntryDeps } from './src/whatsapp/messag
 import { construirContextoPrompt } from './src/openai/prompt.builder'
 import { cargarIgnorados, MENSAJES_RESCATADOS } from './src/whatsapp/preferences.service'
 import { obtenerNumeroReal, setBaileysKeys, limpiarCacheNumeros } from './src/whatsapp/contact.service'
-import { notificarEmpleadosWhatsApp, enviarFotoEmpleadosWhatsApp } from './src/whatsapp/notification.service'
+import { notificarEmpleadosWhatsApp, enviarFotoEmpleadosWhatsApp, obtenerEmpleadosANotificar } from './src/whatsapp/notification.service'
 import { detectarCancelacion, detectarQueja, detectarEvento, detectarInteresCompra } from './src/decision/intent-detector'
 import { FRUSTRACION_NOTIFICADA, ATENCION_HUMANA_NOTIFICADA, INTERES_COMPRA_NOTIFICADO, RECLAMACION_NOTIFICADA, ENVIO_NOTIFICADO, FOTOS_NOTIFICADO, FOTOS_DISPONIBLES_RECIENTES, ALERTAS_DEDUP, ULTIMA_INTERVENCION_HUMANA, RATE_TIMESTAMPS, FOTOS_DISPONIBLES_TTL_MS, INTERVENCION_HUMANA_TTL_MS, limpiarCachesEstado, debeNotificarAtencionHumana, debeNotificarReclamacion, debeEnviarAlertaDedup, registrarIntervencionHumana, obtenerIntervencionHumanaReciente, extraerPrecioRespuesta, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, RATE_AVISADOS, estaRateLimited, obtenerFotosPendientesApertura, limpiarFotosPendientesApertura, setOnFotosPendientesCambiaron } from './src/whatsapp/bot-state'
 import { cargarEstado, guardarEstado, iniciarPersistenciaPeriodica, limpiarClavesVacias } from './src/whatsapp/bot-state-persistence'
@@ -99,6 +99,11 @@ export async function verificarSiBotPausado(): Promise<boolean> {
   finally { verificacionEnCurso = false }
 
   return BOT_PAUSADO
+}
+
+export function setBotPausado(valor: boolean): void {
+  BOT_PAUSADO = valor
+  ultimaVerifPausa = Date.now()
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -467,14 +472,41 @@ async function obtenerClientesAtendidosHoy(): Promise<number> {
   try {
     const { inicio, fin } = fechaInicioFinCDMX()
 
-    const { count, error } = await supabaseAdmin
+    // Obtener números ignorados y de empleados para filtrar
+    const ignorados = await cargarIgnorados()
+    const empleados = await obtenerEmpleadosANotificar()
+    const numerosFiltrar = [...new Set([...ignorados, ...empleados])]
+
+    // Consultar clientes únicos que interactuaron hoy
+    const { data, error } = await supabaseAdmin
       .from('historial_chat')
-      .select('*', { count: 'exact', head: true })
+      .select('cliente_id')
       .gte('creado_en', inicio.toISOString())
       .lte('creado_en', fin.toISOString())
 
     if (error) throw error
-    return count ?? 0
+    if (!data || data.length === 0) return 0
+
+    // Obtener IDs únicos de clientes
+    const clienteIdsUnicos = [...new Set(data.map(d => d.cliente_id))]
+
+    if (clienteIdsUnicos.length === 0) return 0
+
+    // Obtener teléfonos de estos clientes
+    const { data: clientesData, error: clientesError } = await supabaseAdmin
+      .from('clientes')
+      .select('id, telefono')
+      .in('id', clienteIdsUnicos)
+
+    if (clientesError) throw clientesError
+
+    // Filtrar clientes que no estén en la lista de ignorados/empleados
+    const clientesValidos = (clientesData || []).filter(c => {
+      const telefono = c.telefono?.replace(/\D/g, '') || ''
+      return !numerosFiltrar.some(n => n.replace(/\D/g, '') === telefono)
+    })
+
+    return clientesValidos.length
   } catch (err) {
     console.error('[bot] Error obteniendo clientes hoy:', err)
     return 0
@@ -1527,6 +1559,7 @@ const messageEntry = createMessageEntry({
       const buf = Buffer.from(base64, 'base64')
       await sock?.sendMessage(jid, { image: buf, caption, mimetype: mimetype || 'image/jpeg' })
     },
+    setBotPausado: (valor: boolean) => setBotPausado(valor),
   }),
 })
 cargarEstado().then(() => {
