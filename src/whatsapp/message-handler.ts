@@ -557,6 +557,30 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
           `Si el equipo dio un precio, úsalo como confirmado y no lo pidas de nuevo.`
       }
 
+      // Respaldo para bot apagado días: si las capas de 24h no trajeron nada,
+      // se busca hasta 7 días atrás en Supabase (misma clasificación
+      // origen='equipo' o prefijo [Agente:]). Cubre el caso donde el equipo
+      // atendió por teléfono con el bot apagado y el pedido en memoria está
+      // vacío: el precio/dirección confirmados solo viven en el historial.
+      if (!equipoRespondio && mensajesEquipo.length === 0) {
+        const respaldoEquipo = await obtenerUltimosMensajesEquipo(telefono, 7 * 24, 10).catch(() => [])
+        if (respaldoEquipo.length > 0) {
+          const lineas = respaldoEquipo.map(m => {
+            const textoAgente = m.contenido.replace(/^\[Agente:\s*|\]$/g, '').trim()
+            const precio = extraerPrecioRespuesta(textoAgente)
+            const hora = m.creadoEn ? formatearFechaHoraMensaje(m.creadoEn) : ''
+            return `- [${hora}]${precio ? ` $${precio} (precio confirmado por el equipo):` : ''} "${textoAgente.replace(/"/g, "'")}"`
+          })
+          contextoExtra +=
+            `\n\n[HISTORIAL VERIFICADO DEL EQUIPO — DÍAS PREVIOS] ` +
+            `El equipo humano atendió este chat en días anteriores (el bot estuvo apagado, por eso el pedido actual está vacío). ` +
+            `Estos mensajes son respuestas ya confirmadas, NO requieren reconfirmación:\n` +
+            `${lineas.join('\n')}\n` +
+            `INSTRUCCIÓN: NO pidas de nuevo la dirección, el envío, la cotización ni el precio que el equipo ya dio. ` +
+            `Úsalos como datos confirmados y continúa desde ahí. Si falta algo que el equipo NO confirmó, pregunta solo eso.`
+        }
+      }
+
       contextoExtra +=
         `\n\n[DECISION] Intención: ${decision.intencion} | Prioridad: ${decision.prioridad} | ` +
         `Requiere humano: ${decision.requiereHumano} | Cambio de tema: ${decision.esCambioTema}`

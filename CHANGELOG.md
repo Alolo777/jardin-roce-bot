@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## 2026-09-03
+
+### Fix — Fallback "Historial verificado del equipo (días previos)" + tono Flora tras revisión de hilos reales
+
+**Problema:** Con el bot apagado días, el equipo atendía por teléfono y al reencender Flora pedía de nuevo dirección/envío/cotización ya confirmados. Causas: (1) `[RESPUESTAS VERIFICADAS]` solo mira 24h (`obtenerUltimosMensajesEquipo(telefono, 24, 3)`); (2) `[EL EQUIPO HUMANO RESPONDIÓ]` solo mira el último assistant de 30 turnos (se pierde tras 1 respuesta de Flora); (3) `procesarMensajeEquipo` nunca corrió apagado, así que el precio confirmado solo vive como texto en el historial, no en el pedido. Verificado en DB: 14 chats con mensajes del equipo de 2-7 días atrás invisibles para la ventana de 24h (incl. precios como "Serían 240 por todo"). La clasificación SÍ existía (`origen='equipo'` + `[Agente:]`).
+
+**Solución:** En `message-handler.ts`, si ambas capas fallan, se consulta `obtenerUltimosMensajesEquipo(telefono, 7*24, 10)` y se inyecta `[HISTORIAL VERIFICADO DEL EQUIPO — DÍAS PREVIOS]` con fecha + precio extraído por mensaje e instrucción de no re-pedir datos confirmados. Solo contexto, no toca estado del pedido. Además en `prompt.builder.ts`: nombre del cliente máx 1x, aperturas variadas, tú consistente, prohibido "ya recibí tu comprobante" sin imagen confirmada y prohibido fingir consulta al equipo.
+
+**Archivos modificados:** `src/whatsapp/message-handler.ts`, `src/openai/prompt.builder.ts`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; script de verificación Supabase (service_role): 18 chats ≤24h, 32 ≤7d, 14 solo rescatables por fallback.
+
+**Impacto:** Compatible. El fallback solo se ejecuta cuando las capas existentes devuelven vacío (costo: 1 query Supabase extra solo en ese caso).
+
+**Rollback:** Eliminar el bloque `[HISTORIAL VERIFICADO...]` y las líneas agregadas en `buildPersonalitySection()`.
+
+---
+
 ## 2026-08-30
 
 ### Fix — setBotPausado persiste en Supabase para que el dashboard refleje el estado
