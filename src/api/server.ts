@@ -40,7 +40,7 @@ export interface ResumenOperativo {
 
 export interface BotContext {
   getPausado: () => boolean
-  setPausado: (v: boolean) => void
+  setPausado: (v: boolean) => void | Promise<void>
   reiniciarProceso: (motivo: string, contarCrash?: boolean) => never
   getEstado: () => string
   getEstadoDetalle: () => string

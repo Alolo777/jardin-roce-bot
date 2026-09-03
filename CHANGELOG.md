@@ -2,6 +2,16 @@
 
 ## 2026-08-30
 
+### Fix — setBotPausado persiste en Supabase para que el dashboard refleje el estado
+
+**Problema:** Al enviar "habla"/"duerme" desde WhatsApp, el bot cambiaba el estado en memoria pero NO actualizaba Supabase. El dashboard lee `configuracion_agente.bot_pausado` y mostraba el estado antiguo.
+
+**Solución:** `setBotPausado()` ahora es async y actualiza `configuracion_agente.bot_pausado` en Supabase. `setPausado` del server Express también persiste. La interfaz `BotContext.setPausado` ahora acepta `void | Promise<void>`.
+
+**Archivos modificados:** `bot.ts`, `src/api/server.ts`, `src/novedades/admin.handler.ts`, `tests/admin-commands.test.mts`
+
+---
+
 ### Feat — Comandos "habla"/"duerme" y resumen diario filtra ignorados/empleados
 
 **Pedido:** 

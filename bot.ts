@@ -101,9 +101,17 @@ export async function verificarSiBotPausado(): Promise<boolean> {
   return BOT_PAUSADO
 }
 
-export function setBotPausado(valor: boolean): void {
+export async function setBotPausado(valor: boolean): Promise<void> {
   BOT_PAUSADO = valor
   ultimaVerifPausa = Date.now()
+  try {
+    await supabaseAdmin
+      .from('configuracion_agente')
+      .update({ bot_pausado: valor })
+      .eq('id', 1)
+  } catch (err) {
+    console.error('[bot] Error persistiendo bot_pausado en Supabase:', err)
+  }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1787,7 +1795,18 @@ async function cambiarEstadoDesdeDashboard(id: string, estado: string): Promise<
 
 startServer({
   getPausado: () => BOT_PAUSADO,
-  setPausado: (v) => { BOT_PAUSADO = v; ultimaVerifPausa = Date.now() },
+  setPausado: async (v) => {
+    BOT_PAUSADO = v
+    ultimaVerifPausa = Date.now()
+    try {
+      await supabaseAdmin
+        .from('configuracion_agente')
+        .update({ bot_pausado: v })
+        .eq('id', 1)
+    } catch (err) {
+      console.error('[bot] Error persistiendo bot_pausado desde server:', err)
+    }
+  },
   reiniciarProceso: (motivo, contarCrash = true) => reiniciarProceso(motivo, contarCrash),
   getEstado: () => BOT_ESTADO,
   getEstadoDetalle: () => BOT_ESTADO_DETALLE,

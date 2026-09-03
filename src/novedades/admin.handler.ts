@@ -34,7 +34,7 @@ export interface AdminHandlerDeps {
   // DEC-089: adjunta una imagen al chat del admin (opcional)
   responderAdminFoto?: (jid: string, base64: string, mimetype?: string, caption?: string) => Promise<void>
   // Activar/desactivar Flora desde WhatsApp
-  setBotPausado?: (valor: boolean) => void
+  setBotPausado?: (valor: boolean) => Promise<void>
 }
 
 export function crearAdminHandler(deps: AdminHandlerDeps) {
@@ -43,12 +43,12 @@ export function crearAdminHandler(deps: AdminHandlerDeps) {
     try {
       // Comandos para activar/desactivar Flora desde WhatsApp
       if (RE_DUERME.test(texto) && deps.setBotPausado) {
-        deps.setBotPausado(true)
+        await deps.setBotPausado(true)
         await deps.responderAdmin(remoteJid, 'Flora dormida 💤')
         return
       }
       if (RE_HABLA.test(texto) && deps.setBotPausado) {
-        deps.setBotPausado(false)
+        await deps.setBotPausado(false)
         await deps.responderAdmin(remoteJid, 'Flora activa 🌸')
         return
       }

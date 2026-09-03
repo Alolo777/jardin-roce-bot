@@ -11,7 +11,7 @@ function crearHandlerMocks(overrides: Partial<AdminHandlerDeps> = {}) {
     responderAdmin: async (jid: string, texto: string) => {
       respuestas.push({ jid, texto })
     },
-    setBotPausado: (valor: boolean) => {
+    setBotPausado: async (valor: boolean) => {
       pausado = valor
     },
     ...overrides,
