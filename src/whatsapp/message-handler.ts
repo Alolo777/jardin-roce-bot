@@ -33,7 +33,8 @@ import { validarRespuestaIA, sanitizarRespuestaIA } from '../validators/response
 import { evaluarCancelacion } from '../validators/cancelacion.validator'
 import { evaluarQueja } from '../validators/queja.validator'
 import { getAIResponse, clasificarImagenVenta, revisarRespuestaFlora } from '../../lib/ai'
-import { guardarMediaChat } from '../novedades/media-chat.repository'
+import { guardarMediaChat, guardarMediaEquipoChat } from '../novedades/media-chat.repository'
+import type { IntencionMedia } from '../novedades/media-chat.repository'
 import { logger } from '../../lib/logger.service'
 import { PedidoActual, EstadoPedido, OrigenMensaje } from '../models/types'
 
@@ -253,17 +254,28 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
     return true
   }
 
-  async function procesarMediaAcumulado(clienteId: string, telefono: string, textoCliente: string, sock: any, pushName?: string): Promise<'referencia' | 'comprobante' | 'imagen' | null> {
+  async function procesarMediaAcumulado(
+    clienteId: string,
+    telefono: string,
+    textoCliente: string,
+    sock: any,
+    pushName?: string,
+    intencion?: string,
+    contextoExtra?: string
+  ): Promise<'referencia' | 'comprobante' | 'imagen' | null> {
     const mediaAcumulado = deps.MEDIA_POR_CLIENTE.get(clienteId)
     if (!mediaAcumulado || mediaAcumulado.length === 0) return null
 
     deps.MEDIA_POR_CLIENTE.delete(clienteId)
     const historial = await obtenerHistorial(telefono)
-    // DEC-085: guardar las últimas imágenes del chat (máx 2) para que el
-    // administrador pueda preguntar después "¿qué pasó con el 7890?" y la IA
-    // vea también las fotos. Fire-and-forget: no bloquea el flujo de venta.
-    guardarMediaChat(clienteId, telefono, mediaAcumulado.map(m => ({ base64: m.base64, mimetype: m.mimetype, caption: m.caption })))
+    // DEC-085: guardar las últimas imágenes con intención de conversación
+    // para que el admin y la IA sepan el contexto al consultar.
+    const ultimaImagen = mediaAcumulado[mediaAcumulado.length - 1]
+    guardarMediaChat(clienteId, telefono, mediaAcumulado.map(m => ({ base64: m.base64, mimetype: m.mimetype, caption: m.caption })), intencion as any, contextoExtra)
       .catch(err => console.warn('[media-chat] captura fallida:', err))
+    // Solo se envía la ÚLTIMA imagen a visión IA para clasificar.
+    // Si el cliente envió 3+ fotos en ráfaga, solo la última se analiza.
+    const imagenesParaVision = [ultimaImagen]
     const historialRecienteTexto = historial.slice(-8).map(m => m.content).join(' ')
     const captionsTexto = mediaAcumulado.map(m => m.caption).filter(Boolean).join(' ')
     const textoTurno = `${textoCliente} ${captionsTexto}`.trim()
@@ -279,15 +291,16 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
     const tieneImagen = mediaAcumulado.some(m => m.mimetype.startsWith('image/'))
 
     if (tieneImagen) {
-      console.log(`[bot] 👁️ Enviando ${mediaAcumulado.length} imagen(es) a visión IA para ${telefono}...`)
+      console.log(`[bot] 👁️ Enviando ÚLTIMA imagen (${mediaAcumulado.length} recibidas) a visión IA para ${telefono}...`)
       const pedido = deps.pedidoActual(clienteId)
       const contextoVision = [
         `estado_flujo: ${pedido.estadoFlujo ?? 'sin_pedido'}`,
         `metodo_pago: ${pedido.metodoPago ?? 'sin_confirmar'}`,
         `tiene_arreglo: ${deps.tieneArregloVerificado(clienteId) ? 'si' : 'no'}`,
         `texto_turno: ${textoTurno || 'sin texto'}`,
+        `intencion: ${intencion ?? 'sin_definir'}`,
       ].join('\n')
-      const vision = await clasificarImagenVenta(historial, contextoVision, mediaAcumulado)
+      const vision = await clasificarImagenVenta(historial, contextoVision, imagenesParaVision, intencion as any)
       console.log(`[bot] 👁️ Visión clasifica ${telefono}: ${vision.tipo} (${vision.razon})`)
       if (vision.tipo === 'comprobante') {
         esComprobante = true
@@ -304,7 +317,16 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
     const enHorario = estaEnHorario()
 
     for (const media of mediaAcumulado) {
-      if (esComprobante) {
+const ultimoMedia = mediaAcumulado[mediaAcumulado.length - 1]
+    if (ultimoMedia && tieneImagen) {
+      // DEC-085/DEC-091: guarda fotos enviadas por el equipo al cliente
+      // para que el admin sepa qué fotos se enviaron y en qué contexto.
+      const tipoEquipo = esComprobante ? 'comprobante' : esReferencia ? 'referencia' : 'otra'
+      guardarMediaEquipoChat(clienteId, telefono, [{ base64: ultimoMedia.base64, mimetype: ultimoMedia.mimetype, caption: ultimoMedia.caption }], intencion as any, contextoExtra)
+        .catch(err => console.warn('[media-chat] guardado equipo fallido:', err))
+    }
+
+    if (esComprobante) {
         if (!enHorario) {
           encolarFotoPendienteApertura(clienteId, { telefono, tipo: 'comprobante', base64: media.base64, mimetype: media.mimetype, caption: media.caption, ts: Date.now() })
           continue
@@ -849,17 +871,17 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       }
 
       let ventaCerrada = false
-      const tipoMediaProcesada = await procesarMediaAcumulado(clienteId, await numeroRealPromise, textoCliente, sock, msg.pushName)
+      const tipoMediaProcesada = await procesarMediaAcumulado(clienteId, await numeroRealPromise, textoCliente, sock, msg.pushName, decision.intencion, contextoExtra)
       const enHorarioMedia = estaEnHorario()
-      const fueraDeHorarioTexto = enHorarioMedia ? '' : ' El equipo ya descansó, pero tu foto queda guardada y la revisa a primera hora 🌷'
+      const fueraDeHorarioTexto = enHorarioMedia ? '' : ' 🌷 La reviso a primera hora.'
       if (tipoMediaProcesada === 'referencia') {
-        const respuesta = `Ya recibí la foto de referencia 🌷${fueraDeHorarioTexto ? ` ${fueraDeHorarioTexto}` : ' Se la paso al equipo para que la revise y te confirme el precio.'}`
+        const respuesta = `Ya recibí la foto 🌷${fueraDeHorarioTexto}`
         await deps.responderMensaje(msg, respuesta)
         await agregarAlHistorial(telefono, 'assistant', respuesta, OrigenMensaje.FLORA)
         return
       }
       if (tipoMediaProcesada === 'imagen') {
-        const respuesta = `Ya recibí tu imagen 🌷${fueraDeHorarioTexto ? ` ${fueraDeHorarioTexto}` : ' Se la paso al equipo para que la revise.'}`
+        const respuesta = `Ya recibí tu imagen 🌷${fueraDeHorarioTexto}`
         await deps.responderMensaje(msg, respuesta)
         await agregarAlHistorial(telefono, 'assistant', respuesta, OrigenMensaje.FLORA)
         return
@@ -867,7 +889,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
       if (tipoMediaProcesada === 'comprobante') {
         const venta = deps.ventaDesdeEstado(clienteId)
         if (venta && deps.ventaListaParaCerrar(clienteId) && !deps.pedidoEstaCerrado(clienteId)) {
-          const confirmacion = `¡Gracias, ${venta.cliente}! 🌸 Recibí tu comprobante. Tu pedido queda registrado. Total: ${venta.total}.${enHorarioMedia ? '' : ' El equipo lo valida a primera hora.'}`
+          const confirmacion = `¡Gracias, ${venta.cliente}! 🌸 Recibido, pedido apartado.`
           await deps.responderMensaje(msg, confirmacion)
           await agregarAlHistorial(telefono, 'assistant', confirmacion, OrigenMensaje.FLORA)
           await deps.ventaCerradaHandler(clienteId, venta, await numeroRealPromise)

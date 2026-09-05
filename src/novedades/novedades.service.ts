@@ -319,7 +319,60 @@ export function construirMensajeNovedades(digest: NovedadesDiarias | null): stri
   const ordenPrioridad = { alta: 0, media: 1, baja: 2 } as const
   const ordenadas = [...digest.novedades].sort((a, b) => ordenPrioridad[a.prioridad] - ordenPrioridad[b.prioridad])
 
-  // Sección 1: novedades pendientes (máx 8, prioridad primero)
+  // Solo mostrar semáforo: novedades con prioridad alta o media
+  const semaforo = ordenadas.filter(n => n.prioridad === 'alta' || n.prioridad === 'media')
+  const bajas = ordenadas.filter(n => n.prioridad === 'baja')
+
+  // Sección 1: semáforo (máx 5, solo alta/media)
+  const lineas = semaforo.slice(0, 5).map((n, i) => {
+    const etiqueta = ETIQUETA_TIPO[n.tipo] ?? ETIQUETA_TIPO[TipoNovedad.OTRO]
+    const cliente = n.cliente ? ` (${n.cliente})` : ''
+    const marca = n.prioridad === 'alta' ? '🔴' : '🟡'
+    return `${marca} *${mascararTelefono(n.telefono)}*${cliente}: ${etiqueta}${n.resumen ? ` — ${n.resumen}` : ''}`
+  })
+
+  const encabezado = digest.tipoVentana === 'reciente'
+    ? '📋 *Novedades — últimas 48 horas*'
+    : (() => {
+        const [y, m, d] = digest.fechaAnalizada.split('-')
+        return `📋 *Novedades del ${d}/${m}/${y}*`
+      })()
+
+  const partes: string[] = [encabezado]
+  if (lineas.length > 0) {
+    partes.push('', ...lineas)
+  }
+  if (bajas.length > 0) {
+    partes.push('', `_⚪ ${bajas.length} chat sin prioridad (pide "todos" para ver)._`)
+  }
+  if (semaforo.length > 0) {
+    partes.push('', '_Pide "todos" para ver estado completo de cada chat._')
+  }
+
+  // DEC-088: sección compacta del análisis profundo (si ya corrió)
+  const profundo = digest.profundo
+  if (profundo) {
+    const aRevisar = profundo.detalleChats.filter(d => d.requiereRevision)
+    const preguntas = profundo.detalleChats.flatMap(d => d.preguntasAbiertas.slice(0, 1)).slice(0, 5)
+    if (aRevisar.length > 0 || preguntas.length > 0) {
+      partes.push('', `🔬 *Revisar (${profundo.totalChats} chats analizados):*`)
+      for (const d of aRevisar.slice(0, 5)) {
+        partes.push(`• *${mascararTelefono(d.telefono)}*${d.motivoRevision ? ` — ${d.motivoRevision}` : ''}`)
+      }
+      for (const p of preguntas) partes.push(`❓ ${p}`)
+    }
+  }
+  return partes.join('\n')
+}
+
+// Versión completa: todos los chats + todos los estados (solo cuando el admin lo pide)
+export function construirMensajeNovedadesCompleto(digest: NovedadesDiarias | null): string {
+  if (!digest || (digest.novedades.length === 0 && !(digest.estadosChats?.length))) {
+    return '🌸 No hay novedades pendientes. Todo en orden.'
+  }
+  const ordenPrioridad = { alta: 0, media: 1, baja: 2 } as const
+  const ordenadas = [...digest.novedades].sort((a, b) => ordenPrioridad[a.prioridad] - ordenPrioridad[b.prioridad])
+
   const lineas = ordenadas.slice(0, MAX_NOVEDADES_EN_MENSAJE).map((n, i) => {
     const etiqueta = ETIQUETA_TIPO[n.tipo] ?? ETIQUETA_TIPO[TipoNovedad.OTRO]
     const cliente = n.cliente ? ` (${n.cliente})` : ''
@@ -327,33 +380,26 @@ export function construirMensajeNovedades(digest: NovedadesDiarias | null): stri
     return `${marca} *${mascararTelefono(n.telefono)}*${cliente}: ${etiqueta}${n.resumen ? ` — ${n.resumen}` : ''}`
   })
 
-  const restantesNov = ordenadas.length - Math.min(ordenadas.length, MAX_NOVEDADES_EN_MENSAJE)
-
-  // DEC-086: sección 2 — estado de TODOS los chats analizados
   const estados = digest.estadosChats ?? []
   const lineasEstados = estados.slice(0, MAX_ESTADOS_EN_MENSAJE).map(e =>
     `• *${mascararTelefono(e.telefono)}*${e.cliente ? ` (${e.cliente})` : ''}: ${e.estado}`
   )
-  const restantesEstados = estados.length - Math.min(estados.length, MAX_ESTADOS_EN_MENSAJE)
 
   const encabezado = digest.tipoVentana === 'reciente'
-    ? '📋 *Novedades — últimas 48 horas*'
+    ? '📋 *Novedades COMPLETAS — últimas 48 horas*'
     : (() => {
-      const [y, m, d] = digest.fechaAnalizada.split('-')
-      return `📋 *Novedades del ${d}/${m}/${y}*`
-    })()
+        const [y, m, d] = digest.fechaAnalizada.split('-')
+        return `📋 *Novedades COMPLETAS del ${d}/${m}/${y}*`
+      })()
 
   const partes: string[] = [encabezado]
   if (lineas.length > 0) {
     partes.push('', ...lineas)
-    if (restantesNov > 0) partes.push(`_…y ${restantesNov} más._`)
   }
   if (lineasEstados.length > 0) {
     partes.push('', '💬 *Todos los chats:*', ...lineasEstados)
-    if (restantesEstados > 0) partes.push(`_…y ${restantesEstados} más._`)
   }
 
-  // DEC-088: sección compacta del análisis profundo (si ya corrió)
   const profundo = digest.profundo
   if (profundo) {
     const aRevisar = profundo.detalleChats.filter(d => d.requiereRevision)

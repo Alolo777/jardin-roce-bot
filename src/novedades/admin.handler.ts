@@ -7,18 +7,21 @@
 //      últimos 60 mensajes y la IA responde la pregunta del admin.
 // La demora anti-ban ("escribiendo..." + espera aleatoria) la aplica bot.ts.
 
-import { construirMensajeNovedades, construirMensajeInteresantes, consultarChatParaAdmin, ejecutarAnalisisProfundo, generarNovedadesDiarias, obtenerNovedadesDelDia } from './novedades.service'
+import { construirMensajeNovedades, construirMensajeNovedadesCompleto, construirMensajeInteresantes, consultarChatParaAdmin, ejecutarAnalisisProfundo, generarNovedadesDiarias, obtenerNovedadesDelDia } from './novedades.service'
 import { extraerUltimos4 } from './novedad.detector'
 import { logger } from '../../lib/logger.service'
 
 const AYUDA = [
   '🌸 Te puedo ayudar así:',
-  '• Escribe "novedades" → resumen de pendientes de hoy y ayer.',
+  '• Escribe "novedades" → resumen semáforo (solo pendientes urgentes).',
+  '• Escribe "novedades todos" → estado COMPLETO de todos los chats.',
   '• Escribe "Flora" → actualiza TODO y te manda el resumen fresco.',
   '• Escribe "habla" → activa Flora para que responda clientes.',
   '• Escribe "duerme" → pausa Flora para que no responda.',
   '• O pregunta por un chat: "¿qué pasó con el 7890?" o "¿y Lizet?".',
 ].join('\n')
+
+const RE_TODOS = /todos|completo|todas|todo\s+?\b/i
 
 const RE_NOVEDADES = /novedad|pendientes?\b|resumen|que hay|qué hay|como van|cómo van|estado de|reporte/i
 const RE_FLORA = /\bflora\b/i
@@ -86,6 +89,14 @@ export function crearAdminHandler(deps: AdminHandlerDeps) {
 
       const ult4 = extraerUltimos4(texto)
 
+      // ¿Pide el resumen COMPLETO de todos los chats?
+      const quiereTodos = RE_TODOS.test(texto) && !ult4
+      if (quiereTodos) {
+        const digest = await obtenerNovedadesDelDia()
+        await deps.responderAdmin(remoteJid, construirMensajeNovedadesCompleto(digest))
+        return
+      }
+
       // ¿Pregunta de detalle? (menciona dígitos, o es una frase larga que
       // probablemente pregunta por alguien/nombre)
       const quiereDetalle = !!ult4 || (!RE_NOVEDADES.test(texto) && texto.split(/\s+/).length >= 3)
@@ -108,7 +119,7 @@ export function crearAdminHandler(deps: AdminHandlerDeps) {
         return
       }
 
-      // Digest de novedades (sin LLM)
+      // Digest de novedades (sin LLM) — solo semáforo
       const digest = await obtenerNovedadesDelDia()
       await deps.responderAdmin(remoteJid, construirMensajeNovedades(digest))
     } catch (err) {

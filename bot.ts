@@ -73,7 +73,7 @@ import { buscarEnvio, pareceConsultaEnvio } from './src/validators/envio.validat
 import { evaluarCancelacion } from './src/validators/cancelacion.validator'
 import { ejecutarPodaPedidos, obtenerUltimaPodaResumen } from './src/pedidos/poda.service'
 import { evaluarQueja } from './src/validators/queja.validator'
-import { esAdminBot, crearAdminHandler, generarNovedadesDiarias, enviarNovedadesProactivo, construirMensajeNovedades, obtenerNovedadesDelDia, ejecutarAnalisisProfundo, construirMensajeInteresantes, obtenerAdminsBot } from './src/novedades/index'
+import { esAdminBot, crearAdminHandler, generarNovedadesDiarias, enviarNovedadesProactivo, construirMensajeNovedades, construirMensajeNovedadesCompleto, obtenerNovedadesDelDia, ejecutarAnalisisProfundo, construirMensajeInteresantes, obtenerAdminsBot } from './src/novedades/index'
 import { enviarTextoANumeros } from './src/whatsapp/notification.service'
 
 // ════════════════════════════════════════════════════════════════

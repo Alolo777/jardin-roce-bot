@@ -1,26 +1,28 @@
--- =============================================================================
--- MIGRACIÓN: media_chat — últimas imágenes/documentos enviados por chat (DEC-085)
--- Fecha: 2026-08-23
--- Idempotente. CÓMO APLICAR: Supabase Dashboard → SQL Editor → Run.
---
--- Propósito: cuando un administrador pregunta por un chat ("¿qué pasó con
--- el 7890?"), el sistema adjunta hasta 2 imágenes recientes del chat al modelo
--- de visión para describir qué son (dirección, comprobante, referencia...).
--- Se conservan SOLO las últimas 2 por teléfono (la poda la hace el código).
--- =============================================================================
+-- MIGRACIÓN: Agregar columnas intención y contexto a media_chat
+-- Permite clasificar imágenes por contexto de conversación
 
-CREATE TABLE IF NOT EXISTS media_chat (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  cliente_id TEXT NOT NULL,              -- JID de WhatsApp (clave del Order Engine)
-  telefono   TEXT,                       -- número real normalizado (dígitos)
-  origen     TEXT NOT NULL DEFAULT 'cliente', -- cliente | equipo
-  tipo       TEXT NOT NULL DEFAULT 'imagen',  -- imagen | documento
-  mimetype   TEXT,
-  caption    TEXT,
-  base64     TEXT NOT NULL,
-  creado_en  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+ALTER TABLE public.media_chat
+ADD COLUMN IF NOT EXISTS intencion TEXT DEFAULT 'sin_definir';
 
-ALTER TABLE media_chat ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.media_chat
+ADD COLUMN IF NOT EXISTS contexto TEXT DEFAULT '';
 
-CREATE INDEX IF NOT EXISTS media_chat_telefono_idx ON media_chat (telefono, creado_en DESC);
+-- Índice para consultas por teléfono e intención
+CREATE INDEX IF NOT EXISTS idx_media_chat_telefono_intencion
+ON public.media_chat (telefono, intencion);
+
+-- Vista para que el admin vea imágenes con contexto
+CREATE OR REPLACE VIEW public.v_media_chat_con_contexto AS
+SELECT
+  id,
+  cliente_id,
+  telefono,
+  origen,
+  tipo,
+  mimetype,
+  caption,
+  base64,
+  intencion,
+  contexto,
+  creado_en
+FROM public.media_chat;

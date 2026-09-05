@@ -333,20 +333,28 @@ function normalizarConfianza(valor: unknown): number {
   return Math.max(0, Math.min(1, n))
 }
 
+export type IntencionMedia = 'cotizacion' | 'comprobante' | 'referencia' | 'otra' | 'sin_definir'
+
 export type ClasificacionImagenVenta = 'comprobante' | 'referencia' | 'otra' | 'incierto'
 
 interface ImagenCliente {
   base64: string
   mimetype: string
   caption?: string
+  intencion?: IntencionMedia
+  contexto?: string
 }
 
 export async function clasificarImagenVenta(
   historial: MensajeChat[],
   contexto: string,
-  imagenes: ImagenCliente[]
+  imagenes: ImagenCliente[],
+  intencion?: IntencionMedia
 ): Promise<{ tipo: ClasificacionImagenVenta; razon: string }> {
   if (imagenes.length === 0) return { tipo: 'incierto', razon: 'sin imagenes' }
+
+  // Solo usar la ÚLTIMA imagen cuando el cliente envía múltiples en ráfaga.
+  const imagenUso = imagenes[imagenes.length - 1]
 
   const historialReciente = historial
     .slice(-8)
@@ -354,22 +362,30 @@ export async function clasificarImagenVenta(
     .join('\n')
     .slice(-3000)
 
+  const intencionTexto = intencion && intencion !== 'sin_definir'
+    ? `\nINTENCIÓN DE LA CONVERSACIÓN: ${intencion}`
+    : ''
+
+  const contextoVision = contexto || ''
+
   const prompt = [
-    'Clasifica las imagenes del cliente en una venta de floreria.',
+    'Clasifica la imagen del cliente en una venta de flores.',
+    `INTENCIÓN DE LA CONVERSACIÓN: ${intencionTexto}`,
+    `CONTEXTO DEL PEDIDO: ${contextoVision}`,
     'Responde SOLO JSON valido, sin markdown, con este formato: {"tipo":"comprobante|referencia|otra|incierto","razon":"max 120 caracteres"}.',
     'comprobante = captura/foto de transferencia, recibo, ticket, deposito, banco o pago.',
     'referencia = flores, ramo, arreglo floral, imagen de inspiracion/cotizacion o producto deseado.',
     'otra = imagen no relacionada con pago ni flores.',
     'incierto = no se puede determinar.',
-    'Prioriza como comprobante si el historial indica que el equipo humano (humano, VERIFICADO) pidio el pago o el comprobante, aunque la imagen sea ambigua.',
-    'Si el historial dice que esperaba pago pero la imagen muestra flores, clasifica referencia.',
-    'Si el historial dice que cotizaba flores pero la imagen muestra banco/recibo, clasifica comprobante.',
-    '',
-    `Contexto operativo: ${contexto}`,
+    'Si la intención de la conversación es "comprobante", clasifica como comprobante aunque la imagen muestre flores.',
+    'Si la intención es "cotizacion" o "referencia", clasifica como referencia aunque la imagen muestre banco.',
+    'Si el historial indica que el equipo pidió pago/comprobante, prioriza comprobante.',
+    'Si el historial dice que cotizaba flores, clasifica referencia.',
     '',
     `Historial reciente:\n${historialReciente || 'Sin historial'}`,
     '',
-    `Captions: ${imagenes.map(i => i.caption).filter(Boolean).join(' | ') || 'Sin texto'}`,
+    `Caption de la imagen: ${imagenUso.caption || 'Sin texto'}`,
+    'Responde solo JSON, nada más.',
   ].join('\n')
 
   try {
@@ -377,6 +393,7 @@ export async function clasificarImagenVenta(
 
     const rawTexto = await (async () => {
         // Gemini primario: soporta imágenes inline (base64) en una sola llamada.
+        // Solo usa la ÚLTIMA imagen para evitar saturar la API con ráfagas.
         const llamarGemini = async (): Promise<string> => {
           if (!geminiClient) throw new Error('Gemini no configurado')
           const model = geminiClient.getGenerativeModel({ model: GEMINI_MODEL })
@@ -386,13 +403,13 @@ export async function clasificarImagenVenta(
                 role: 'user',
                 parts: [
                   { text: prompt },
-                  ...imagenes.slice(0, 2).map(img => ({
-                    inlineData: { mimeType: img.mimetype || 'image/jpeg', data: img.base64 },
-                  })),
+                  {
+                    inlineData: { mimeType: imagenUso.mimetype || 'image/jpeg', data: imagenUso.base64 },
+                  },
                 ],
               },
             ],
-            generationConfig: { maxOutputTokens: 1024, temperature: 0 },
+            generationConfig: { maxOutputTokens: 512, temperature: 0 },
           })
           return result.response.text() || ''
         }
@@ -402,10 +419,10 @@ export async function clasificarImagenVenta(
           if (!provider.client) throw new Error(`${provider.name} no configurado`)
           const content: ChatCompletionContentPart[] = [
             { type: 'text', text: prompt },
-            ...imagenes.slice(0, 2).map(img => ({
+            {
               type: 'image_url' as const,
-              image_url: { url: `data:${img.mimetype || 'image/jpeg'};base64,${img.base64}` },
-            })),
+              image_url: { url: `data:${imagenUso.mimetype || 'image/jpeg'};base64,${imagenUso.base64}` },
+            },
           ]
           const completion = await conRetry(async () => {
             const controller = new AbortController()
@@ -415,7 +432,7 @@ export async function clasificarImagenVenta(
                 {
                   model: provider.model,
                   messages: [{ role: 'user', content }],
-                  max_tokens: 1024,
+max_tokens: 512,
                   temperature: 0,
                 },
                 { signal: controller.signal }
@@ -567,19 +584,17 @@ export async function resumirNovedadesChats(chats: ChatParaResumen[]): Promise<A
     .join('\n\n')
 
   const prompt = [
-    'Analiza las conversaciones de una floreria (Flora es la asistente virtual).',
-    'COBERTURA TOTAL (DEC-091): devuelve EXACTAMENTE un objeto por CADA bloque "CHAT <telefono>" listado, usando su telefono EXACTO. PROHIBIDO omitir bloques; si un chat es trivial, igual devuelve su objeto con estado breve y sin novedad.',
-    'DIA DE LA SEMANA: cada bloque o marca 📅 indica la fecha real en que se escribieron esos mensajes. Interpreta palabras relativas ("hoy", "mañana", "el viernes") segun EL DIA DEL MENSAJE, no segun hoy. Ej: si un SABADO dice "mañana paso por el ramo", se refiere al DOMINGO.',
-    'Para CADA chat devuelve SIEMPRE un objeto con:',
-    '- estado (OBLIGATORIO, max 90 caracteres): que se hablo y en que quedo, INCLUYENDO conversaciones cerradas (ej: "cotizo girasoles; quedo de mandar foto" / "venta cerrada ramo $300; recoge domingo 11 am").',
-    '- novedad (SOLO si hay algo pendiente para el equipo humano): { tipo, prioridad, resumen } donde tipo es una de:',
+    'Analiza conversaciones de Jardin RoCe. Flora es la asistente virtual.',
+    'Devuelve UN objeto por CADA chat listado, con telefono EXACTO. Incluso chats triviales tienen objeto.',
+    'DIA DE LA SEMANA: marca 📅 = fecha del mensaje. Palabras relativas ("hoy", "mañana") segun EL DIA del mensaje, no de hoy.',
+    'Para CADA chat devuelve:',
+    '- estado (max 90 chars): que se hablo y en que quedo.',
+    '- novedad (SOLO si hay algo pendiente del equipo): { tipo, prioridad, resumen max 90 chars }',
     `    ${TIPOS_NOVEDAD_PERMITIDOS}`,
-    '  PRIORIDADES DE ALERTA a detectar: (1) comprobante que prometio y falta → pago_pendiente; (2) ramo/arreglo por COTIZAR sin precio del equipo → cotizacion_pendiente; (3) arreglo PENDIENTE DE ENTREGA o recogida confirmada → entrega_programada; (4) duda que quedo SIN RESPONDER en el chat → duda_sin_responder.',
-    '  Reglas de novedad: cotizacion_pendiente reportala aunque luego diga ok/gracias si nadie del equipo confirmo precio; entrega_programada SIEMPRE aunque la venta este cerrada; pago_pendiente si prometio comprobante y no hay confirmacion.',
-    '  prioridad: baja|media|alta · resumen: max 90 caracteres, con fecha/hora cuando aplique ("recoge domingo 11 am").',
-    'SIN NOVEDAD (pero CON estado) cuando: el ULTIMO mensaje es de equipo/flora y no hay pedido pendiente ni entrega futura ("...esperando respuesta del cliente"), o el chat fue solo saludo/cortesia.',
-    'REGLAS: No inventes telefonos: usa EXACTAMENTE los de los bloques CHAT. Hasta 2 novedades por chat SOLO si son temas distintos (duplica el objeto). espanol mexicano.',
-    `Responde SOLO JSON valido, sin markdown, formato: [{"telefono":"...","estado":"...","novedad":{"tipo":"cotizacion_pendiente","prioridad":"baja|media|alta","resumen":"..."}}]. El campo novedad se omite si no aplica.`,
+    'prioridad: baja|media|alta',
+    'SIN NOVEDAD: ultimo mensaje equipo/flora sin pedido pendiente = "sin novedad".',
+    'No inventes telefonos. Max 2 novedades por chat. Español mexicano.',
+    `Formato: [{"telefono":"...","estado":"...","novedad":{"tipo":"...","prioridad":"...","resumen":"..."}}]`,
     '',
     bloques,
   ].join('\n')
@@ -592,7 +607,7 @@ export async function resumirNovedadesChats(chats: ChatParaResumen[]): Promise<A
         const model = geminiClient.getGenerativeModel({ model: GEMINI_MODEL })
         const result = await conRetry(() => model.generateContent({
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 2048, temperature: 0 },
+          generationConfig: { maxOutputTokens: 512, temperature: 0 },
         }), 3)
         return result.response.text() || ''
       },
@@ -606,7 +621,7 @@ export async function resumirNovedadesChats(chats: ChatParaResumen[]): Promise<A
               {
                 model: provider.model,
                 messages: [{ role: 'user', content: prompt }],
-                max_tokens: 2048,
+                max_tokens: 512,
                 temperature: 0,
               },
               { signal: controller.signal }
@@ -654,24 +669,15 @@ export async function analizarChatDetalle(
   ahora: { fecha: string; diaSemana: string; hora: string }
 ): Promise<DetalleChatIA | null> {
   const prompt = [
-    'Eres analista interno de una floreria. Analiza ESTA conversacion atendida y responde SOLO JSON valido, sin markdown.',
-    `HOY es ${ahora.diaSemana} ${ahora.fecha} y son las ${ahora.hora} (CDMX). El transcript tiene marcas [📅 dia fecha] (cuando cambio el dia) y [hora] por mensaje.`,
-    'FECHAS RELATIVAS: interpreta "hoy/mañana/el viernes" segun EL DIA DEL MENSAJE (la marca 📅 vigente), no segun hoy. Ej: sabado dice "mañana paso" → domingo.',
-    'Con eso, razona el estado temporal: ej. si quedo de recoger el sabado 11 am y ya paso, marca que falta confirmar si se lo llevaron.',
-    '',
-    'Devuelve exactamente:',
-    `{ "categoria": "${CATEGORIAS_CHAT}",`,
-    '  "resumen": "2-4 lineas detalladas de como se dio la conversacion",',
-    '  "puntosClave": ["dato importante", "..."],',
-    '  "requiereRevision": true|false,   // true SOLO si vale la pena que el admin la lea: dinero pendiente, queja, promesa sin confirmar, cambio de fecha, entrega que ya debio ocurrir',
-    '  "motivoRevision": "porque (solo si requiereRevision=true)",',
-    '  "preguntasAbiertas": ["pregunta concreta que el equipo debe verificar, ej: ¿Ya recogio su pedido del sabado 11 am?"],',
-    '  "fechasMencionadas": ["sabado 22/08 11 am"] }',
-    'Si algo no aplica, usa array vacio. No inventes datos que no esten en el transcript.',
-    'RUIDO (DEC-089): si el ULTIMO mensaje es del equipo/flora y no hay pedido pendiente (datos/pago/comprobante) ni entrega futura, marca requiereRevision=false, sin preguntasAbiertas: ya fue atendido; sin respuesta del cliente = no interesó.',
+    'Analiza esta conversacion de Jardin RoCe. Responde SOLO JSON valido, sin markdown.',
+    `HOY es ${ahora.diaSemana} ${ahora.fecha}, son las ${ahora.hora} (CDMX). Usa marcas 📅 del transcript para fechas relativas ("hoy", "mañana" → según día del mensaje).`,
+    'Devuelve: { "categoria":"venta_cerrada|cotizacion|pedido_en_proceso|duda|queja|postventa|saludo|otro", "resumen":"2 lineas max", "puntosClave":["..."], "requiereRevision":true|false, "motivoRevision":"...", "preguntasAbiertas":["..."], "fechasMencionadas":["..."] }',
+    'REQUIERE_REVISION=true SOLO si: dinero pendiente, queja, promesa sin confirmar, cambio de fecha, entrega que ya debio ocurrir.',
+    'SI ULTIMO mensaje es equipo/flora sin pedido pendiente ni entrega futura → requiereRevision=false, sin preguntasAbiertas.',
+    'No inventes datos. Max 600 chars total.',
     '',
     `CHAT ${chat.telefono}:`,
-    chat.lineas.join('\n').slice(-2400),
+    chat.lineas.join('\n').slice(-2000),
   ].join('\n')
 
   try {
@@ -681,7 +687,7 @@ export async function analizarChatDetalle(
         const model = geminiClient.getGenerativeModel({ model: GEMINI_MODEL })
         const result = await conRetry(() => model.generateContent({
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 700, temperature: 0.2 },
+          generationConfig: { maxOutputTokens: 300, temperature: 0.2 },
         }), 2)
         return result.response.text() || ''
       },
@@ -695,7 +701,7 @@ export async function analizarChatDetalle(
               {
                 model: provider.model,
                 messages: [{ role: 'user', content: prompt }],
-                max_tokens: 700,
+                max_tokens: 300,
                 temperature: 0.2,
               },
               { signal: controller.signal }
@@ -840,7 +846,7 @@ export async function revisarRespuestaFlora(
     'Eres revisor de calidad de Flora, asistente de una floreria.',
     'Evalua si la respuesta propuesta es la mejor para el ultimo mensaje considerando el historial reciente. Ignora historial viejo que no aplique al pedido actual.',
     'REGLA DE PRECIOS: Si la respuesta propuesta contiene un PRECIO (simbolo $ o cifras monetarias) que NO aparece en el contexto operativo ni en una cotizacion del equipo en el historial, DESAPRUEBALA (approved:false, riesgo:alto) y en "mensaje" escribe una respuesta corregida que diga "Déjame verificarlo con mi equipo" sin cifras. Flora nunca debe inventar precios.',
-    'REGLA DE NO INSISTIR: Si el ultimo mensaje del cliente es solo un agradecimiento, "ok", "gracias", "listo", un saludo ya respondido, o no requiere accion de Flora, y la respuesta propuesta vuelve a preguntar algo ya resuelto o insiste en vender, DESAPRUEBALA (approved:false, riesgo:bajo) y en "mensaje" escribe una respuesta corta (max 1 linea) o deja "mensaje" vacio para no responder.',
+    'REGLA DE NO INSISTIR: Si el ultimo mensaje del cliente es solo un agradecimiento, "ok", "gracias", "listo", un saludo ya respondido, o no requiere accion de Flora, y la respuesta propuesta vuelve a preguntar algo ya resuelto o insiste en vender, DESAPRUEBALA (approved:false, riesgo:bajo) y en "mensaje" escribe una respuesta corta (max 1 linea, max 80 caracteres) o deja "mensaje" vacio para no responder.',
     'Si la respuesta propuesta es buena y no inventa datos, APRUEBALA (approved:true) y deja "mensaje" vacio.',
     'No apruebes respuestas que inventen disponibilidad, envio, pagos, promesas, compensaciones o que ignoren una cotizacion humana reciente.',
     'TONO AL CORREGIR (BUG-027): si escribes un "mensaje" corregido, usa la voz de Flora: espanol mexicano dulce y breve (max 3 lineas), 1-2 emojis maximo, maximo UNA pregunta, nunca robotica ni corporativa.',
@@ -975,33 +981,33 @@ export async function getAIResponse(
         const resultContent = await conRetry(() => model.generateContent({
           systemInstruction: systemPromptFinal,
           contents,
-          generationConfig: { maxOutputTokens: 2048, temperature: 0.7 },
+          generationConfig: { maxOutputTokens: 512, temperature: 0.7 },
         }), 3)
         const texto = resultContent.response.text() || ''
         return texto.trim().length > 0 ? texto : 'Lo siento, no pude procesar tu mensaje. ¿Puedes repetirlo? 🌸'
       },
       async (provider: OpenAICompatProvider) => {
         if (!provider.client) throw new Error(`${provider.name} no configurado`)
-        const completion = await conRetry(async () => {
-          const controller = new AbortController()
-          const timeoutId  = setTimeout(() => controller.abort(), 15_000)
-          try {
-            return await provider.client!.chat.completions.create(
-              {
-                model: provider.model,
-                messages: [
-                  { role: 'system', content: systemPromptFinal },
-                  ...historialConFechas,
-                ],
-                max_tokens: 2048,
-                temperature: 0.7,
-              },
-              { signal: controller.signal }
-            )
-          } finally {
-            clearTimeout(timeoutId)
-          }
-        })
+const completion = await conRetry(async () => {
+            const controller = new AbortController()
+            const timeoutId  = setTimeout(() => controller.abort(), 15_000)
+            try {
+              return await provider.client!.chat.completions.create(
+                {
+                  model: provider.model,
+                  messages: [
+                    { role: 'system', content: systemPromptFinal },
+                    ...historialConFechas,
+                  ],
+                  max_tokens: 512,
+                  temperature: 0.7,
+                },
+                { signal: controller.signal }
+              )
+            } finally {
+              clearTimeout(timeoutId)
+            }
+          })
         const contenido = completion.choices[0]?.message?.content?.trim()
         return contenido && contenido.length > 0
           ? contenido
