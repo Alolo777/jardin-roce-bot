@@ -61,7 +61,6 @@ export async function GET() {
     const promedioVenta = cantidadVentas > 0 ? totalVentas / cantidadVentas : 0
     const ticketMayor = metricas.reduce((max, v) => Math.max(max, v.precio_total || 0), 0)
     const enviosHoy = metricas.filter(v => (Number(v.precio_envio) || 0) > 0 || /env[ií]o|domicilio/i.test(`${v.direccion_entrega || ''} ${v.metodo_pago || ''}`)).length
-const recogidasHoy = metricas.filter(v => /sucursal|recoger|centro|norte/i.test(v.direccion_entrega || '')).length
     const recogidasHoy = metricas.filter(v => /sucursal|recoger|centro|norte/i.test(v.direccion_entrega || '')).length
     const ultimaVentaHora = ventasRecientes[0]?.creado_en ?? null
     const productosTop = Object.entries(metricas.reduce<Record<string, number>>((acc, v) => {
