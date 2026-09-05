@@ -53,39 +53,7 @@ export async function GET() {
       pedidosMetricas = []
     }
 
-    const metricas = [
-      ...(ventas ?? []).map(v => ({
-        cliente_nombre: v.cliente_nombre,
-        cliente_telefono: v.cliente_telefono,
-        producto: v.producto,
-        precio_total: Number(v.precio_total || 0),
-        direccion_entrega: v.direccion_entrega,
-        metodo_pago: v.metodo_pago,
-        estado: v.estado,
-        creado_en: v.creado_en,
-        precio_envio: 0,
-        fuente: 'venta',
-      })),
-    ]
-
-    const clavesVenta = new Set(metricas.map(v => `${v.cliente_telefono || ''}|${v.producto || ''}|${v.precio_total || 0}`))
-    for (const pedido of pedidosMetricas) {
-      const precio = Number(pedido.total || 0)
-      const clave = `${pedido.telefono || ''}|${pedido.producto || ''}|${precio}`
-      if (clavesVenta.has(clave)) continue
-      metricas.push({
-        cliente_nombre: pedido.cliente_nombre,
-        cliente_telefono: pedido.telefono,
-        producto: pedido.producto || 'Pedido',
-        precio_total: precio,
-        direccion_entrega: pedido.zona_envio || pedido.direccion || (pedido.sucursal ? `Sucursal ${pedido.sucursal}` : ''),
-        metodo_pago: pedido.metodo_pago,
-        estado: pedido.estado,
-        creado_en: pedido.actualizado_en,
-        precio_envio: Number(pedido.precio_envio || 0),
-        fuente: 'pedido',
-      })
-    }
+    const metricas = [...(ventas ?? [])]
 
     const cantidadVentas = metricas.length
     const totalVentas = metricas.reduce((sum, v) => sum + (v.precio_total || 0), 0)
