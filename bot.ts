@@ -418,7 +418,7 @@ async function registrarVenta(clienteNombre: string, telefono: string, producto:
       precio_total: precioNumerico,
       direccion_entrega: direccion,
       metodo_pago: metodoPago,
-      estado: metodoPago === 'transferencia' ? 'pagado' : 'apartado',
+      estado: 'pagado',
     })
     if (error) console.error('[bot] Error registrando venta:', error)
   } catch (err) { console.error('[bot] Error en registrarVenta:', err) }
@@ -884,7 +884,9 @@ function precioArregloTexto(clienteId: string): string {
 
 function totalDashboardPedido(clienteId: string, fallback: string): string {
   const total = totalPedidoNumerico(clienteId)
-  return total && total > 0 ? `$${total.toFixed(2)} MXN` : fallback
+  if (total != null && total > 0) return `$${total.toFixed(2)} MXN`
+  const numFallback = parseFloat(fallback.replace(/[^0-9.]/g, '')) || 0
+  return numFallback > 0 ? `$${numFallback.toFixed(2)} MXN` : fallback
 }
 
 function faltaFechaHoraParaCerrar(clienteId: string): boolean {
@@ -1060,8 +1062,9 @@ async function ventaCerradaHandler(clienteId: string, venta: VentaCerrada, telef
     return
   }
 
+  const metodoReal = pedido.metodoPago || 'transferencia'
   console.log(`[bot] 💰 Venta cerrada: ${nombreAlerta} — ${venta.producto} — ${venta.total}`)
-  await registrarVenta(nombreAlerta, numeroReal, venta.producto, totalDashboardPedido(clienteId, venta.total), venta.direccion, 'transferencia')
+  await registrarVenta(nombreAlerta, numeroReal, venta.producto, totalDashboardPedido(clienteId, venta.total), venta.direccion, metodoReal)
   await persistirPedido(clienteId, numeroReal, 'pagado')
 
   eventBus.emit(EventType.PAYMENT_CONFIRMED, {
@@ -1070,8 +1073,8 @@ async function ventaCerradaHandler(clienteId: string, venta: VentaCerrada, telef
     producto: venta.producto,
     total: parseFloat(venta.total.replace(/[^0-9.]/g, '')) || 0,
     sucursal: venta.direccion,
-    metodoPago: 'Transferencia',
-    descripcion: 'Pago recibido — venta completada',
+    metodoPago: metodoReal === 'efectivo_recoger' ? 'Efectivo al recoger' : metodoReal === 'tarjeta_recoger' ? 'Tarjeta al recoger' : 'Transferencia',
+    descripcion: '',
   })
   silenciarPedido(clienteId)
 }
