@@ -1151,29 +1151,7 @@ const ultimoMedia = mediaAcumulado[mediaAcumulado.length - 1]
         contexto: 'Error en procesarMensaje',
       })
     } finally {
-      const mediaPendiente = deps.MEDIA_POR_CLIENTE.get(clienteId)
-      if (mediaPendiente && mediaPendiente.length > 0) {
-        deps.MEDIA_POR_CLIENTE.delete(clienteId)
-        const telefonoReal = await numeroRealPromise.catch(() => telefono)
-        const enHorarioPendiente = estaEnHorario()
-        for (const media of mediaPendiente) {
-          if (!enHorarioPendiente) {
-            encolarFotoPendienteApertura(clienteId, { telefono: telefonoReal, tipo: 'otra', base64: media.base64, mimetype: media.mimetype, caption: media.caption, ts: Date.now() })
-            continue
-          }
-          eventBus.emit(EventType.PHOTO_RECEIVED, {
-            telefono: telefonoReal,
-            tipo: 'pendiente',
-            base64: media.base64,
-            mimetype: media.mimetype,
-            caption: media.caption,
-          })
-          enviarFotoEmpleadosWhatsApp(sock, media.base64, `📷 Imagen pendiente de ${telefonoReal}${media.caption ? `\n\nCliente dice: ${media.caption}` : ''}`, media.mimetype).catch(err => console.error('[bot] WhatsApp imagen pendiente:', err))
-          if (debeEnviarAlertaDedup(clienteId, 'foto-sent', media.caption || 'Imagen pendiente', 30 * 60_000)) {
-            eventBus.emit(EventType.PHOTO_SENT, { telefono: telefonoReal, descripcion: media.caption || 'Imagen pendiente' })
-          }
-        }
-      }
+      deps.MEDIA_POR_CLIENTE.delete(clienteId)
     }
   }
 

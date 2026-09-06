@@ -880,7 +880,7 @@ export async function revisarRespuestaFlora(
               {
                 model: provider.model,
                 messages: [{ role: 'user', content: prompt }],
-                max_tokens: 1024,
+                max_tokens: 256,
                 temperature: 0,
               },
               { signal: controller.signal }
@@ -981,7 +981,7 @@ export async function getAIResponse(
         const resultContent = await conRetry(() => model.generateContent({
           systemInstruction: systemPromptFinal,
           contents,
-          generationConfig: { maxOutputTokens: 512, temperature: 0.7 },
+          generationConfig: { maxOutputTokens: 250, temperature: 0.7 },
         }), 3)
         const texto = resultContent.response.text() || ''
         return texto.trim().length > 0 ? texto : 'Lo siento, no pude procesar tu mensaje. ¿Puedes repetirlo? 🌸'
@@ -999,7 +999,7 @@ const completion = await conRetry(async () => {
                     { role: 'system', content: systemPromptFinal },
                     ...historialConFechas,
                   ],
-                  max_tokens: 512,
+max_tokens: 250,
                   temperature: 0.7,
                 },
                 { signal: controller.signal }
