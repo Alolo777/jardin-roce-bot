@@ -263,12 +263,9 @@ export function obtenerPedido(clienteId: string): PedidoActual | null {
   return activos[activos.length - 1] ?? null
 }
 
-export function obtenerPedidoPorId(id: string): { clienteId: string; pedido: PedidoActual } | null {
-  const porCliente = obtenerPedido(id)
-  if (porCliente) return { clienteId: id, pedido: porCliente }
-
+export function obtenerPedidoPorId(pedidoId: string): { clienteId: string; pedido: PedidoActual } | null {
   for (const [clienteId, pedidos] of PEDIDOS) {
-    const pedido = pedidos.find(p => p.id === id && esPedidoActivo(p))
+    const pedido = pedidos.find(p => p.id === pedidoId && esPedidoActivo(p))
     if (pedido) return { clienteId, pedido }
   }
   return null

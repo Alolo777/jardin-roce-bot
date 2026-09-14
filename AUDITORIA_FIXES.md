@@ -49,8 +49,8 @@
 - **Archivos relacionados:** `src/pedidos/pedido.service.ts:266-268`, `src/pedidos/pedido.repository.ts`, consumidores `app/api/bot/diag/[chatId]/route.ts`
 - **Fix propuesto:** Eliminar el primer branch o renombrar param a `pedidoId` y buscar directo en loop. Agregar test unitario.
 - **Verificación:** `tests/pedido.test.mts` (nuevo) — crear pedido, buscar por id, debe retornar correcto.
-- **Estado:** - [ ] Pendiente
-- **Cómo se ajustó:** _pendiente_
+- **Estado:** - [x] Resuelto — 2026-09-03: eliminado branch `obtenerPedido(id)` y renombrado param a `pedidoId`; solo loop por `p.id===pedidoId`. `tsc` OK.
+- **Cómo se ajustó:** `pedido.service.ts:266` reescrito a búsqueda directa en `PEDIDOS` Map.
 
 ### C4 — `QUEJA` inalcanzable
 - **Severidad:** 🔴 Crítico (funcional)
