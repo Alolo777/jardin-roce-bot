@@ -1,4 +1,5 @@
 import { Intencion, TipoCaso, Prioridad } from '../models/types'
+import { esTextoComprobante as _esTextoComprobante, esCuentaYaCompartida } from '../validators/pago.validator'
 
 export interface Decision {
   intencion: Intencion
@@ -215,13 +216,8 @@ export function detectarEmpezarCero(texto: string): boolean {
   return /empecemos\s+desde\s+cero|desde\s+cero|borr[oó]n\s+y\s+cuenta\s+nueva|nuevo\s+pedido|otro\s+pedido|otro\s+ramo|es\s+aparte|aparte\s+ese|ya\s+hab[ií]a\s+finalizado|ya\s+se\s+finaliz[oó]|ese\s+ya\s+qued[oó]/i.test(texto)
 }
 
-export function esTextoComprobante(texto: string): boolean {
-  return /\b(comprobante|ya\s*pag[uú]e|pagado|pago\s*hecho|ya\s*qued[oó]|ya\s*transfer[ií]|transfer[ií]|transferencia|dep[oó]sito|recibo|ticket|bbva|devi\s+america|devi\s+am[eé]rica|4152)\b/i.test(texto)
-}
-
-export function respuestaPideComprobante(texto: string): boolean {
-  return /(?:bbva|4152|devi\s+am[eé]rica|m[aá]ndame\s+(?:tu\s+)?comprobante|comprobante\s+cuando\s+est[eé]\s+listo|pon\s+tu\s+nombre\s+en\s+concepto)/i.test(texto)
-}
+export const esTextoComprobante = _esTextoComprobante
+export const respuestaPideComprobante = esCuentaYaCompartida
 
 export function detectarWebPedido(texto: string): boolean {
   return /^NUEVO PEDIDO[\s\S]*Florería RoCé[\s\S]*TOTAL A COBRAR[\s\S]*MXN[\s\S]*Flores del arreglo/i.test(texto)

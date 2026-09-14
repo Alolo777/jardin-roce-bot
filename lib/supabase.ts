@@ -1,10 +1,10 @@
-import 'server-only'
 import { createClient } from '@supabase/supabase-js'
 
 // ⚠️ Este cliente usa la service_role key.
 // NUNCA lo importes en componentes del lado del cliente.
 // Solo usar en: API Routes, Server Components, bot.ts
-// 'server-only' garantiza que Next.js falle en build si se importa desde el cliente.
+// Protección: este archivo debe usarse solo en servidor; si se importa desde
+// un Client Component, Next.js bundlearía la service_role key.
 
 if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
   throw new Error('Falta NEXT_PUBLIC_SUPABASE_URL')

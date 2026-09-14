@@ -32,7 +32,9 @@ export function procesarMensajePre(mensaje: MensajeEntrante): ContextoProcesamie
   actualizarActividad(casoActivo)
 
   let pedidoActivo = obtenerPedido(mensaje.clienteId)
-  if (!pedidoActivo) {
+  const intencionesConPedido = new Set(['PEDIDO','PAGO','TRANSFERENCIA','COMPROBANTE','ENVIO','RECOGER','COTIZACION','PERSONALIZADO','PRECIO'])
+  const debeCrearPedido = !pedidoActivo && intencionesConPedido.has(String(decision.intencion))
+  if (debeCrearPedido) {
     pedidoActivo = crearPedido(mensaje.clienteId, mensaje.telefono)
     if (casoActivo?.id && pedidoActivo.id) sincronizarConCaso(pedidoActivo, casoActivo.id)
   }

@@ -448,11 +448,10 @@ export function mediaToBase64(media: Buffer | Uint8Array | ArrayBuffer): string 
 
 
 function fechaInicioFinCDMX(): { inicio: Date; fin: Date } {
-  const ahora = new Date()
-  const cdmxStr = ahora.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })
-  const cdmx = new Date(cdmxStr)
-  const inicio = new Date(Date.UTC(cdmx.getFullYear(), cdmx.getMonth(), cdmx.getDate()))
-  const fin = new Date(Date.UTC(cdmx.getFullYear(), cdmx.getMonth(), cdmx.getDate(), 23, 59, 59, 999))
+  const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit' })
+  const [y, m, d] = fmt.format(new Date()).split('-').map(Number)
+  const inicio = new Date(Date.UTC(y, m - 1, d, 6, 0, 0))
+  const fin = new Date(Date.UTC(y, m - 1, d + 1, 6, 0, 0) - 1)
   return { inicio, fin }
 }
 

@@ -2,7 +2,7 @@ import { obtenerTextoCuenta } from './pago.validator'
 import { SUCURSALES_INFO } from './sucursal.validator'
 import { obtenerPreciosReferencia, obtenerHorarios, obtenerPrecios } from '../config/configuracion.service'
 import { obtenerInventarioDisponible } from '../config/inventario.service'
-import { normalizarTexto } from '../conversation/conversation.service'
+import { normalizarTexto } from '../utils/text'
 import type { ProductoDetalle } from '../models/types'
 import { ahoraCdmx } from '../whatsapp/message-utils'
 

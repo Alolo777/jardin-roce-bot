@@ -286,9 +286,7 @@ export function yaProcesadoRecientemente(msg: any): boolean {
 // UTILIDADES DE TEXTO
 // ════════════════════════════════════════════════════════════════
 
-export function normalizarTexto(texto: string): string {
-  return texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
-}
+export { normalizarTexto } from '../utils/text'
 
 // ════════════════════════════════════════════════════════════════
 // LIMPIEZA DE CACHÉS (llamado desde watchdog de memoria)
