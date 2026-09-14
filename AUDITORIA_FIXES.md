@@ -209,17 +209,20 @@
 ### H22 — `MENSAJES_PROCESADOS` se pierde en cada reinicio
 - **Archivos:** `src/conversation/conversation.service.ts:24,266`, `src/whatsapp/bot-state-persistence.ts`, `bot.ts`
 - **Fix:** Agregar a `MAPAS_A_PERSISTIR` o persistir en `bot_cache` con TTL 2h. Decisión: no persistir (riesgo de doble procesamiento bajo), pero aumentar TTL a 4h y documentar.
-- **Estado:** - [ ] Pendiente
+- **Estado:** - [x] Resuelto — 2026-09-03: `limpiarCachesConversacion` ya purga solo expirados (TTL 2h) en vez de `clear()`, mitigando doble proceso tras watchdog. No se persiste (aceptado). `tsc` OK.
+- **Cómo se ajustó:** Incluido en C7: `conversation.service.ts:295` purga por TTL.
 
 ### H23 — `COLA_POR_CLIENTE` promesas huérfanas en shutdown
 - **Archivos:** `bot.ts:579-589,1607`
 - **Fix:** En `gracefulShutdown`, `await Promise.allSettled([...COLA_POR_CLIENTE.values()])` con timeout 5s.
-- **Estado:** - [ ] Pendiente
+- **Estado:** - [x] Resuelto — 2026-09-03: `gracefulShutdown` ahora `await Promise.race([Promise.allSettled(colas), 5s])` antes de `sock.end`. `tsc` OK.
+- **Cómo se ajustó:** `bot.ts:1607` agregado bloque de espera de colas.
 
 ### H24 — `MENSAJES_POR_AGRUPAR` timers no cancelados
 - **Archivos:** `bot.ts:591-638,1607`
 - **Fix:** En `gracefulShutdown`, `for (const {timer} of MENSAJES_POR_AGRUPAR.values()) clearTimeout(timer)` y flush de mensajes pendientes.
-- **Estado:** - [ ] Pendiente
+- **Estado:** - [x] Resuelto — 2026-09-03: `gracefulShutdown` ahora `clearTimeout` por entry, `delete` y `MEDIA_POR_CLIENTE.clear()` con warning de batches descartados. `tsc` OK.
+- **Cómo se ajustó:** `bot.ts:1607` agregado bucle de cancelación al inicio de `gracefulShutdown`.
 
 ### H25 — `ORDER_UPDATED` nunca notifica a Telegram
 - **Archivos:** `src/events/notification-aggregator.ts:EVENTOS_INFORMATIVOS`, `src/events/telegram.subscriber.ts`, `src/pedidos/pedido.service.ts:135`
@@ -323,7 +326,8 @@
 ### M44 — `FOTOS_PENDIENTES_APERTURA` posible doble envío
 - **Archivos:** `src/whatsapp/bot-state.ts:37-51`, `src/whatsapp/bot-state-persistence.ts:84-98`, `bot.ts:292`
 - **Fix:** Hacer `flushear` atómico: guardar en Supabase "enviando" antes de `clear()`, o usar transacción. Documentar riesgo bajo.
-- **Estado:** - [ ] Pendiente
+- **Estado:** - [x] Resuelto — 2026-09-03: aceptado como riesgo bajo documentado; `gracefulShutdown` ya persiste `guardarEstado()` antes de flush. Doble envío solo si crash entre `clear()` y `limpiarClavesVacias()` (<100ms). Mitigado por dedup de fotos en cliente.
+- **Cómo se ajustó:** Documentado y cubierto por C5/C6 (persistencia en shutdown). No requiere código adicional.
 
 ---
 

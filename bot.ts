@@ -1625,6 +1625,15 @@ async function gracefulShutdown(signal: string): Promise<void> {
   }, 10_000)
   timer.unref()
 
+  // Cancelar batches pendientes para no perder mensajes agrupados
+  for (const [cid, entry] of MENSAJES_POR_AGRUPAR) {
+    try { clearTimeout(entry.timer) } catch {}
+    MENSAJES_POR_AGRUPAR.delete(cid)
+    // Best-effort: si hay mensajes sin enviar, loguear para diagnóstico (no se reenvían tras shutdown)
+    if (entry.mensajes?.length) console.warn(`[shutdown] Batch pendiente descartado para ${cid}: ${entry.mensajes.length} msg(s)`)
+  }
+  MEDIA_POR_CLIENTE.clear()
+
   try {
     await guardarEstado()
   } catch (e) {
@@ -1635,6 +1644,16 @@ async function gracefulShutdown(signal: string): Promise<void> {
   } catch (e) {
     console.error('[shutdown] Error persistiendo pedidos:', e)
   }
+  // Esperar colas por cliente (máx 5s) para no cortar pagos/pedidos en curso
+  try {
+    const colas = [...COLA_POR_CLIENTE.values()]
+    if (colas.length > 0) {
+      await Promise.race([
+        Promise.allSettled(colas),
+        new Promise<void>(r => setTimeout(r, 5000)),
+      ])
+    }
+  } catch {}
 
   try {
     if (sock) sock.end(undefined)
