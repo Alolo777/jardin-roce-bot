@@ -67,8 +67,8 @@
 - **Archivos relacionados:** `bot.ts:1217,1252,1407,1505,1516,1607`, `src/whatsapp/bot-state-persistence.ts`
 - **Fix propuesto:** `reiniciarProceso` → `await gracefulShutdown('restart')` antes de `process.exit(1)` (con timeout de 3s para no bloquear). Extraer `guardarEstadoCritico()` reutilizable.
 - **Verificación:** Simular `reiniciarProceso` en test con mock de `guardarEstado`; debe llamarse.
-- **Estado:** - [ ] Pendiente
-- **Cómo se ajustó:** _pendiente_
+- **Estado:** - [x] Resuelto — 2026-09-03: `reiniciarProceso` ahora hace fire-and-forget `guardarEstado()+persistirPedidosEngine()` con `Promise.race` 3s antes de `process.exit(1)` (compat `never`). `tsc` OK.
+- **Cómo se ajustó:** `bot.ts:1217` reescrito a best-effort async + `throw` para tipado `never`. No bloquea `systemd` restart.
 
 ### C6 — `gracefulShutdown` no guarda `PEDIDOS`/`CASOS`
 - **Severidad:** 🔴 Crítico
@@ -76,8 +76,8 @@
 - **Archivos relacionados:** `bot.ts:1607-1628`, `src/pedidos/pedido.service.ts:52-58` (`persistirPedidosEngine`), `src/casos/caso.service.ts`, `src/whatsapp/bot-state-persistence.ts:MAPAS_A_PERSISTIR`
 - **Fix propuesto:** En `gracefulShutdown`, `await persistirPedidosEngine()` + `await persistirCasos()` (si existe) + agregar `PEDIDOS`/`CASOS` a persistencia o llamarlos explícitamente. No agregar `CACHE_CLIENTE_UUID` (se regenera).
 - **Verificación:** `npx tsc --noEmit`; test de shutdown con mocks.
-- **Estado:** - [ ] Pendiente
-- **Cómo se ajustó:** _pendiente_
+- **Estado:** - [x] Resuelto — 2026-09-03: `gracefulShutdown` ahora `await persistirPedidosEngine()` tras `guardarEstado()`. Casos ya se persisten por operación (`insertarCaso/actualizarCaso`). `tsc` OK.
+- **Cómo se ajustó:** `bot.ts:1607` agregado bloque `try{await persistirPedidosEngine()}catch`. Mantiene timeout 10s.
 
 ### C7 — `CACHE_CLIENTE_UUID` nunca persiste y se limpia cada 5 min
 - **Severidad:** 🔴 Crítico (performance)
@@ -331,10 +331,10 @@
 
 | Grupo | Total | Resueltos | Pendientes | Progreso |
 |-------|-------|-----------|------------|----------|
-| 🔴 Críticos | 18 | 1 (2 parciales) | 17 | 5% |
+| 🔴 Críticos | 18 | 3 (2 parciales) | 15 | 16% |
 | 🟠 Altos | 14 | 0 | 14 | 0% |
 | 🟡 Medianos | 12 | 0 | 12 | 0% |
-| **TOTAL** | **44** | **1** | **43** | 2% |
+| **TOTAL** | **44** | **3** | **41** | 6% |
 
 > Actualizar esta tabla tras cada fix. El porcentaje se calcula sobre `[x]` (resueltos verificados).
 

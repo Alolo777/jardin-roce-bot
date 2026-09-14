@@ -1217,7 +1217,20 @@ async function revisarComandoRemoto(): Promise<void> {
 function reiniciarProceso(motivo: string, contarCrash = true): never {
   console.error(`[bot] 🔄 Reinicio forzado: ${motivo}`)
   if (contarCrash) registrarCrash()
-  process.exit(1)
+  // Guardado best-effort antes de morir (fire-and-forget, máx 3s no bloquea exit)
+  void (async () => {
+    try {
+      await Promise.race([
+        (async () => { try { await guardarEstado() } catch {} try { await persistirPedidosEngine() } catch {} })(),
+        new Promise<void>((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000)),
+      ])
+    } catch {}
+    process.exit(1)
+  })()
+  // Fallback si la promesa no arranca
+  setTimeout(() => process.exit(1), 3500).unref?.()
+  // Mantener compatibilidad con signatura `never` (el proceso muere, pero TS lo ve como no-retorno)
+  throw new Error(`reiniciarProceso: ${motivo}`)
 }
 
 function limpiarSocketActual(): void {
@@ -1616,6 +1629,11 @@ async function gracefulShutdown(signal: string): Promise<void> {
     await guardarEstado()
   } catch (e) {
     console.error('[shutdown] Error guardando estado:', e)
+  }
+  try {
+    await persistirPedidosEngine()
+  } catch (e) {
+    console.error('[shutdown] Error persistiendo pedidos:', e)
   }
 
   try {
