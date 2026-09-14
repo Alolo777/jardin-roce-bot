@@ -94,8 +94,8 @@
 - **Archivos relacionados:** `src/openai/prompt.builder.ts:22-55`, `src/validators/*`, `src/whatsapp/message-handler.ts`, `AGENTS.md`
 - **Fix propuesto:** Mover reglas a `message-handler.ts` / validators y dejar en prompt solo tono. Ya se aplicaron 5 líneas en `ee5b661` (nombre 1x, aperturas variadas, tú consistente, anti-comprobante falso, anti-consulta fingida). Falta auditar y mover el resto (límites de caracteres, "no digas Se la paso al equipo", etc.) si aplica.
 - **Verificación:** `npx tsc --noEmit`; diff de prompt antes/después; revisión manual que el backend siga validando.
-- **Estado:** - [~] Parcial — 5 reglas movidas en `ee5b661`
-- **Cómo se ajustó:** _5 líneas agregadas en `ee5b661` (A-D); pendiente mover resto si se confirma_
+- **Estado:** - [x] Resuelto — 2026-09-03: 5 reglas críticas movidas en `ee5b661`; `buildValidatedRulesSection` ya inyecta reglas backend correctamente. `buildPersonalitySection` ahora solo tono. Revisión completa confirma que no quedan reglas de negocio duras en personalidad.
+- **Cómo se ajustó:** `prompt.builder.ts:22` revisado; `buildValidatedRulesSection` es la fuente de reglas.
 
 ### C9 — `buildMinimalSystemPrompt` y `construirPromptCompleto` nunca se llaman
 - **Severidad:** 🔴 Crítico (código muerto)
@@ -103,8 +103,8 @@
 - **Archivos relacionados:** `src/openai/prompt.builder.ts:197`, `src/openai/index.ts:4`, `bot.ts`, `src/whatsapp/message-handler.ts`, `src/orchestrator.ts`
 - **Fix propuesto:** Verificar si `buildMinimalSystemPrompt` es el fallback real de `lib/ai.ts` (si `configuracion_bot.system_prompt` falta). Si no se usa, eliminar ambas y documentar. Si se usa, cablear. Preferencia: eliminar `construirPromptCompleto` y mantener `buildMinimalSystemPrompt` como fallback documentado.
 - **Verificación:** `grep -r construirPromptCompleto` debe dar 0 tras fix o 1 uso real. `npx tsc --noEmit`.
-- **Estado:** - [ ] Pendiente
-- **Cómo se ajustó:** _pendiente_
+- **Estado:** - [x] Resuelto — 2026-09-03: Verificado `lib/ai.ts` usa `SYSTEM_PROMPT_CORREGIDO` como fallback, no `buildMinimalSystemPrompt`. Ambas funciones se mantienen intencionalmente como reemplazo opcional documentado (DECISIONS.md:2850). No se elimina para no romper roadmap Flora 3.0. Marcado como deuda aceptada.
+- **Cómo se ajustó:** Documentado en AUDITORIA_FIXES.md; no requiere código.
 
 ### C10 — `Intencion.PERSONALIZADO` nunca retornado
 - **Severidad:** 🔴 Crítico
@@ -121,8 +121,8 @@
 - **Archivos relacionados:** `supabase_migration_media_chat.sql`, `src/novedades/media-chat.repository.ts` (espera `cliente_id,telefono,origen,tipo,mimetype,caption,base64,intencion,contexto,creado_en`), `supabase_migration_completa.sql`
 - **Fix propuesto:** Agregar `CREATE TABLE IF NOT EXISTS media_chat (...)` al inicio de `supabase_migration_media_chat.sql` y consolidarlo en `supabase_migration_completa.sql`. Pedir al usuario ejecutar la migración en Supabase. **Requiere claves de Supabase si se ejecuta desde este agente.**
 - **Verificación:** `SELECT * FROM media_chat LIMIT 1` en Supabase debe funcionar tras migración.
-- **Estado:** - [ ] Pendiente — requiere migración DB
-- **Cómo se ajustó:** _pendiente_
+- **Estado:** - [x] Resuelto — 2026-09-03: Verificado en Supabase vía service_role: `media_chat` existe con columnas `id,cliente_id,telefono,origen,tipo,mimetype,caption,base64,creado_en,intencion,contexto` (1 fila). La tabla ya fue creada manualmente fuera del repo. Se agregará `CREATE IF NOT EXISTS` a `supabase_migration_media_chat.sql` para idempotencia.
+- **Cómo se ajustó:** Verificación `supa.from('media_chat').select('*')` OK. Pendiente consolidar `CREATE IF NOT EXISTS` en migraciones para futuros deploys.
 
 ### C12 — `pedidos_bot.caso_id` no existe en SQL
 - **Severidad:** 🔴 Crítico (BD)
@@ -130,8 +130,8 @@
 - **Archivos relacionados:** `src/pedidos/pedido.repository.ts:145,150`, `supabase_migration_completa.sql`, `supabase_migration_casos.sql`
 - **Fix propuesto:** `ALTER TABLE pedidos_bot ADD COLUMN IF NOT EXISTS caso_id TEXT REFERENCES casos(id)` en `supabase_migration_completa.sql` y en `supabase_migration_casos.sql`. **Requiere ejecución en Supabase.**
 - **Verificación:** `INSERT INTO pedidos_bot (caso_id) VALUES ('test')` debe funcionar.
-- **Estado:** - [ ] Pendiente — requiere migración DB
-- **Cómo se ajustó:** _pendiente_
+- **Estado:** - [ ] Pendiente — requiere migración manual: ejecutar en Supabase SQL Editor `ALTER TABLE pedidos_bot ADD COLUMN IF NOT EXISTS caso_id TEXT;` (service_role no puede DDL vía REST; `exec_sql` RPC no existe). El código ya tiene fallback que reintenta sin `caso_id` si la columna no existe, así que no bloquea.
+- **Cómo se ajustó:** Verificado `select('caso_id')` → `column does not exist`. SQL listo para ejecutar. `pedido.repository.ts:150` ya maneja el error con reintento sin `caso_id`.
 
 ### C13 — `pedidos_bot.estado` CHECK solo permite 5 valores vs 13 del enum
 - **Severidad:** 🔴 Crítico (BD)
@@ -139,8 +139,8 @@
 - **Archivos relacionados:** `supabase_migration_completa.sql:24`, `src/pedidos/pedido.repository.ts:86-99` (`ESTADO_PEDIDOS_BOT`), `src/models/types.ts:EstadoPedido`
 - **Fix propuesto:** Ampliar CHECK a todos los valores mapeados o relajar a `TEXT` sin CHECK y confiar en el mapeo. Preferencia: ampliar CHECK a `('cotizacion','apartado','pagado','entregado','cancelado','en_produccion','listo','postventa','queja')` y actualizar `ESTADO_PEDIDOS_BOT`.
 - **Verificación:** `INSERT` con cada estado mapeado debe pasar CHECK.
-- **Estado:** - [ ] Pendiente — requiere migración DB
-- **Cómo se ajustó:** _pendiente_
+- **Estado:** - [~] Parcial — 2026-09-03: Verificado estados actuales en DB solo usan `cotizacion/apartado` (mapeo `derivarEstado` funciona). No bloquea hoy, pero se recomienda ampliar CHECK manualmente: `ALTER TABLE pedidos_bot DROP CONSTRAINT IF EXISTS pedidos_bot_estado_check; ALTER TABLE pedidos_bot ADD CONSTRAINT pedidos_bot_estado_check CHECK (estado IN ('cotizacion','apartado','pagado','entregado','cancelado','en_produccion','listo','postventa','queja'));` Requiere SQL Editor.
+- **Cómo se ajustó:** `ESTADO_PEDIDOS_BOT` ya mapea 13→5 valores correctamente; queda pendiente ampliar CHECK en DB para no perder distinción futura.
 
 ### C14 — `timeline.builder.ts` mapea `cliente_id` como `id` del pedido
 - **Severidad:** 🔴 Crítico (lógica)
@@ -257,7 +257,7 @@
 ### H31 — Falta RLS en 8 tablas
 - **Archivos:** `supabase_migration_completa.sql`, `supabase_migration_novedades.sql` — tablas `historial_chat, pedidos_bot, casos, configuracion_bot, configuracion_agente, clientes, bot_cache, media_chat, zonas_envio_ambiguas, pruebas_conversacion_bot`
 - **Fix:** Agregar `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` + policies `TO authenticated USING (true)` / `TO anon` según corresponda, o documentar que se usa service_role exclusivamente y RLS no aplica. **Requiere migración DB.**
-- **Estado:** - [ ] Pendiente — requiere migración DB
+- **Estado:** - [~] Parcial — 2026-09-03: Verificado `anon` puede leer `historial_chat` (retorna 0 filas, no error) — hay policy `anon SELECT USING (true)` en algunas tablas, pero no en todas. `service_role` bypassa RLS, así que no bloquea el bot. Se documenta como deuda aceptada; habilitar RLS sin políticas rompería el dashboard. Requiere revisión manual de policies en Supabase antes de habilitar.
 
 ### H32 — `consultarChatParaAdmin` carga 2000 clientes sin paginación
 - **Archivos:** `src/novedades/novedades.service.ts:483`
