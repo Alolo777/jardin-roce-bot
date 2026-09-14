@@ -24,6 +24,7 @@
 - `sucursal.validator` sucursales distinguibles (Maps Centro/Norte reales).
 - `response.validator` "está listo" permitido si backend marcó LISTO/ENTREGADO.
 - `pago.validator` "ya quedó" fuera del regex global, dentro de contexto con pago.
+- `novedad.detector` PAGO_PENDIENTE ahora prioridad 'alta' (era ternario roto que siempre daba 'media').
 
 **Telegram y privacidad (T1-T6, N3-priv, A1-A2):**
 - `notification-aggregator` BOT_* fuera de críticos (dedup 2min, anti crash-loop spam).
