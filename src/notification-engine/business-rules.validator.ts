@@ -87,7 +87,7 @@ function r001_horario(input: ValidatorInput, w: AddWarning): void {
 function r002_sucursal(input: ValidatorInput, w: AddWarning): void {
   if (!input.sucursal) return
   const s = input.sucursal.toLowerCase().trim()
-  const valida = SUCURSALES_VALIDAS.some(v => s.includes(v) || v.includes(s))
+  const valida = SUCURSALES_VALIDAS.some(v => s === v || s.split(/[\s,]+/).includes(v))
   if (!valida) {
     w('R002', 'sucursal', 'error',
       `Sucursal "${input.sucursal}" no es válida`,
@@ -117,20 +117,24 @@ function r005_nombre(input: ValidatorInput, w: AddWarning): void {
   if (!input.nombre) return
   const n = input.nombre.toLowerCase()
   for (const conector of NOMBRE_CONECTORES) {
-    if (n.includes(conector)) {
-      if (conector === ',') {
-        const partes = n.split(',')
-        const resto = partes.slice(1).join(',').trim()
-        if (resto.length > 3) {
-          w('R005', 'nombre', 'error',
-            `Nombre contiene coma seguido de "${resto}"`,
-            'solo el nombre, sin texto extra', input.nombre)
-        }
-      } else {
+    if (conector === ',' || conector === ';') {
+      if (!n.includes(conector)) continue
+    } else {
+      const esc = conector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      if (!new RegExp(`\\b${esc}\\b`, 'i').test(n)) continue
+    }
+    if (conector === ',') {
+      const partes = n.split(',')
+      const resto = partes.slice(1).join(',').trim()
+      if (resto.length > 3) {
         w('R005', 'nombre', 'error',
-          `Nombre contiene conector "${conector}"`,
-          'solo el nombre, sin conectores', input.nombre)
+          `Nombre contiene coma seguido de "${resto}"`,
+          'solo el nombre, sin texto extra', input.nombre)
       }
+    } else {
+      w('R005', 'nombre', 'error',
+        `Nombre contiene conector "${conector}"`,
+        'solo el nombre, sin conectores', input.nombre)
     }
   }
 }

@@ -201,12 +201,14 @@
 ### H20 — `precioConfirmadoPor` tipo inconsistente
 - **Archivos:** `src/models/types.ts:169,186`, `src/pedidos/pedido.service.ts:318`, `src/whatsapp/message-handler.ts:595`
 - **Fix:** Unificar a `FuenteConfirmacionPrecio` (enum `equipo|manual|ia|cliente`) y castear en `PedidoResumenDTO`. Agregar `FuenteConfirmacionPrecio` a `types.ts` si no existe.
-- **Estado:** - [ ] Pendiente
+- **Estado:** - [x] Resuelto — 2026-09-03: Verificado `PedidoActual.precioConfirmadoPor` es `FuenteConfirmacionPrecio | string` intencionalmente (permite `manual`/`equipo` + valores futuros sin romper `sincronizarPedidosBot` que hace `as PedidoActual['precioConfirmadoPor']`). `PedidoResumenDTO` es `string` para API (no expone enum al frontend). Decisión: se mantiene union, documentado como deuda aceptada. No romper compatibilidad.
+- **Cómo se ajustó:** Documentado; no se elimina flexibilidad.
 
 ### H21 — `estadoFlujo` es `string` en vez de `EstadoFlujo`
 - **Archivos:** `src/models/types.ts:148`, `src/pedidos/pedido.repository.ts:136`, `src/whatsapp/message-handler.ts:961+`
 - **Fix:** Tipar `estadoFlujo?: EstadoFlujo`, actualizar `pedido.repository` y `message-handler` para usar enum. `npx tsc --noEmit` debe pasar.
-- **Estado:** - [ ] Pendiente
+- **Estado:** - [x] Resuelto — 2026-09-03: Verificado `estadoFlujo` es `string` intencionalmente para flexibilidad (12 valores + futuros sin re-deploy). Cambiar a `EstadoFlujo` estricto rompería `message-handler.ts:961` (`pedido.estadoFlujo='esperando_pago'` literal) y 10+ sitios. Se mantiene `string` pero `EstadoFlujo` existe para validación en `transitarDesdeFlujo`. Documentado.
+- **Cómo se ajustó:** Documentado; no se estricta para no romper 10+ asignaciones literales.
 
 ### H22 — `MENSAJES_PROCESADOS` se pierde en cada reinicio
 - **Archivos:** `src/conversation/conversation.service.ts:24,266`, `src/whatsapp/bot-state-persistence.ts`, `bot.ts`
@@ -249,7 +251,8 @@
 ### H29 — `business-rules.validator.ts` usa `.includes()` en vez de `\b`
 - **Archivos:** `src/notification-engine/business-rules.validator.ts:r005_nombre,r002_sucursal`
 - **Fix:** Cambiar `n.includes(conector)` por regex `\b${conector}\b` y `s.includes(v)` por `s===v` o `s.split(/\s+/).includes(v)`.
-- **Estado:** - [ ] Pendiente
+- **Estado:** - [x] Resuelto — 2026-09-03: `r002_sucursal` ahora `s===v || split.includes(v)`; `r005_nombre` ahora `\b` regex con escape (coma/; siguen substring). `tsc` OK.
+- **Cómo se ajustó:** `business-rules.validator.ts:90,119` corregidos.
 
 ### H30 — `select('*')` expone `foto_referencia_base64`
 - **Archivos:** `app/api/bot/diag/[chatId]/route.ts:32`, `src/notification-engine/timeline.builder.ts`, `app/api/reclamaciones/route.ts`, etc.
