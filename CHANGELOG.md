@@ -1,5 +1,45 @@
 # CHANGELOG
 
+## 2026-09-14
+
+### Fix — Auditoría profunda (15 hallazgos N1-N15 + Telegram T1-T6 + timezone A1-A2 + diagnóstico producción)
+
+**Diagnóstico producción (logs crash-loop 401):**
+- `src/whatsapp/message-entry.ts:79` DIAG se logueaba antes del filtrado → flood de sync noise (`type: unknown + fromMe`). Ahora filtra grupos/newsletter/status/sync antes de loguear.
+- `bot.ts:1049` path equipo "pagado" documentado como verificación humana intencional.
+- Config "0 precios/horarios" = tablas Supabase vacías, se usan defaults. Informativo.
+
+**Ventas (N1-N3):**
+- `message-handler.ts` bloque "lo quiero"→venta ELIMINADO; `procesarMediaAcumulado` retorna `'comprobante-cerrado'` para no duplicar `ventaCerradaHandler`; confirmación al cliente sin reconstruir estado.
+- `lib/ai.ts` `clasificarImagenVenta` retorna tipo `ClasificacionImagenVentaResultado` (monto tipado, sin `as any`).
+
+**Estados y casos (N4-N6):**
+- `timeline.builder` variable renombrada (comparación DB lowercase era correcta).
+- `caso.service` `reabrirCaso` reescrito (código muerto roto).
+- `pedido.service` transiciones estrictas sin saltos (BFS sigue resolviendo flujos largos).
+
+**Decisión y validación (N7-N9, N12-N14):**
+- `decision.engine` COMPROBANTE alcanzable; `message-handler` usa `detectarConfirmacionCorta` compartida.
+- `prompt.builder` pagos como informativo con referencia a R007/R009.
+- `sucursal.validator` sucursales distinguibles (Maps Centro/Norte reales).
+- `response.validator` "está listo" permitido si backend marcó LISTO/ENTREGADO.
+- `pago.validator` "ya quedó" fuera del regex global, dentro de contexto con pago.
+
+**Telegram y privacidad (T1-T6, N3-priv, A1-A2):**
+- `notification-aggregator` BOT_* fuera de críticos (dedup 2min, anti crash-loop spam).
+- `lib/telegram` rate limit 1.5s + dedup 60s.
+- `bot/status` sin `foto_referencia_base64` (conteo separado); timezones CDMX→UTC 6AM en reportes y status.
+
+**Archivos:** `message-entry.ts`, `message-handler.ts`, `bot.ts`, `lib/ai.ts`, `lib/telegram.ts`, `pedido.service.ts`, `caso.service.ts`, `decision.engine.ts`, `prompt.builder.ts`, `sucursal.validator.ts`, `response.validator.ts`, `pago.validator.ts`, `novedad.detector.ts`, `timeline.builder.ts`, `notification-aggregator.ts`, `reportes/route.ts`, `bot/status/route.ts`, `AUDITORIA_FIXES.md`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; tests novedades/precio/response-validator/nombre/horario/telefono/poda OK.
+
+**Impacto:** Compatible. Requiere `git pull && sudo systemctl restart floreria-bot` en producción. El DIAG flood desaparecerá y los mensajes del dueño llegarán al flujo correcto.
+
+**Rollback:** Revertir commit `fix(auditoria-profunda)`.
+
+---
+
 ## 2026-09-03
 
 ### Fix — Ventas solo con comprobante foto/PDF + monto IA (evita falsos por teléfonos/"ok"/"listo")

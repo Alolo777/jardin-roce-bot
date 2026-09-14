@@ -12,8 +12,13 @@ function jidANumero(jid: string): string {
 }
 
 const TRANSICIONES_VALIDAS: Record<string, EstadoPedido[]> = {
-  [EstadoPedido.NUEVO]: [EstadoPedido.COTIZANDO, EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO, EstadoPedido.QUEJA],
-  [EstadoPedido.COTIZANDO]: [EstadoPedido.PRECIO_CONFIRMADO, EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO, EstadoPedido.QUEJA],
+  // N6: máquina secuencial estricta (AGENTS.md) — sin saltos. NUEVO solo va a
+  // COTIZANDO; COTIZANDO solo a PRECIO_CONFIRMADO. transitarDesdeFlujo usa BFS
+  // (encontrarCaminoEstados) así que los flujos largos siguen funcionando paso
+  // a paso. Terminales (CANCELADO/ARCHIVADO/QUEJA) permitidos desde cualquier
+  // estado porque el cliente puede cancelar o quejarse en cualquier momento.
+  [EstadoPedido.NUEVO]: [EstadoPedido.COTIZANDO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO, EstadoPedido.QUEJA],
+  [EstadoPedido.COTIZANDO]: [EstadoPedido.PRECIO_CONFIRMADO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO, EstadoPedido.QUEJA],
   [EstadoPedido.PRECIO_CONFIRMADO]: [EstadoPedido.ESPERANDO_DATOS, EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO, EstadoPedido.QUEJA],
   [EstadoPedido.ESPERANDO_DATOS]: [EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO, EstadoPedido.QUEJA],
   [EstadoPedido.ESPERANDO_PAGO]: [EstadoPedido.APARTADO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO, EstadoPedido.QUEJA],

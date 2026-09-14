@@ -19,8 +19,13 @@ export async function GET(req: NextRequest) {
     const hasta = searchParams.get('hasta') || fechaCdmxISO()
     const sucursal = searchParams.get('sucursal')
 
-    const inicio = new Date(desde + 'T00:00:00.000Z')
-    const fin = new Date(hasta + 'T23:59:59.999Z')
+    // A1: Supabase guarda creado_en en UTC. CDMX es UTC-6, así que la
+    // medianoche CDMX = 06:00 UTC. Sin este offset el rango se desfasa 6h
+    // (incluye tarde del día anterior, excluye noche del día pedido).
+    const inicio = new Date(desde + 'T06:00:00.000Z')
+    const finDate = new Date(hasta + 'T06:00:00.000Z')
+    finDate.setUTCDate(finDate.getUTCDate() + 1)
+    const fin = new Date(finDate.getTime() - 1)
 
     if (isNaN(inicio.getTime()) || isNaN(fin.getTime())) {
       return NextResponse.json({ error: 'Fechas inválidas' }, { status: 400 })

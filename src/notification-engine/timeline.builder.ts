@@ -21,7 +21,9 @@ export async function buildTimeline(
   ].filter(Boolean).sort().reverse()[0] || null
 
   const estadoActual = pedido?.estado ?? caso?.estado ?? null
-  const pedidoCanceladoOArchivado = pedido?.estado === 'cancelado' || pedido?.estado === 'entregado'
+  // N4: pedidos_bot.estado usa minúsculas en DB ('cancelado'|'entregado' son
+  // terminales). Se renombra para reflejar lo que realmente verifica.
+  const pedidoEnEstadoTerminal = pedido?.estado === 'cancelado' || pedido?.estado === 'entregado'
 
   return {
     telefono,
@@ -31,8 +33,8 @@ export async function buildTimeline(
     historial,
     ultimaActividad,
     estadoActual,
-    existePedidoActivo: !!pedido && !pedidoCanceladoOArchivado,
-    pedidoCanceladoOArchivado,
+    existePedidoActivo: !!pedido && !pedidoEnEstadoTerminal,
+    pedidoCanceladoOArchivado: pedidoEnEstadoTerminal,
   }
 }
 

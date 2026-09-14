@@ -34,11 +34,50 @@ function horaActual(): string {
   })
 }
 
+// T5: rate limiting global — evita ráfagas (crash-loop generaba decenas de
+// mensajes/segundo). Mínimo 1.5s entre envíos; mensajes idénticos dentro de
+// 60s se suprimen (dedup por contenido).
+const ULTIMO_ENVIO_MS = { valor: 0 }
+const INTERVALO_MINIMO_MS = 1500
+const DEDUP_MENSAJES = new Map<string, number>()
+const DEDUP_TTL_MS = 60_000
+
+function huellaMensaje(texto: string): string {
+  return texto.trim().slice(0, 200)
+}
+
+async function respetarRateLimit(): Promise<void> {
+  const ahora = Date.now()
+  const espera = INTERVALO_MINIMO_MS - (ahora - ULTIMO_ENVIO_MS.valor)
+  if (espera > 0) await new Promise(r => setTimeout(r, espera))
+  ULTIMO_ENVIO_MS.valor = Date.now()
+}
+
+function esDuplicadoReciente(texto: string): boolean {
+  const ahora = Date.now()
+  const huella = huellaMensaje(texto)
+  const ultimo = DEDUP_MENSAJES.get(huella) ?? 0
+  if (ahora - ultimo < DEDUP_TTL_MS) return true
+  DEDUP_MENSAJES.set(huella, ahora)
+  if (DEDUP_MENSAJES.size > 200) {
+    for (const [k, ts] of DEDUP_MENSAJES) {
+      if (ahora - ts > DEDUP_TTL_MS) DEDUP_MENSAJES.delete(k)
+    }
+  }
+  return false
+}
+
 async function enviar(texto: string, intentos = 3): Promise<void> {
   if (!process.env.TELEGRAM_BOT_TOKEN || CHAT_IDS.length === 0) {
     console.warn('[Telegram] Variables no configuradas.')
     return
   }
+
+  if (esDuplicadoReciente(texto)) {
+    console.log('[Telegram] Mensaje duplicado suprimido (dedup 60s).')
+    return
+  }
+  await respetarRateLimit();
 
   const textoCortado = texto.length > 4000 ? texto.slice(0, 4000) + '\n…_(recortado)_' : texto
 

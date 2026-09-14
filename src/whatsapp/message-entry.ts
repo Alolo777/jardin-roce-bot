@@ -76,11 +76,14 @@ export function createMessageEntry(deps: MessageEntryDeps) {
     const msgType = getMessageType(msg)
     const body = getMessageBody(msg) || ''
 
-    console.log(`[DIAG] from: ${remoteJid} | type: ${msgType} | fromMe: ${msg.key?.fromMe}`)
-
     if (isJidGroup(remoteJid)) return
     if (remoteJid.endsWith('@newsletter')) return
     if (remoteJid === 'status@broadcast') return
+    // Ruido de sincronización de Baileys al reconectar: ecos/protocolos sin
+    // contenido (type unknown + fromMe) que antes inundaban los logs.
+    if (msgType === 'unknown' && msg.key?.fromMe && !body.trim()) return
+
+    console.log(`[DIAG] from: ${remoteJid} | type: ${msgType} | fromMe: ${msg.key?.fromMe}`)
     if (!msg.key?.fromMe && yaProcesadoRecientemente(msg)) {
       console.log(`[entry] ↩️ Mensaje duplicado ignorado: ${obtenerMensajeId(msg)}`)
       return

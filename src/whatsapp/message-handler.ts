@@ -70,7 +70,9 @@ function extraerFechaHoraPedido(texto: string): { fecha?: string; hora?: string 
 function contextoEsperaComprobante(clienteId: string, textoTurno: string, historialRecienteTexto: string, deps: Pick<MsgHandlerDeps, 'pedidoActual'>): boolean {
   const pedido = deps.pedidoActual(clienteId)
   const contextoPago = pedido.metodoPago === 'transferencia' || pedido.estadoFlujo === 'esperando_pago' || /comprobante|pago\s+por\s+transferencia|mandame\s+(?:tu\s+)?comprobante|m[aá]ndame\s+(?:tu\s+)?comprobante|cuenta\s*(?:bbva)?\s*:?\s*4152|bbva|devi\s+am[eé]rica|pon\s+tu\s+nombre\s+en\s+concepto|cuando\s+est[eé]\s+listo/i.test(historialRecienteTexto)
-  const confirmaTurno = /\b(listo|claro|va|vale|ya\s+est[aá]|hecho|te\s+lo\s+mand[oó]|lo\s+mand[oó])\b/i.test(textoTurno)
+  // N14: "ya quedó" vive aquí (con contexto de pago exigido por contextoPago),
+  // no en esTextoComprobante global — evita falsos por charla casual.
+  const confirmaTurno = /\b(listo|claro|va|vale|ya\s+est[aá]|ya\s+qued[oó]|hecho|te\s+lo\s+mand[oó]|lo\s+mand[oó])\b/i.test(textoTurno)
   const imagenSinTexto = !textoTurno.trim() || /^\[Imagen sin texto\]$/i.test(textoTurno.trim())
   return Boolean(contextoPago && (imagenSinTexto || confirmaTurno || esTextoComprobante(textoTurno)))
 }
@@ -262,7 +264,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
     pushName?: string,
     intencion?: string,
     contextoExtra?: string
-  ): Promise<'referencia' | 'comprobante' | 'imagen' | null> {
+  ): Promise<'referencia' | 'comprobante' | 'comprobante-cerrado' | 'imagen' | null> {
     const mediaAcumulado = deps.MEDIA_POR_CLIENTE.get(clienteId)
     if (!mediaAcumulado || mediaAcumulado.length === 0) return null
 
@@ -300,7 +302,7 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         `texto_turno: ${textoTurno || 'sin texto'}`,
         `intencion: ${intencion ?? 'sin_definir'}`,
       ].join('\n')
-      const vision: any = await clasificarImagenVenta(historial, contextoVision, imagenesParaVision, intencion as any)
+      const vision = await clasificarImagenVenta(historial, contextoVision, imagenesParaVision, intencion as any)
       console.log(`[bot] 👁️ Visión clasifica ${telefono}: ${vision.tipo} (${vision.razon}) monto=${vision.monto ?? 'null'}`)
       if (typeof vision.monto === 'number' && Number.isFinite(vision.monto)) montoVision = vision.monto
       if (vision.tipo === 'comprobante') {
@@ -404,6 +406,9 @@ const ultimoMedia = mediaAcumulado[mediaAcumulado.length - 1]
         : venta
       if (ventaConMonto && deps.ventaListaParaPagoTransferencia(clienteId)) {
         await deps.ventaCerradaHandler(clienteId, ventaConMonto, telefono)
+        // N2: la venta ya quedó cerrada aquí — el bloque externo
+        // (tipoMediaProcesada === 'comprobante') debe omitirla.
+        return 'comprobante-cerrado'
       } else {
         await deps.persistirPedido(clienteId, telefono, 'apartado', `Comprobante recibido${montoVision ? ` $${montoVision}` : ''}, faltan datos para cierre`)
         if (debeEnviarAlertaDedup(clienteId, 'comprobante-pendiente', textoTurno || 'comprobante', 30 * 60_000)) {
@@ -693,7 +698,9 @@ const ultimoMedia = mediaAcumulado[mediaAcumulado.length - 1]
           `INSTRUCCION: Responde breve y amable. No inventes datos de sucursal, fotos del local, estado de pedidos ni conversaciones de Instagram. ` +
           `Di que lo reportas al equipo para que puedan apoyarle. El sistema notificará al administrador.`
       }
-      const confirmaCorto = /^(ok|okay|okey|oki|okis|vale|va|dale|s[ií]|si|perfecto|de acuerdo|esta bien|está bien)$/i.test(textoCliente.trim())
+      // N8: usa la función compartida (no duplicar regex). NOTA: confirmaCorto
+      // NUNCA debe cerrar ventas por sí solo — solo flujo conversacional.
+      const confirmaCorto = detectarConfirmacionCorta(textoCliente)
       if (confirmaCorto && /env[ií]o a esa zona cuesta|costo.*env[ií]o|cuesta \$/.test(historialTexto)) {
         contextoExtra +=
           `\n\n[CLIENTE ACEPTÓ EL COSTO DE ENVÍO] ` +
@@ -911,6 +918,18 @@ const ultimoMedia = mediaAcumulado[mediaAcumulado.length - 1]
         await agregarAlHistorial(telefono, 'assistant', respuesta, OrigenMensaje.FLORA)
         return
       }
+      // N2: 'comprobante-cerrado' ya registró la venta en
+      // procesarMediaAcumulado — solo confirmar al cliente, no duplicar.
+      if (tipoMediaProcesada === 'comprobante-cerrado') {
+        // El pedido ya quedó archivado por ventaCerradaHandler, así que no se
+        // reconstruye desde estado (evita crear pedido vacío como side-effect).
+        const confirmacion = `¡Gracias! 🌸 Comprobante recibido, tu pedido quedó apartado.`
+        await deps.responderMensaje(msg, confirmacion)
+        await agregarAlHistorial(telefono, 'assistant', confirmacion, OrigenMensaje.FLORA)
+        ventaCerrada = true
+        return
+      }
+      // Solo 'comprobante' (pendiente: faltaban datos) intenta el cierre aquí.
       if (tipoMediaProcesada === 'comprobante') {
         const venta = deps.ventaDesdeEstado(clienteId)
         if (venta && deps.ventaListaParaCerrar(clienteId) && !deps.pedidoEstaCerrado(clienteId)) {
@@ -1124,19 +1143,10 @@ const ultimoMedia = mediaAcumulado[mediaAcumulado.length - 1]
           }
         }
 
-        const ventaEstado = deps.ventaDesdeEstado(clienteId)
-        if (!deps.pedidoEstaCerrado(clienteId) && ventaEstado && deps.ventaListaParaCerrar(clienteId) && (
-          confirmaCorto || /lo[sv]? quiero|me gusta|adelante|procedo|hagamoslo|hag[aá]moslo|d[aá]le|adelante|apartalo|aparta lo|si? (por favor|gracias)/i.test(textoCliente)
-        )) {
-          const totalTexto = formatearTotalConDesglose(clienteId)
-          if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
-          deps.ventaCerradaHandler(clienteId, {
-            cliente: ventaEstado.cliente,
-            producto: ventaEstado.producto,
-            total: totalTexto,
-            direccion: ventaEstado.direccion,
-          }, await numeroRealPromise)
-        }
+        // N1: cierre por texto ("lo quiero"/"ok") ELIMINADO — la venta solo se
+        // registra con foto/PDF de comprobante validado por IA (bloque
+        // esComprobante) o por confirmación explícita del equipo.
+        // El handler de "confirmaCorto" (línea ~1028) ya pide el comprobante.
 
         const intervencionAntesDeEnviar = obtenerIntervencionHumanaReciente(clienteId)
         if (intervencionAntesDeEnviar && intervencionAntesDeEnviar.haceMs < 30_000) {

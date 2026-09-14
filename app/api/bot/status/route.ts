@@ -12,12 +12,13 @@ export async function GET() {
 
     if (configError) throw configError
 
-    // Obtener ventas de hoy
-    const ahora = new Date()
-    const cdmxStr = ahora.toLocaleString('en-US', { timeZone: 'America/Mexico_City' })
-    const cdmx = new Date(cdmxStr)
-    const inicio = new Date(Date.UTC(cdmx.getFullYear(), cdmx.getMonth(), cdmx.getDate()))
-    const fin = new Date(Date.UTC(cdmx.getFullYear(), cdmx.getMonth(), cdmx.getDate(), 23, 59, 59, 999))
+    // Obtener ventas de hoy.
+    // A2: CDMX es UTC-6 → medianoche CDMX = 06:00 UTC. El código anterior usaba
+    // UTC midnight (6h antes), desfazando todas las métricas "de hoy".
+    const cdmxHoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(new Date())
+    const inicio = new Date(cdmxHoy + 'T06:00:00.000Z')
+    const finMs = inicio.getTime() + 24 * 60 * 60_000 - 1
+    const fin = new Date(finMs)
 
     const { data: ventas, error: ventasError } = await supabaseAdmin
       .from('reporte_ventas')
@@ -33,7 +34,8 @@ export async function GET() {
       let pedidos: any[] | null = null
       const pedidosMetricasExtendidos = await supabaseAdmin
         .from('pedidos_bot')
-        .select('telefono, cliente_nombre, producto, total, zona_envio, precio_envio, direccion, sucursal, metodo_pago, estado, estado_flujo, fecha_entrega, hora_entrega, foto_referencia_base64, actualizado_en')
+        // N-privacidad: NUNCA exponer foto_referencia_base64 en API pública.
+        .select('telefono, cliente_nombre, producto, total, zona_envio, precio_envio, direccion, sucursal, metodo_pago, estado, estado_flujo, fecha_entrega, hora_entrega, actualizado_en')
         .in('estado', ['apartado', 'pagado', 'entregado'])
         .gte('actualizado_en', inicio.toISOString())
         .lte('actualizado_en', fin.toISOString())
@@ -96,7 +98,8 @@ export async function GET() {
       let pedidos: any[] | null = null
       const pedidosExtendidos = await supabaseAdmin
         .from('pedidos_bot')
-        .select('id, cliente_id, telefono, estado, estado_flujo, cliente_nombre, producto, precio_arreglo, zona_envio, precio_envio, direccion, sucursal, metodo_pago, nota, total, ultimo_mensaje, requiere_revision, fecha_entrega, hora_entrega, detalles_especiales, precio_confirmado_por, foto_referencia_base64, actualizado_en')
+        // N-privacidad: NUNCA exponer foto_referencia_base64 en API pública.
+        .select('id, cliente_id, telefono, estado, estado_flujo, cliente_nombre, producto, precio_arreglo, zona_envio, precio_envio, direccion, sucursal, metodo_pago, nota, total, ultimo_mensaje, requiere_revision, fecha_entrega, hora_entrega, detalles_especiales, precio_confirmado_por, actualizado_en')
         .in('estado', ['cotizacion', 'apartado'])
         .order('actualizado_en', { ascending: false })
         .limit(20)
@@ -121,9 +124,21 @@ export async function GET() {
         if (['esperando_fecha_hora', 'esperando_entrega', 'esperando_nombre', 'esperando_pago'].includes(flujo)) acc.esperandoDatos++
         if (flujo === 'apartado_sucursal' || (pedido.estado === 'apartado' && /recoger|efectivo|tarjeta/i.test(`${pedido.metodo_pago || ''}`))) acc.apartadosSucursal++
         if (flujo === 'pagado_transferencia' || pedido.estado === 'pagado') acc.pagadosTransferencia++
-        if (pedido.foto_referencia_base64) acc.conFotoReferencia++
+        // N-privacidad: el campo foto ya no se selecciona (no exponer base64).
+        // conFotoReferencia se calcula abajo con conteo sin traer los datos.
         return acc
       }, pedidosResumen)
+
+      try {
+        const { count: conFoto } = await supabaseAdmin
+          .from('pedidos_bot')
+          .select('id', { count: 'exact', head: true })
+          .in('estado', ['cotizacion', 'apartado'])
+          .not('foto_referencia_base64', 'is', null)
+        if (typeof conFoto === 'number') pedidosResumen.conFotoReferencia = conFoto
+      } catch {
+        // Columna opcional hasta aplicar migración — se queda en 0.
+      }
 
       const { count } = await supabaseAdmin
         .from('zonas_envio_ambiguas')

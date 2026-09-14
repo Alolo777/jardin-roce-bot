@@ -224,9 +224,15 @@ export function validarRespuestaIA(respuesta: string, contexto: string): Validat
     }
   }
 
+  // N13: solo rechazar "está listo" si el backend NO marcó el pedido como
+  // LISTO/ENTREGADO. El contexto incluye "[PEDIDO: Estado: LISTO | ...]" cuando
+  // el equipo ya lo marcó — en ese caso la confirmación es legítima.
   for (const frase of FRASES_CONFIRMACION_ENTREGA) {
     if (frase.test(textoLower)) {
-      return { valido: false, razon: 'El LLM confirmó entrega o producción sin respaldo del backend' }
+      const pedidoListoEnBackend = /\[PEDIDO:[^\]]*Estado:\s*(LISTO|ENTREGADO)/i.test(contexto)
+      if (!pedidoListoEnBackend) {
+        return { valido: false, razon: 'El LLM confirmó entrega o producción sin respaldo del backend' }
+      }
     }
   }
 

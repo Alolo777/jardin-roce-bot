@@ -52,7 +52,8 @@ export function detectarPedidosAtascos(pedidos: PedidoConCliente[]): Novedad[] {
       cliente: pedido.nombre,
       tipo,
       resumen: `${descripcionPedido(pedido)} — ${motivo}`,
-      prioridad: tipo === TipoNovedad.PAGO_PENDIENTE ? 'media' : 'media',
+      // N15: PAGO_PENDIENTE es urgente (dinero en juego) → 'alta'.
+      prioridad: tipo === TipoNovedad.PAGO_PENDIENTE ? 'alta' : 'media',
       fuente: 'reglas',
     })
   }

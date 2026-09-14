@@ -1,6 +1,10 @@
 import { EventType, SystemEvent } from './types'
 import { withPipeline } from '../notification-engine'
 
+// T1: solo eventos que requieren acción HUMANA inmediata van sin dedup.
+// Los eventos de SISTEMA (BOT_*) salieron de aquí: en un crash-loop cada
+// reconexión generaba BOT_DISCONNECTED+BOT_CONNECTED inmediatos (spam visto
+// en logs de producción). Ahora pasan por la ventana de agregación de 2 min.
 const EVENTOS_CRITICOS: ReadonlySet<EventType> = new Set([
   EventType.HUMAN_REQUIRED,
   EventType.CUSTOMER_ANGRY,
@@ -8,10 +12,6 @@ const EVENTOS_CRITICOS: ReadonlySet<EventType> = new Set([
   EventType.PAYMENT_CONFIRMED,
   EventType.CANCELACION_REQUESTED,
   EventType.PROVIDER_FAILURE,
-  EventType.BOT_DISCONNECTED,
-  EventType.BOT_CONNECTED,
-  EventType.BOT_DAILY_ALERT,
-  EventType.BOT_DAILY_SUMMARY,
 ])
 
 const EVENTOS_INFORMATIVOS: ReadonlySet<EventType> = new Set([

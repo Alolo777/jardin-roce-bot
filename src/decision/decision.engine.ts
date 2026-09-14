@@ -63,7 +63,10 @@ function detectarIntencion(texto: string): Intencion {
   if (/\b(lo\s+quiero|apart[ao]|reserva|me\s+interesa|necesito|lo\s+necesito|d[áa]mel[oó]|ese\s+me\s+gusta|ese\s+quiero|lo\s+encargo)\b/i.test(t)) {
     return Intencion.PEDIDO
   }
-  if (/\b(pag[au]|transfer|comprobante|dep[oó]sito|bbva|4152|devi\s+america|recibo|ticket|ya\s+pag[ué]|ya\s+qued[oó]|ya\s+transfer[ií]|pagado)\b/i.test(t)) {
+  // N7: "comprobante" y "ya quedó" REMOVIDOS de PAGO — "comprobante" tiene su
+  // propia intención COMPROBANTE abajo (antes era código muerto por shadowing)
+  // y "ya quedó" es charla casual (ver N14 en pago.validator.ts).
+  if (/\b(pag[au]|transfer|dep[oó]sito|bbva|4152|devi\s+america|recibo|ticket|ya\s+pag[ué]|ya\s+transfer[ií]|pagado)\b/i.test(t)) {
     return Intencion.PAGO
   }
   if (/\b(comprobante|ya\s+env[ií]e|ah[ií]\s+va|ah[ií]\s+est[aá]|ah[ií]\s+te\s+va|ah[ií]\s+te\s+env[ií]o)\b/i.test(t)) {

@@ -129,17 +129,18 @@ export function archivarCaso(casoId: string, motivo?: string): void {
 }
 
 export function reabrirCaso(casoId: string): Caso | null {
-  for (const [clienteId, caso] of CASOS_ACTIVOS) {
-    if (caso.id === casoId && caso.estado === EstadoCaso.ARCHIVADO) {
-      caso.estado = EstadoCaso.ACTIVO
-      caso.archivadoEn = undefined
-      caso.ultimaActividad = new Date().toISOString()
-      CASOS_ACTIVOS.set(clienteId, caso)
-      actualizarCaso(caso)
-      return caso
-    }
-  }
-  return null
+  // N5: los casos archivados se eliminan de CASOS_ACTIVOS (ver archivarCaso),
+  // así que nunca hay un ARCHIVADO en memoria que reabrir. Si el caso sigue
+  // activo, se refresca su actividad y se devuelve; si no existe en memoria
+  // (archivado o inexistente) se retorna null — el llamador debe crear uno
+  // nuevo con crearCaso(). No se consulta la DB para mantener la función
+  // sincrónica; la reactivación real ocurre vía crearCaso().
+  const caso = obtenerCasoPorId(casoId)
+  if (!caso) return null
+  if (caso.estado !== EstadoCaso.ACTIVO) return null
+  caso.ultimaActividad = new Date().toISOString()
+  actualizarCaso(caso)
+  return caso
 }
 
 export function actualizarActividad(caso: Caso): void {

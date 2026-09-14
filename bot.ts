@@ -1046,6 +1046,9 @@ export async function procesarMensajeEquipo(remoteJid: string, msgType: string, 
     }
     persistirPedido(remoteJid, num, 'cotizacion', `[Agente: ${texto}]`).catch(() => {})
   }
+  // NOTA: este bloque es verificación HUMANA intencional (el equipo confirma
+  // tras revisar el comprobante). No es el path de cliente — el cliente solo
+  // cierra venta con foto/PDF validado por IA (message-handler.ts).
   if (/\b(gracias\s+por\s+(su\s+)?pago|pago\s+recibido|comprobante\s+recibido|le\s+agendamos|queda\s+agendado|pagado)\b/i.test(texto)) {
     const pedido = pedidoActual(remoteJid)
     pedido.metodoPago = 'transferencia'

@@ -345,13 +345,23 @@ interface ImagenCliente {
   contexto?: string
 }
 
+// A3: el tipo incluye `monto` (antes se retornaba vía `as any` sin tipar).
+export interface ClasificacionImagenVentaResultado {
+  tipo: ClasificacionImagenVenta
+  razon: string
+  monto: number | null
+}
+
 export async function clasificarImagenVenta(
   historial: MensajeChat[],
   contexto: string,
   imagenes: ImagenCliente[],
   intencion?: IntencionMedia
-): Promise<{ tipo: ClasificacionImagenVenta; razon: string }> {
-  if (imagenes.length === 0) return { tipo: 'incierto', razon: 'sin imagenes' }
+): Promise<ClasificacionImagenVentaResultado> {
+  if (imagenes.length === 0) {
+    const vacio: ClasificacionImagenVentaResultado = { tipo: 'incierto', razon: 'sin imagenes', monto: null }
+    return vacio
+  }
 
   // Solo usar la ÚLTIMA imagen cuando el cliente envía múltiples en ráfaga.
   const imagenUso = imagenes[imagenes.length - 1]
@@ -464,10 +474,12 @@ max_tokens: 512,
       const n = Number(String(parsed.monto).replace(/[^0-9.]/g, ''))
       if (Number.isFinite(n) && n >= 60 && n <= 50000) monto = n
     }
-    return { tipo, razon: String(parsed.razon || '').slice(0, 160), monto } as any
+    const resultado: ClasificacionImagenVentaResultado = { tipo, razon: String(parsed.razon || '').slice(0, 160), monto }
+    return resultado
   } catch (error) {
     console.warn('[ai.ts] Error clasificando imagen:', error instanceof Error ? error.message : error)
-    return { tipo: 'incierto', razon: 'error vision' } as any
+    const fallback: ClasificacionImagenVentaResultado = { tipo: 'incierto', razon: 'error vision', monto: null }
+    return fallback
   }
 }
 

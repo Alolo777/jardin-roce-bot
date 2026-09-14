@@ -15,7 +15,11 @@ export function obtenerTextoCuenta(): string {
   return `BBVA | ${CUENTA_BBVA.numero} | ${CUENTA_BBVA.titular}`
 }
 
-const REGEX_COMPROBANTE = /\b(comprobante|ya\s*pag[uú]e|pagado|pago\s*hecho|ya\s*qued[oó]|ya\s*transfer[ií]|transfer[ií]|transferencia|dep[oó]sito|recibo|ticket|bbva|devi\s+america|devi\s+am[eé]rica|4152)\b/i
+// N14: "ya quedó" ELIMINADO de aquí — en charla casual significa "listo/ok"
+// ("ya quedó, gracias") y disparaba el flujo de pago sin que hubiera pago.
+// El "ya quedó" con contexto real de pago se detecta en
+// contextoEsperaComprobante (message-handler.ts) que exige historial de pago.
+const REGEX_COMPROBANTE = /\b(comprobante|ya\s*pag[uú]e|pagado|pago\s*hecho|ya\s*transfer[ií]|transfer[ií]|transferencia|dep[oó]sito|recibo|ticket|bbva|devi\s+america|devi\s+am[eé]rica|4152)\b/i
 
 const REGEX_CUENTA_COMPARTIDA = /(?:bbva|4152|devi\s+am[eé]rica|m[aá]ndame\s+(?:tu\s+)?comprobante|comprobante\s+cuando\s+est[eé]\s+listo|pon\s+tu\s+nombre\s+en\s+concepto)/i
 

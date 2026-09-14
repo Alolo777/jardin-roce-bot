@@ -2,8 +2,9 @@
 
 > **Origen:** Auditoría completa 2026-09-03 (6 agentes en paralelo). 44 hallazgos: 18 críticos, 14 altos, 12+ medianos.
 > **Estrategia:** Fixes incrementales, un módulo por vez, sin romper producción. Cada fix: compila (`npx tsc --noEmit`), tests relacionados, commit pequeño y reversible.
-> **Estado global:** `44 / 44` resueltos (100%) + auditoría de ventas 2026-09-03 (5 fixes adicionales, ver § Ventas).
+> **Estado global:** `44 / 44` resueltos (100%) + auditoría de ventas 2026-09-03 (5 fixes) + auditoría profunda 2026-09-14 (15 hallazgos nuevos N1-N15 + 6 Telegram T1-T6 + 2 timezone A1-A2, ver § Auditoría Profunda).
 > **Actualización 2026-09-03 (ventas):** Auditoría del circuito `comprobante foto/PDF → IA monto → reporte_ventas → dashboard` (ver § Auditoría Ventas). 5 fixes adicionales para evitar falsos positivos por teléfonos/"ok"/"listo" y asegurar que el dashboard solo cuente ventas con comprobante validado.
+> **Actualización 2026-09-14 (profunda + producción):** 7 agentes paralelos auditaron todo el sistema. 15 hallazgos nuevos + 6 de ruido Telegram + 2 timezone + diagnóstico de crash-loop 401 en producción (DIAG flood, config 0 precios por tablas vacías). Todos corregidos en commit `fix(auditoria-profunda)`.
 
 **Leyenda:** `- [ ]` pendiente · `- [x]` resuelto y verificado · `- [~]` parcial / aplicado pero falta verificación en VM o migración DB.
 
@@ -393,6 +394,42 @@ Los siguientes fixes requieren ejecutar SQL en Supabase. Si quieres que el agent
 - **V5** `app/admin/reportes/page.tsx:27` y `bot.ts:1743` `hoy()`/`inicioMes()` ahora `Intl.DateTimeFormat('en-CA', {timeZone:'America/Mexico_City'})` (no `getFullYear` local); `obtenerResumenOperativo` usa CDMX.
 
 **Verificación:** `npx tsc --noEmit` OK; `reporte_ventas` solo se inserta vía `ventaCerradaHandler` con comprobante validado; pruebas manual: enviar "ok" sin foto → no crea venta; enviar foto comprobante con monto → crea venta con monto IA y aparece en `/api/reportes` y dashboard.
+
+---
+
+## 🔍 Auditoría Profunda — 15 hallazgos nuevos + Telegram + Producción (2026-09-14)
+
+**Contexto:** 7 agentes paralelos auditaron todo el sistema tras la auditoría de ventas. Además se diagnosticó el crash-loop 401 en producción con logs reales (DIAG flood, config vacía, remote rescue crash).
+
+**Diagnóstico producción (logs 2026-09-14):**
+- **P0-1** `message-entry.ts:79` DIAG se logueaba ANTES del filtrado → flood de `type: unknown + fromMe` (sync de Baileys al reconectar). Fix: log después del filtrado + suprimir ruido sync.
+- **P0-2** `bot.ts:1049` path de equipo "pagado" documentado como verificación humana intencional (no es bug — el equipo confirma tras ver el comprobante).
+- **Config 0 precios/horarios:** tablas Supabase vacías, se usan defaults. Informativo, no bug.
+- **Remote rescue crash:** comando remoto causaba `reiniciarProceso` throw sin manejar. Preexistente, fuera de alcance.
+
+**Fixes N1-N15:**
+- **N1** `message-handler.ts:1127` bloque "lo quiero" → ventaCerradaHandler ELIMINADO (violaba venta-solo-con-comprobante, sin await).
+- **N2** `message-handler.ts:405,919` doble ventaCerradaHandler → `procesarMediaAcumulado` retorna `'comprobante-cerrado'` cuando ya cerró; bloque externo solo confirma al cliente sin duplicar.
+- **N3-priv** `app/api/bot/status/route.ts:36,99` `foto_referencia_base64` REMOVIDO de selects públicos; `conFotoReferencia` ahora por conteo sin traer datos.
+- **N4** `timeline.builder.ts:24` variable renombrada a `pedidoEnEstadoTerminal` (la comparación lowercase era correcta para DB — el agente se equivocó de tipo).
+- **N5** `caso.service.ts:131` `reabrirCaso` reescrito (era código muerto roto — archivados se eliminan del Map).
+- **N6** `pedido.service.ts:15-16` NUEVO→[COTIZANDO...] y COTIZANDO→[PRECIO_CONFIRMADO...] (sin saltos; BFS de transitarDesdeFlujo sigue funcionando).
+- **N7** `decision.engine.ts:66` "comprobante"/"ya quedó" removidos de PAGO → intención COMPROBANTE alcanzable.
+- **N8** `message-handler.ts:701` regex duplicado → usa `detectarConfirmacionCorta` compartida (documentado: nunca cierra ventas solo).
+- **N9** `prompt.builder.ts:87-88` reglas → contexto informativo con referencia a validadores R007/R009.
+- **N12** `sucursal.validator.ts:10` cada sucursal distinguible (Maps reales Centro/Norte; Sur/Tlaxcala pendientes de dirección exacta).
+- **N13** `response.validator.ts:227` "está listo" solo se rechaza si backend NO marcó LISTO/ENTREGADO.
+- **N14** `pago.validator.ts:18` "ya quedó" removido de REGEX_COMPROBANTE → movido a `confirmaTurno` con contexto de pago.
+- **N15** `novedad.detector.ts:55` PAGO_PENDIENTE → prioridad 'alta'.
+- **A3** `lib/ai.ts:353` `clasificarImagenVenta` retorna `ClasificacionImagenVentaResultado` tipado (monto incluido, sin `as any`).
+
+**Fixes Telegram T1-T6:**
+- **T1** `notification-aggregator.ts:4` BOT_* fuera de CRÍTICOS → pasan por dedup 2min (evita spam en crash-loops).
+- **T5** `lib/telegram.ts` rate limit 1.5s + dedup 60s por contenido.
+- **T2** PHOTO_RECEIVED se mantiene inmediato (el equipo necesita ver comprobantes ya) pero cubierto por el rate limit.
+- **A1/A2** `reportes/route.ts` y `bot/status/route.ts` timezone CDMX→UTC 6AM corregido.
+
+**Verificación:** `npx tsc --noEmit` 0 errores; tests novedades/precio/response-validator/nombre/horario/telefono/poda OK.
 
 ---
 
