@@ -2,6 +2,26 @@
 
 ## 2026-09-03
 
+### Fix — Ventas solo con comprobante foto/PDF + monto IA (evita falsos por teléfonos/"ok"/"listo")
+
+**Problema:** `reporte_ventas` (fuente del dashboard) se contaminaba: `extraerTotalNumerico` tomaba cualquier número (ej. teléfono `2461367890`), `ventaCerradaHandler` se disparaba por texto ("ya pagué", "listo", "ok"→venta, token `[VENTA_CERRADA]`), y `pedidoApartadoHandler` (efectivo al recoger) insertaba como `pagado`. El frontend `app/admin/reportes` usaba `new Date()` local para filtros (desfase CDMX) y `bot.ts:1743` `pedidosHoy` igual.
+
+**Solución:**
+- `bot.ts:427` `extraerTotalNumerico` filtra teléfonos (≥10 dígitos, prefijo 52, ventana con patrón `XXX-XXX-XXXX`) y rango 60-50000.
+- `lib/ai.ts:375` `clasificarImagenVenta` ahora `{"tipo","razon","monto"}` + nuevo `extraerMontoComprobante(base64,mimetype)` con prompt dedicado (ignora cuenta/clabe/telefono/folio, soporta `image/*` y `application/pdf`, rango 60-50000) como fallback si visión no da monto.
+- `src/whatsapp/message-handler.ts:291,328,382,1017,1027` `tieneMediaVision` incluye PDF, captura `montoVision`, exige `tieneMediaVision` para registrar venta (texto "ya pagué" sin foto solo persiste como `esperando_pago`), compara `montoVision` vs esperado (warn >50) y lo usa en `ventaCerradaHandler`; `cierrePagoTransferencia` y `confirmaCorto` ("ok"/"sí") ya no cierran venta, piden foto; token `[VENTA_CERRADA]` ya no registra; `pedidoApartadoHandler` (`bot.ts:1091`) ya no inserta en `reporte_ventas`.
+- `app/admin/reportes/page.tsx:27` y `bot.ts:1743` `hoy()`/`inicioMes()` ahora `Intl.DateTimeFormat('en-CA', {timeZone:'America/Mexico_City'})`.
+
+**Archivos modificados:** `bot.ts`, `lib/ai.ts`, `src/whatsapp/message-handler.ts`, `app/admin/reportes/page.tsx`, `AUDITORIA_FIXES.md`
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; flujo "ok" sin foto → no crea venta; foto comprobante → venta con monto IA y aparece en `/api/reportes` y `obtenerVentasHoy`.
+
+**Impacto:** Compatible. El dashboard ahora solo cuenta ventas validadas con comprobante. Los apartados por recoger siguen en `pedidos_bot` pero no en `reporte_ventas`.
+
+**Rollback:** Revertir `bot.ts:427`, `lib/ai.ts:extraerMonto`, `message-handler.ts:382`, `bot.ts:1091`.
+
+---
+
 ### Fix — Auditoría completa 44 hallazgos (18 críticos, 14 altos, 12 medianos) — M1-M6
 
 **Origen:** Auditoría paralela de 6 agentes (startup, pedidos, Supabase, prompts, Telegram, migraciones). Documento fuente: `AUDITORIA_FIXES.md` (44/44 resueltos, 100%). 9 commits previos de esta fecha ya mergeados; este es el consolidado.

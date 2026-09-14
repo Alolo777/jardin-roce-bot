@@ -32,7 +32,7 @@ import { buscarEnvio, pareceConsultaEnvio, detectarLinkMaps, formatearZonasParaP
 import { validarRespuestaIA, sanitizarRespuestaIA } from '../validators/response.validator'
 import { evaluarCancelacion } from '../validators/cancelacion.validator'
 import { evaluarQueja } from '../validators/queja.validator'
-import { getAIResponse, clasificarImagenVenta, revisarRespuestaFlora } from '../../lib/ai'
+import { getAIResponse, clasificarImagenVenta, extraerMontoComprobante, revisarRespuestaFlora } from '../../lib/ai'
 import { guardarMediaChat, guardarMediaEquipoChat } from '../novedades/media-chat.repository'
 import type { IntencionMedia } from '../novedades/media-chat.repository'
 import { logger } from '../../lib/logger.service'
@@ -288,10 +288,10 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
     let esComprobante = esperaComprobante || (!quiereCotizarTurno && (pagoEnTurno || pagoReciente))
     let esReferencia = !esComprobante && (quiereCotizarTurno || (!pagoEnTurno && !pagoReciente))
 
-    const tieneImagen = mediaAcumulado.some(m => m.mimetype.startsWith('image/'))
-
-    if (tieneImagen) {
-      console.log(`[bot] 👁️ Enviando ÚLTIMA imagen (${mediaAcumulado.length} recibidas) a visión IA para ${telefono}...`)
+    const tieneMediaVision = mediaAcumulado.some(m => m.mimetype.startsWith('image/') || m.mimetype.includes('pdf'))
+    let montoVision: number | null = null
+    if (tieneMediaVision) {
+      console.log(`[bot] 👁️ Enviando ÚLTIMA imagen/PDF (${mediaAcumulado.length} recibidas) a visión IA para ${telefono}...`)
       const pedido = deps.pedidoActual(clienteId)
       const contextoVision = [
         `estado_flujo: ${pedido.estadoFlujo ?? 'sin_pedido'}`,
@@ -300,8 +300,9 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         `texto_turno: ${textoTurno || 'sin texto'}`,
         `intencion: ${intencion ?? 'sin_definir'}`,
       ].join('\n')
-      const vision = await clasificarImagenVenta(historial, contextoVision, imagenesParaVision, intencion as any)
-      console.log(`[bot] 👁️ Visión clasifica ${telefono}: ${vision.tipo} (${vision.razon})`)
+      const vision: any = await clasificarImagenVenta(historial, contextoVision, imagenesParaVision, intencion as any)
+      console.log(`[bot] 👁️ Visión clasifica ${telefono}: ${vision.tipo} (${vision.razon}) monto=${vision.monto ?? 'null'}`)
+      if (typeof vision.monto === 'number' && Number.isFinite(vision.monto)) montoVision = vision.monto
       if (vision.tipo === 'comprobante') {
         esComprobante = true
         esReferencia = false
@@ -312,13 +313,20 @@ export function createMessageHandler(deps: MsgHandlerDeps) {
         esComprobante = false
         esReferencia = false
       }
+      // Fallback: si visión dice comprobante pero no dio monto, intentar extracción dedicada (soporta PDF)
+      if (esComprobante && montoVision == null) {
+        try {
+          const last = imagenesParaVision[0]
+          if (last) montoVision = await extraerMontoComprobante(last.base64, last.mimetype)
+        } catch {}
+      }
     }
 
     const enHorario = estaEnHorario()
 
     for (const media of mediaAcumulado) {
 const ultimoMedia = mediaAcumulado[mediaAcumulado.length - 1]
-    if (ultimoMedia && tieneImagen) {
+    if (ultimoMedia && tieneMediaVision) {
       // DEC-085/DEC-091: guarda fotos enviadas por el equipo al cliente
       // para que el admin sepa qué fotos se enviaron y en qué contexto.
       const tipoEquipo = esComprobante ? 'comprobante' : esReferencia ? 'referencia' : 'otra'
@@ -372,24 +380,41 @@ const ultimoMedia = mediaAcumulado[mediaAcumulado.length - 1]
     }
 
     if (esComprobante) {
+      // ✅ Registro de venta SOLO con foto/PDF real + monto IA (evita falsos por "ok", teléfonos, etc.)
+      if (!tieneMediaVision) {
+        const pedidoTmp = deps.pedidoActual(clienteId)
+        pedidoTmp.metodoPago = 'transferencia'
+        pedidoTmp.estadoFlujo = 'esperando_pago'
+        await deps.persistirPedido(clienteId, telefono, 'apartado', 'Cliente dice que pagó, falta foto del comprobante')
+        return 'comprobante'
+      }
       const pedido = deps.pedidoActual(clienteId)
       pedido.metodoPago = 'transferencia'
       pedido.estadoFlujo = 'pagado_transferencia'
       transitarDesdeFlujoSeguro(clienteId, 'pagado_transferencia')
       const venta = deps.ventaDesdeEstado(clienteId)
-      if (venta && deps.ventaListaParaPagoTransferencia(clienteId)) {
-        await deps.ventaCerradaHandler(clienteId, venta, telefono)
+      // Validar monto IA contra esperado (si hay discrepancia, log pero usar monto IA como fuente de verdad)
+      const esperado = venta ? parseFloat(venta.total.replace(/[^0-9.]/g, '')) || 0 : 0
+      if (montoVision != null && esperado > 0 && Math.abs(montoVision - esperado) > 50) {
+        console.warn(`[venta] Monto comprobante $${montoVision} difiere de esperado $${esperado} para ${telefono}`)
+        logger.warn('venta', `Monto comprobante $${montoVision} difiere de esperado $${esperado} para ${telefono}`)
+      }
+      const ventaConMonto = venta && montoVision != null
+        ? { ...venta, total: `$${montoVision.toFixed(2)}` }
+        : venta
+      if (ventaConMonto && deps.ventaListaParaPagoTransferencia(clienteId)) {
+        await deps.ventaCerradaHandler(clienteId, ventaConMonto, telefono)
       } else {
-        await deps.persistirPedido(clienteId, telefono, 'apartado', 'Comprobante recibido, faltan datos para cierre')
+        await deps.persistirPedido(clienteId, telefono, 'apartado', `Comprobante recibido${montoVision ? ` $${montoVision}` : ''}, faltan datos para cierre`)
         if (debeEnviarAlertaDedup(clienteId, 'comprobante-pendiente', textoTurno || 'comprobante', 30 * 60_000)) {
-          const pedido = deps.pedidoActual(clienteId)
+          const pedido2 = deps.pedidoActual(clienteId)
           eventBus.emit(EventType.ORDER_CREATED, {
-            orderId: pedido.id,
+            orderId: pedido2.id,
             telefono,
-            cliente: pedido.nombre ?? 'Verificar en chat',
-            producto: pedido.productoPersonalizado ?? 'Verificar en conversación',
-            total: parseFloat(deps.totalDashboardPedido(clienteId, '0').replace(/[^0-9.]/g, '')) || 0,
-            sucursal: pedido.direccion ?? pedido.sucursal ?? pedido.envio?.zona ?? 'Por confirmar',
+            cliente: pedido2.nombre ?? 'Verificar en chat',
+            producto: pedido2.productoPersonalizado ?? 'Verificar en conversación',
+            total: (montoVision ?? (parseFloat(deps.totalDashboardPedido(clienteId, '0').replace(/[^0-9.]/g, '')) || 0)),
+            sucursal: pedido2.direccion ?? pedido2.sucursal ?? pedido2.envio?.zona ?? 'Por confirmar',
             metodoPago: 'Transferencia',
             descripcion: 'comprobante-pendiente',
             precioArreglo: deps.tienePrecioConfirmado(clienteId) ? deps.precioArregloTexto(clienteId) : undefined,
@@ -917,11 +942,9 @@ const ultimoMedia = mediaAcumulado[mediaAcumulado.length - 1]
       }
 
       if (/venta\s*cerrada/i.test(textoCliente)) {
-        const venta = deps.ventaDesdeEstado(clienteId)
-        if (venta) {
-          if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
-          await deps.ventaCerradaHandler(clienteId, venta, await numeroRealPromise)
-        }
+        // Legacy token del LLM — ya no cierra venta automáticamente (solo con comprobante foto/PDF)
+        // Se deja solo como log, no registra venta
+        console.log(`[venta] token [VENTA_CERRADA] ignorado (requiere comprobante) para ${clienteId}`)
       }
 
       const notaMatch = textoCliente.match(/nota[:\s]*([\s\S]{1,500})/i)
@@ -993,25 +1016,24 @@ const ultimoMedia = mediaAcumulado[mediaAcumulado.length - 1]
 
       const cierrePagoTransferencia = /\b(listo|ya\s+qued[oó]|ya\s+pag[uú]e|ya\s+transfer[ií]|comprobante)\b/i.test(textoCliente) && (consultaPagoEnviado || /\b(bbva|devi\s+america|devi\s+américa|cuenta|transferencia)\b/i.test(historialTexto))
       if (!ventaCerrada && !deps.pedidoEstaCerrado(clienteId) && ventaParaCierre && cierrePagoTransferencia && deps.ventaListaParaCerrar(clienteId)) {
+        // Texto dice que pagó pero sin foto/PDF: pedir comprobante, NO registrar venta (evita falsos por "listo"/teléfonos)
         if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
-        const confirmacion = `¡Gracias, ${ventaParaCierre.cliente}! 🌸 Tu pedido queda registrado. Total: ${ventaParaCierre.total}.`
-        await deps.responderMensaje(msg, confirmacion)
-        await agregarAlHistorial(telefono, 'assistant', confirmacion, OrigenMensaje.FLORA)
-        await deps.ventaCerradaHandler(clienteId, ventaParaCierre, await numeroRealPromise)
+        const pideComprobante = `Perfecto, ${ventaParaCierre.cliente} 🌸 Cuando tengas el comprobante, envíame la foto o PDF por aquí y lo registro con el monto exacto. Total a pagar: ${ventaParaCierre.total}.`
+        await deps.responderMensaje(msg, pideComprobante)
+        await agregarAlHistorial(telefono, 'assistant', pideComprobante, OrigenMensaje.FLORA)
+        await deps.persistirPedido(clienteId, await numeroRealPromise, 'apartado', 'Cliente dice que pagó, falta foto comprobante')
         ventaCerrada = true
       }
 
       if (!ventaCerrada && !deps.pedidoEstaCerrado(clienteId) && confirmaCorto && deps.ventaListaParaCerrar(clienteId) && (deps.tieneArregloVerificado(clienteId) || (textoCliente.length < 150 && !textoCliente.includes('?')))) {
-        const venta = deps.ventaDesdeEstado(clienteId)
-        if (venta) {
-          const totalTexto = formatearTotalConDesglose(clienteId)
+        // "ok"/"sí" ya NO cierra venta sin comprobante (evita falsos positivos)
+        const ventaOk = deps.ventaDesdeEstado(clienteId)
+        if (ventaOk) {
           if (await pedirFechaHoraSiFalta(msg, await numeroRealPromise, clienteId)) return
-          await deps.ventaCerradaHandler(clienteId, {
-            cliente: venta.cliente,
-            producto: venta.producto,
-            total: totalTexto,
-            direccion: venta.direccion,
-          }, await numeroRealPromise)
+          const pideComprobanteOk = `¡Gracias, ${ventaOk.cliente}! 🌸 Queda pendiente tu comprobante. Envíame la foto o PDF del pago y lo registro. Total: ${ventaOk.total}.`
+          await deps.responderMensaje(msg, pideComprobanteOk)
+          await agregarAlHistorial(telefono, 'assistant', pideComprobanteOk, OrigenMensaje.FLORA)
+          await deps.persistirPedido(clienteId, await numeroRealPromise, 'apartado', 'Confirmación corta, falta comprobante')
           ventaCerrada = true
         }
       }

@@ -24,10 +24,10 @@ type VentasReporte = {
   }>
 }
 
-const hoy = () => new Date().toISOString().slice(0, 10)
+const hoy = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(new Date())
 const inicioMes = () => {
-  const d = new Date()
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10)
+  const hoyStr = hoy()
+  return hoyStr.slice(0, 8) + '01'
 }
 
 export default function ReportesPage() {

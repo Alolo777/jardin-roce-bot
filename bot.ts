@@ -425,20 +425,35 @@ async function registrarVenta(clienteNombre: string, telefono: string, producto:
 }
 
 function extraerTotalNumerico(total: string): number {
-  const montos = String(total ?? '').match(/\d{1,6}(?:[,.]\d{2})?/g) ?? []
+  const raw = String(total ?? '')
+  // Filtrar teléfonos y números irrelevantes: 10+ dígitos, 52/521 prefijos, o fuera de rango 60-50000
+  const candidatos = raw.match(/\d{1,6}(?:[,.]\d{2})?/g) ?? []
+  const PRECIO_MIN = 60
+  const PRECIO_MAX = 50000
+  const esTelefono = (s: string) => {
+    const d = s.replace(/\D/g, '')
+    if (d.length >= 10) return true
+    if (/^52\d{10,11}$/.test(d)) return true
+    return false
+  }
+  const montos = candidatos.filter(m => {
+    if (esTelefono(m)) return false
+    // Buscar el token original en contexto para ver si es teléfono contiguo
+    const idx = raw.indexOf(m)
+    const ventana = raw.slice(Math.max(0, idx - 4), idx + m.length + 4)
+    if (/\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/.test(ventana)) return false
+    const n = Number(m.replace(/,/g, '')) || 0
+    return n >= PRECIO_MIN && n <= PRECIO_MAX
+  })
   if (montos.length === 0) return 0
 
   const normalizar = (monto: string) => Number(monto.replace(/,/g, '')) || 0
   const primero = normalizar(montos[0]!)
 
-  // Los totales generados por el bot empiezan con el total y luego incluyen desglose.
-  if (/^\s*\$?\s*\d/.test(total)) return primero
-
-  // Si solo hay desglose tipo "ramo $500 + envio $80", registrar la suma.
-  if (/[+]/.test(total) && montos.length > 1) {
+  if (/^\s*\$?\s*\d/.test(raw)) return primero
+  if (/[+]/.test(raw) && montos.length > 1) {
     return Array.from(montos).reduce((sum, monto) => sum + normalizar(monto), 0)
   }
-
   return primero
 }
 
@@ -1096,7 +1111,8 @@ async function pedidoApartadoHandler(clienteId: string, venta: VentaCerrada, tel
   pedido.cerradoEn = new Date().toISOString()
   console.log(`[bot] 📦 Pedido apartado: ${nombreParaAlerta(clienteId, venta.cliente)} — ${venta.producto} — ${venta.total}`)
   const nombreApt = nombreParaAlerta(clienteId, venta.cliente)
-  await registrarVenta(nombreApt, numeroReal, venta.producto, totalDashboardPedido(clienteId, venta.total), venta.direccion, metodoPago)
+  // Venta NO se registra en reporte_ventas aquí (solo con comprobante foto/PDF + monto IA).
+  // El dashboard de ventas solo cuenta comprobantes validados; el apartado queda en pedidos_bot.
   await persistirPedido(clienteId, numeroReal, 'apartado')
   eventBus.emit(EventType.PAYMENT_PENDING, {
     telefono: numeroReal,
@@ -1724,7 +1740,7 @@ async function obtenerResumenOperativo(): Promise<import('./src/api/server').Res
     hace: haceTexto(caso.ultimaActividad),
   }))
 
-  const hoy = new Date().toISOString().slice(0, 10)
+  const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(new Date())
   const pedidosHoy = pedidos.filter(p => p.pedido.creadoEn?.slice(0, 10) === hoy).length
 
   return {

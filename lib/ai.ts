@@ -372,11 +372,11 @@ export async function clasificarImagenVenta(
     'Clasifica la imagen del cliente en una venta de flores.',
     `INTENCIÓN DE LA CONVERSACIÓN: ${intencionTexto}`,
     `CONTEXTO DEL PEDIDO: ${contextoVision}`,
-    'Responde SOLO JSON valido, sin markdown, con este formato: {"tipo":"comprobante|referencia|otra|incierto","razon":"max 120 caracteres"}.',
-    'comprobante = captura/foto de transferencia, recibo, ticket, deposito, banco o pago.',
-    'referencia = flores, ramo, arreglo floral, imagen de inspiracion/cotizacion o producto deseado.',
-    'otra = imagen no relacionada con pago ni flores.',
-    'incierto = no se puede determinar.',
+    'Responde SOLO JSON valido, sin markdown, con este formato: {"tipo":"comprobante|referencia|otra|incierto","razon":"max 120 caracteres","monto":1234.56}.',
+    'comprobante = captura/foto de transferencia, recibo, ticket, deposito, banco o pago. Si es comprobante, extrae el monto total pagado en "monto" (number, 60-50000), ignora cuenta/clabe/telefono/folio.',
+    'referencia = flores, ramo, arreglo floral, imagen de inspiracion/cotizacion o producto deseado. Deja "monto": null.',
+    'otra = imagen no relacionada con pago ni flores. Deja "monto": null.',
+    'incierto = no se puede determinar. Deja "monto": null.',
     'Si la intención de la conversación es "comprobante", clasifica como comprobante aunque la imagen muestre flores.',
     'Si la intención es "cotizacion" o "referencia", clasifica como referencia aunque la imagen muestre banco.',
     'Si el historial indica que el equipo pidió pago/comprobante, prioriza comprobante.',
@@ -454,14 +454,72 @@ max_tokens: 512,
       })()
     console.timeEnd('[ai.ts] Vision classify')
 
-    const parsed = JSON.parse(extraerJsonObjeto(rawTexto)) as { tipo?: string; razon?: string }
+    const parsed = JSON.parse(extraerJsonObjeto(rawTexto)) as { tipo?: string; razon?: string; monto?: number | string }
     const tipo = parsed.tipo === 'comprobante' || parsed.tipo === 'referencia' || parsed.tipo === 'otra' || parsed.tipo === 'incierto'
       ? parsed.tipo
       : 'incierto'
-    return { tipo, razon: String(parsed.razon || '').slice(0, 160) }
+    // Nuevo: si es comprobante, intentar extraer monto del JSON de visión (evita falsos por teléfonos)
+    let monto: number | null = null
+    if (tipo === 'comprobante' && parsed.monto != null) {
+      const n = Number(String(parsed.monto).replace(/[^0-9.]/g, ''))
+      if (Number.isFinite(n) && n >= 60 && n <= 50000) monto = n
+    }
+    return { tipo, razon: String(parsed.razon || '').slice(0, 160), monto } as any
   } catch (error) {
     console.warn('[ai.ts] Error clasificando imagen:', error instanceof Error ? error.message : error)
-    return { tipo: 'incierto', razon: 'error vision' }
+    return { tipo: 'incierto', razon: 'error vision' } as any
+  }
+}
+
+export async function extraerMontoComprobante(
+  base64: string,
+  mimetype: string
+): Promise<number | null> {
+  const prompt = [
+    'Eres un extractor de montos de comprobantes de pago mexicanos.',
+    'Analiza la imagen/PDF del comprobante y extrae el MONTO TOTAL transferido/pagado.',
+    'Responde SOLO JSON: {"monto": 1234.56, "confianza": 0.0-1.0, "razon":"max 80 chars"}',
+    'Si no ves un monto claro, responde {"monto": null}.',
+    'Ignora números de cuenta, clabe, referencia, teléfono, folio y fecha. Solo el importe pagado.',
+    'Rango válido: 60 a 50000 MXN. Fuera de rango → null.',
+  ].join('\n')
+  try {
+    const raw = await (async () => {
+      const llamarGemini = async (): Promise<string> => {
+        if (!geminiClient) throw new Error('Gemini no configurado')
+        const model = geminiClient.getGenerativeModel({ model: GEMINI_MODEL })
+        const parts: any[] = [{ text: prompt }]
+        // Gemini acepta image/* y application/pdf como inlineData
+        const mime = mimetype?.includes('pdf') ? 'application/pdf' : (mimetype || 'image/jpeg')
+        parts.push({ inlineData: { mimeType: mime, data: base64 } })
+        const result = await model.generateContent({ contents: [{ role: 'user', parts }], generationConfig: { maxOutputTokens: 256, temperature: 0 } })
+        return result.response.text() || ''
+      }
+      const llamarOpenAICompat = async (p: OpenAICompatProvider): Promise<string> => {
+        if (!p.client) throw new Error(`${p.name} no configurado`)
+        const content: ChatCompletionContentPart[] = [
+          { type: 'text', text: prompt },
+          { type: 'image_url' as const, image_url: { url: `data:${mimetype || 'image/jpeg'};base64,${base64}` } },
+        ]
+        const completion = await conRetry(async () => {
+          const c = new AbortController()
+          const tid = setTimeout(() => c.abort(), 25_000)
+          try {
+            const r = await p.client!.chat.completions.create({ model: p.model, messages: [{ role: 'user', content }], max_tokens: 256, temperature: 0 }, { signal: c.signal })
+            return r.choices[0]?.message?.content?.trim() || ''
+          } finally { clearTimeout(tid) }
+        }, 2)
+        return completion
+      }
+      return await callWithFallback(() => conRetry(llamarGemini, 3), llamarOpenAICompat, 'extraerMontoComprobante', true)
+    })()
+    const parsed = JSON.parse(extraerJsonObjeto(raw)) as { monto?: number | string | null }
+    if (parsed.monto == null) return null
+    const n = Number(String(parsed.monto).replace(/[^0-9.]/g, ''))
+    if (!Number.isFinite(n) || n < 60 || n > 50000) return null
+    return n
+  } catch {
+    return null
   }
 }
 

@@ -2,7 +2,8 @@
 
 > **Origen:** Auditoría completa 2026-09-03 (6 agentes en paralelo). 44 hallazgos: 18 críticos, 14 altos, 12+ medianos.
 > **Estrategia:** Fixes incrementales, un módulo por vez, sin romper producción. Cada fix: compila (`npx tsc --noEmit`), tests relacionados, commit pequeño y reversible.
-> **Estado global:** `0 / 44` resueltos. Este archivo es la fuente de verdad. Marcar `[x]` solo cuando el fix esté mergeado y verificado.
+> **Estado global:** `44 / 44` resueltos (100%) + auditoría de ventas 2026-09-03 (5 fixes adicionales, ver § Ventas).
+> **Actualización 2026-09-03 (ventas):** Auditoría del circuito `comprobante foto/PDF → IA monto → reporte_ventas → dashboard` (ver § Auditoría Ventas). 5 fixes adicionales para evitar falsos positivos por teléfonos/"ok"/"listo" y asegurar que el dashboard solo cuente ventas con comprobante validado.
 
 **Leyenda:** `- [ ]` pendiente · `- [x]` resuelto y verificado · `- [~]` parcial / aplicado pero falta verificación en VM o migración DB.
 
@@ -377,6 +378,21 @@ Los siguientes fixes requieren ejecutar SQL en Supabase. Si quieres que el agent
 | M39 `sucursal` datos | `UPDATE configuracion_bot SET valor=... WHERE clave='sucursales'` o similar | Bajo — solo datos |
 
 > **Nota:** El agente puede ejecutar estas migraciones con `supabaseAdmin` (service_role) si tiene las claves. Alternativamente, puedes ejecutarlas manualmente desde el SQL Editor de Supabase.
+
+---
+
+## 🔍 Auditoría Ventas — Circuito comprobante → IA → reporte_ventas → dashboard (2026-09-03)
+
+**Hallazgo:** `reporte_ventas` se contaminaba con falsos positivos: `extraerTotalNumerico` tomaba cualquier número (teléfonos 10 dígitos, "ok"/"listo" cerraban venta), `ventaCerradaHandler` se llamaba por texto ("ya pagué", "venta cerrada", "ok"→venta), y `pedidoApartadoHandler` (efectivo al recoger) insertaba como `pagado`. El dashboard (`/admin/reportes`, `/api/reportes`, `obtenerVentasHoy`, `obtenerResumenOperativo`) leía `reporte_ventas` pagado, así que mostraba ventas falsas. El frontend `app/admin/reportes` usaba `new Date()` local (no CDMX) para filtros.
+
+**Fixes (5):**
+- **V1** `bot.ts:427` `extraerTotalNumerico` filtra teléfonos (≥10 dígitos, 52*, ventana con patrón teléfono) y rango 60-50000; ya no toma `2461367890` como precio.
+- **V2** `lib/ai.ts:375,460` `clasificarImagenVenta` ahora pide `{"tipo","razon","monto"}` y extrae `monto` 60-50000; nuevo `extraerMontoComprobante(base64,mimetype)` con prompt dedicado (ignora cuenta/clabe/telefono/folio, soporta `image/*` y `application/pdf`) como fallback.
+- **V3** `src/whatsapp/message-handler.ts:291,328,382` `tieneMediaVision` incluye `pdf`; `montoVision` capturado de visión + fallback `extraerMontoComprobante`; bloque `esComprobante` ahora exige `tieneMediaVision` (texto "ya pagué" sin foto solo persiste como `esperando_pago`, no registra venta); monto comparado contra esperado (warn si difiere >50) y usado en `ventaCerradaHandler`/evento; `venta cerrada` token ya no registra.
+- **V4** `message-handler.ts:1017,1027` y `bot.ts:1091` `cierrePagoTransferencia` y `confirmaCorto` ("ok"/"listo") ya no llaman `ventaCerradaHandler`; piden foto del comprobante y persisten como `apartado`; `pedidoApartadoHandler` ya no inserta en `reporte_ventas` (solo `persistirPedido`).
+- **V5** `app/admin/reportes/page.tsx:27` y `bot.ts:1743` `hoy()`/`inicioMes()` ahora `Intl.DateTimeFormat('en-CA', {timeZone:'America/Mexico_City'})` (no `getFullYear` local); `obtenerResumenOperativo` usa CDMX.
+
+**Verificación:** `npx tsc --noEmit` OK; `reporte_ventas` solo se inserta vía `ventaCerradaHandler` con comprobante validado; pruebas manual: enviar "ok" sin foto → no crea venta; enviar foto comprobante con monto → crea venta con monto IA y aparece en `/api/reportes` y dashboard.
 
 ---
 
