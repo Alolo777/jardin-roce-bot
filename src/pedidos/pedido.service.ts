@@ -12,18 +12,18 @@ function jidANumero(jid: string): string {
 }
 
 const TRANSICIONES_VALIDAS: Record<string, EstadoPedido[]> = {
-  [EstadoPedido.NUEVO]: [EstadoPedido.COTIZANDO, EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
-  [EstadoPedido.COTIZANDO]: [EstadoPedido.PRECIO_CONFIRMADO, EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
-  [EstadoPedido.PRECIO_CONFIRMADO]: [EstadoPedido.ESPERANDO_DATOS, EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
-  [EstadoPedido.ESPERANDO_DATOS]: [EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
-  [EstadoPedido.ESPERANDO_PAGO]: [EstadoPedido.APARTADO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
-  [EstadoPedido.APARTADO]: [EstadoPedido.EN_PRODUCCION, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
-  [EstadoPedido.EN_PRODUCCION]: [EstadoPedido.LISTO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
-  [EstadoPedido.LISTO]: [EstadoPedido.ENTREGADO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO],
-  [EstadoPedido.ENTREGADO]: [EstadoPedido.POSTVENTA, EstadoPedido.ARCHIVADO],
+  [EstadoPedido.NUEVO]: [EstadoPedido.COTIZANDO, EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO, EstadoPedido.QUEJA],
+  [EstadoPedido.COTIZANDO]: [EstadoPedido.PRECIO_CONFIRMADO, EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO, EstadoPedido.QUEJA],
+  [EstadoPedido.PRECIO_CONFIRMADO]: [EstadoPedido.ESPERANDO_DATOS, EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO, EstadoPedido.QUEJA],
+  [EstadoPedido.ESPERANDO_DATOS]: [EstadoPedido.ESPERANDO_PAGO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO, EstadoPedido.QUEJA],
+  [EstadoPedido.ESPERANDO_PAGO]: [EstadoPedido.APARTADO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO, EstadoPedido.QUEJA],
+  [EstadoPedido.APARTADO]: [EstadoPedido.EN_PRODUCCION, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO, EstadoPedido.QUEJA],
+  [EstadoPedido.EN_PRODUCCION]: [EstadoPedido.LISTO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO, EstadoPedido.QUEJA],
+  [EstadoPedido.LISTO]: [EstadoPedido.ENTREGADO, EstadoPedido.CANCELADO, EstadoPedido.ARCHIVADO, EstadoPedido.QUEJA],
+  [EstadoPedido.ENTREGADO]: [EstadoPedido.POSTVENTA, EstadoPedido.ARCHIVADO, EstadoPedido.QUEJA],
   [EstadoPedido.ARCHIVADO]: [],
   [EstadoPedido.CANCELADO]: [],
-  [EstadoPedido.QUEJA]: [EstadoPedido.POSTVENTA, EstadoPedido.ARCHIVADO],
+  [EstadoPedido.QUEJA]: [EstadoPedido.POSTVENTA, EstadoPedido.ARCHIVADO, EstadoPedido.CANCELADO],
   [EstadoPedido.POSTVENTA]: [EstadoPedido.ARCHIVADO],
 }
 
@@ -433,6 +433,7 @@ export function transitarDesdeFlujo(clienteId: string, flujo: string, motivo?: s
     pagado_transferencia: EstadoPedido.APARTADO,
     cerrado: EstadoPedido.ENTREGADO,
     cancelado: EstadoPedido.CANCELADO,
+    queja: EstadoPedido.QUEJA,
   }
 
   const nuevo = mapping[flujo]

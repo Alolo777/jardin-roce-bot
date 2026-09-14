@@ -58,8 +58,8 @@
 - **Archivos relacionados:** `src/models/types.ts:17,26`, `src/pedidos/pedido.service.ts:14-27,422`, `src/decision/intent-detector.ts`, `src/validators/queja.validator.ts`
 - **Fix propuesto:** Decidir: (A) hacer `QUEJA` alcanzable desde `COTIZANDO|PRECIO_CONFIRMADO|ESPERANDO_PAGO|APARTADO|EN_PRODUCCION|LISTO` vía `transitarDesdeFlujo['queja']` y `detectarQueja` → `cambiarEstado(QUEJA)`, o (B) eliminar `QUEJA` del enum y mapear a `CANCELADO` con flag. Preferencia A, documentar en DECISIONS.md.
 - **Verificación:** Test de máquina de estados: `NUEVO→COTIZANDO→QUEJA` debe ser válido tras fix.
-- **Estado:** - [ ] Pendiente
-- **Cómo se ajustó:** _pendiente_
+- **Estado:** - [x] Resuelto — 2026-09-03: `TRANSICIONES_VALIDAS` ahora permite `QUEJA` desde todos los estados activos (NUEVO→ENTREGADO). `transitarDesdeFlujo` mapea `queja→QUEJA` y `QUEJA→CANCELADO`. `tsc` OK.
+- **Cómo se ajustó:** `pedido.service.ts:14-27` ampliado y `mapping: queja` agregado.
 
 ### C5 — `reiniciarProceso` hace `process.exit(1)` sin `gracefulShutdown`
 - **Severidad:** 🔴 Crítico
