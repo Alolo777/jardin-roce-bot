@@ -40,8 +40,8 @@
 - **Archivos relacionados:** `src/conversation/conversation.service.ts:197`, `src/whatsapp/message-handler.ts:532,545` (consumidor + fallback 7d 2026-09-03), `src/novedades/novedades.service.ts:53,149`
 - **Fix propuesto:** Cambiar a `.or('origen.eq.equipo,contenido.ilike.%[Agente:%')` y verificar con script Supabase service_role que retorna filas. Agregar test `conversation.service` que mockee Supabase y valide la query.
 - **Verificación:** Script Supabase: `obtenerUltimosMensajesEquipo(tel,24,3)` debe retornar >0 en chats con `[Agente:]`. `npx tsc --noEmit`.
-- **Estado:** - [~] Parcial — fallback 7d agregado en `message-handler.ts:ee5b661` mitiga, pero la query base sigue rota
-- **Cómo se ajustó:** _fallback 7d agregado; falta corregir el `.or()`_
+- **Estado:** - [x] Resuelto — 2026-09-03: `.or()` corregido a `origen.eq.equipo,contenido.ilike.%[Agente:%` (`ilike` + `%`). Fallback 7d ya existía. `tsc` OK.
+- **Cómo se ajustó:** `conversation.service.ts:199` reescrito.
 
 ### C3 — `obtenerPedidoPorId` confunde pedidoId con clienteId
 - **Severidad:** 🔴 Crítico
@@ -148,8 +148,8 @@
 - **Archivos relacionados:** `src/notification-engine/timeline.builder.ts:127,152`, `src/notification-engine/conflict.detector.ts`, `src/notification-engine/notification.engine.ts`
 - **Fix propuesto:** Cambiar a `id: data.id ?? data.cliente_id` (fallback). Agregar test de `timeline.builder`.
 - **Verificación:** Test que `mapearPedido({id:'ped_1', cliente_id:'cli_1'})` retorne `id:'ped_1'`.
-- **Estado:** - [ ] Pendiente
-- **Cómo se ajustó:** _pendiente_
+- **Estado:** - [x] Resuelto — 2026-09-03: `mapearPedido` ahora `id: data.id ?? data.cliente_id`; `cargarHistorial` incluye `origen` (M41 incluido). `tsc` OK.
+- **Cómo se ajustó:** `timeline.builder.ts:127` y `:152` corregidos.
 
 ### C15 — `reportes/route.ts` usa timezone local, no CDMX
 - **Severidad:** 🔴 Crítico (datos)
@@ -311,7 +311,8 @@
 ### M41 — `origen` no seleccionado por `timeline.builder.ts`
 - **Archivos:** `src/notification-engine/timeline.builder.ts:152` (`.select('rol, contenido, creado_en')` sin `origen`)
 - **Fix:** Agregar `origen` al select y usarlo para distinguir equipo/cliente/flora en la línea de tiempo.
-- **Estado:** - [ ] Pendiente
+- **Estado:** - [x] Resuelto — 2026-09-03: incluido en C14. `cargarHistorial` ahora `select('rol, contenido, creado_en, origen')`.
+- **Cómo se ajustó:** `timeline.builder.ts:152` corregido.
 
 ### M42 — `resolverLidInverso` falla silenciosamente
 - **Archivos:** `src/novedades/novedades.service.ts:143`, `src/whatsapp/contact.service.ts:resolverLidInverso`

@@ -196,7 +196,7 @@ export async function obtenerUltimosMensajesEquipo(
       .from('historial_chat')
       .select('contenido, creado_en')
       .eq('cliente_id', clienteId)
-      .or('origen.eq.equipo,contenido.like.*[Agente:*')
+      .or('origen.eq.equipo,contenido.ilike.%[Agente:%')
       .gte('creado_en', desde)
       .order('creado_en', { ascending: false })
       .limit(limite)

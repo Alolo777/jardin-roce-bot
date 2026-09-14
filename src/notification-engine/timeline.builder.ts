@@ -124,7 +124,7 @@ function mapearCaso(data: Record<string, any>) {
 
 function mapearPedido(data: Record<string, any>) {
   return {
-    id: data.cliente_id,
+    id: data.id ?? data.cliente_id,
     estado: data.estado,
     estadoFlujo: data.estado_flujo,
     telefono: data.telefono,
@@ -149,7 +149,7 @@ async function cargarHistorial(clienteId: string | null) {
   try {
     const { data } = await supabaseAdmin
       .from('historial_chat')
-      .select('rol, contenido, creado_en')
+      .select('rol, contenido, creado_en, origen')
       .eq('cliente_id', clienteId)
       .order('creado_en', { ascending: false })
       .limit(MAX_HISTORIAL)
