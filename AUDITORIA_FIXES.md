@@ -184,8 +184,8 @@
 - **Archivos relacionados:** `src/notification-engine/conflict.detector.ts`, `src/pedidos/pedido.service.ts:TRANSICIONES_VALIDAS`, `src/events/types.ts`
 - **Fix propuesto:** Cambiar a `return 'cotizacion'` o `EstadoPedido.NUEVO`. Agregar test de `conflict.detector`.
 - **Verificación:** `detectConflicts` con `ORDER_CREATED` no debe permitir transición inválida.
-- **Estado:** - [ ] Pendiente
-- **Cómo se ajustó:** _pendiente_
+- **Estado:** - [x] Resuelto — 2026-09-03: `ORDER_CREATED` ahora retorna `'cotizacion'`. `tsc` OK.
+- **Cómo se ajustó:** `conflict.detector.ts:23` cambiado de `'pagado'` a `'cotizacion'`.
 
 ---
 

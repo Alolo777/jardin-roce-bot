@@ -21,7 +21,7 @@ function esTransicionValida(desde: string | null, hasta: string | null): boolean
 function extraerEstadoEvento(eventType: EventType, payload: EventPayload): string | null {
   switch (eventType) {
     case EventType.ORDER_CREATED:
-      return 'pagado'
+      return 'cotizacion'
     case EventType.ORDER_UPDATED:
       return 'apartado'
     case EventType.ORDER_READY:
