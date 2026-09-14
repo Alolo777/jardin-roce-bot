@@ -112,8 +112,8 @@
 - **Archivos relacionados:** `src/decision/decision.engine.ts:56,142,253`, `src/models/types.ts`, `src/casos/caso.service.ts:234`
 - **Fix propuesto:** Sacar "personalizado" del regex de COTIZACION o dar prioridad a PERSONALIZADO antes. Agregar test `decision.engine` que valide `detectarIntencion("ramo personalizado") === PERSONALIZADO`.
 - **Verificación:** `npx tsx --env-file=.env.test tests/nombre.test.mts` + nuevo test de intención.
-- **Estado:** - [ ] Pendiente
-- **Cómo se ajustó:** _pendiente_
+- **Estado:** - [x] Resuelto — 2026-09-03: agregado `if(/\bpersonalizado\b/) return PERSONALIZADO` antes de COTIZACION y removido `personalizado` del regex COTIZACION. `tsc` OK.
+- **Cómo se ajustó:** `decision.engine.ts:56` reordenado.
 
 ### C11 — `media_chat` sin `CREATE TABLE`
 - **Severidad:** 🔴 Crítico (BD)
@@ -157,8 +157,8 @@
 - **Archivos relacionados:** `app/api/reportes/route.ts:10-11`, `app/api/bot/status/route.ts` (patrón correcto), `bot.ts:fechaInicioFinCDMX`
 - **Fix propuesto:** Reemplazar por `partesCdmx()` o `fechaInicioFinCDMX()` (extraer a `src/utils/fecha.ts` compartido).
 - **Verificación:** Test: mockear `Date` en UTC y verificar que `desde` sea fecha CDMX.
-- **Estado:** - [ ] Pendiente
-- **Cómo se ajustó:** _pendiente_
+- **Estado:** - [x] Resuelto — 2026-09-03: `desde/hasta` ahora usan `fechaCdmxISO()` con `Intl.DateTimeFormat('en-CA', {timeZone:'America/Mexico_City'})`. `tsc` OK.
+- **Cómo se ajustó:** `app/api/reportes/route.ts:7` agregado `fechaCdmxISO`/`inicioMesCdmxISO` y reemplazado fallback.
 
 ### C16 — `lib/ai.ts` importa `supabaseAdmin` (riesgo fuga service_role al cliente)
 - **Severidad:** 🔴 Crítico (seguridad)

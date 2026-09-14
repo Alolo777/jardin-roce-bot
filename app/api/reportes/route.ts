@@ -4,11 +4,19 @@ import { supabaseAdmin } from '@/lib/supabase'
 const ESTADOS_VENTA = ['pagado', 'entregado']
 const ESTADOS_COTIZACION = ['cotizacion']
 
+function fechaCdmxISO(d = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(d)
+}
+function inicioMesCdmxISO(): string {
+  const hoy = fechaCdmxISO()
+  return hoy.slice(0, 8) + '01'
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
-    const desde = searchParams.get('desde') || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
-    const hasta = searchParams.get('hasta') || new Date().toISOString().slice(0, 10)
+    const desde = searchParams.get('desde') || inicioMesCdmxISO()
+    const hasta = searchParams.get('hasta') || fechaCdmxISO()
     const sucursal = searchParams.get('sucursal')
 
     const inicio = new Date(desde + 'T00:00:00.000Z')

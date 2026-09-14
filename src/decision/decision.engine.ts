@@ -53,7 +53,10 @@ function detectarIntencion(texto: string): Intencion {
   if (/\b(cu[aá]nto\s+(cuesta|sale|vale|est[aá])|precio|saldr[ií]a|costar[ií]a|qu[eé]\s+precio|en\s+cu[aá]nto|qu[eé]\s+tan|precios|valor)\b/i.test(t)) {
     return Intencion.PRECIO
   }
-  if (/\b(cotiza|cotizar|cotizaci[oó]n|personalizado|armar\s+un\s+ramo|quiero\s+un\s+ramo|quisiera\s+un|me\s+gustar[ií]a|hacer\s+un|como\s+(este|esa|esa\s+foto|la\s+foto|la\s+imagen)|referencia|parecido)\b/i.test(t)) {
+  if (/\bpersonalizado\b/i.test(t)) {
+    return Intencion.PERSONALIZADO
+  }
+  if (/\b(cotiza|cotizar|cotizaci[oó]n|armar\s+un\s+ramo|quiero\s+un\s+ramo|quisiera\s+un|me\s+gustar[ií]a|hacer\s+un|como\s+(este|esa|esa\s+foto|la\s+foto|la\s+imagen)|referencia|parecido)\b/i.test(t)) {
     return Intencion.COTIZACION
   }
   if (/\b(lo\s+quiero|apart[ao]|reserva|me\s+interesa|necesito|lo\s+necesito|d[áa]mel[oó]|ese\s+me\s+gusta|ese\s+quiero|lo\s+encargo)\b/i.test(t)) {
