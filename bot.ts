@@ -1573,36 +1573,36 @@ const messageEntry = createMessageEntry({
     setBotPausado: (valor: boolean) => setBotPausado(valor),
   }),
 })
-cargarEstado().then(() => {
-  limpiarClavesVacias().catch(() => {})
-}).catch(() => {})
-setOnFotosPendientesCambiaron(() => {
-  guardarEstado().catch(() => {})
-  limpiarClavesVacias().catch(() => {})
-})
-subscribeTelegramEvents()
-subscribeLogEvents()
-logger.info('bot', 'Bot iniciado — observabilidad activa')
-verificarConexionTelegram().then(r => {
-  if (r.ok) console.log(`[Telegram] ✅ ${r.detalle}`)
-  else console.warn(`[Telegram] ⚠️ ${r.detalle}`)
-}).catch(() => {})
-iniciarTelegramListener(manejarComandoTelegram)
-setInterval(() => {
-  Promise.resolve(
-    supabaseAdmin
-      .from('configuracion_bot')
-      .upsert({ clave: 'bot_metrics', valor: JSON.stringify(metrics.getSnapshot()) })
-  ).catch(() => {})
-}, 30_000).unref?.()
-iniciarPersistenciaPeriodica()
-cargarPedidosDesdeBD().catch(() => {})
-cargarCasosDesdeBD().catch(() => {})
-refrescarConfiguracion(true).catch(() => {})
-setInterval(() => { refrescarConfiguracion().catch(() => {}) }, 5 * 60_000).unref?.()
-refrescarInventario(true).catch(() => {})
-setInterval(() => { refrescarInventario().catch(() => {}) }, 5 * 60_000).unref?.()
-iniciarBaileys().catch((err) => { console.error('❌ Error:', err); registrarCrash(); process.exit(1) })
+;(async () => {
+  try { await cargarEstado(); await limpiarClavesVacias().catch(() => {}) } catch {}
+  setOnFotosPendientesCambiaron(() => {
+    guardarEstado().catch(() => {})
+    limpiarClavesVacias().catch(() => {})
+  })
+  subscribeTelegramEvents()
+  subscribeLogEvents()
+  logger.info('bot', 'Bot iniciado — observabilidad activa')
+  verificarConexionTelegram().then(r => {
+    if (r.ok) console.log(`[Telegram] ✅ ${r.detalle}`)
+    else console.warn(`[Telegram] ⚠️ ${r.detalle}`)
+  }).catch(() => {})
+  iniciarTelegramListener(manejarComandoTelegram)
+  setInterval(() => {
+    Promise.resolve(
+      supabaseAdmin
+        .from('configuracion_bot')
+        .upsert({ clave: 'bot_metrics', valor: JSON.stringify(metrics.getSnapshot()) })
+    ).catch(() => {})
+  }, 30_000).unref?.()
+  iniciarPersistenciaPeriodica()
+  try { await cargarPedidosDesdeBD() } catch {}
+  try { await cargarCasosDesdeBD() } catch {}
+  refrescarConfiguracion(true).catch(() => {})
+  setInterval(() => { refrescarConfiguracion().catch(() => {}) }, 5 * 60_000).unref?.()
+  refrescarInventario(true).catch(() => {})
+  setInterval(() => { refrescarInventario().catch(() => {}) }, 5 * 60_000).unref?.()
+  try { await iniciarBaileys() } catch (err) { console.error('❌ Error:', err); registrarCrash(); process.exit(1) }
+})()
 
 async function gracefulShutdown(signal: string): Promise<void> {
   console.log(`\n⚠️ ${signal} recibido — cerrando graceful...`)
