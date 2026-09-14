@@ -296,38 +296,6 @@ export function serializarPedidoParaDashboard(clienteId: string, pedido: PedidoA
   }
 }
 
-export function syncLegacyToEngine(clienteId: string, telefono: string, legado: Record<string, unknown>): PedidoActual {
-  const existente = obtenerPedido(clienteId)
-  if (existente) return existente
-
-  const datos: Partial<PedidoActual> = {}
-  if (typeof legado.nombre === 'string') datos.nombre = legado.nombre
-  if (typeof legado.productoPersonalizado === 'string') datos.productoPersonalizado = legado.productoPersonalizado
-  if (typeof legado.precioPersonalizado === 'number') datos.precioPersonalizado = legado.precioPersonalizado
-  if (typeof legado.direccion === 'string') datos.direccion = legado.direccion
-  if (typeof legado.sucursal === 'string') datos.sucursal = legado.sucursal
-  if (typeof legado.metodoPago === 'string') datos.metodoPago = legado.metodoPago as PedidoActual['metodoPago']
-  if (typeof legado.nota === 'string') datos.nota = legado.nota
-  if (typeof legado.fechaEntrega === 'string') datos.fechaEntrega = legado.fechaEntrega
-  if (typeof legado.horaEntrega === 'string') datos.horaEntrega = legado.horaEntrega
-  if (typeof legado.detallesEspeciales === 'string') datos.detallesEspeciales = legado.detallesEspeciales
-  if (typeof legado.estadoFlujo === 'string') datos.estadoFlujo = legado.estadoFlujo as string
-  if (typeof legado.precioConfirmadoPor === 'string') datos.precioConfirmadoPor = legado.precioConfirmadoPor as PedidoActual['precioConfirmadoPor']
-  if (typeof legado.esperandoPrecioEnvio === 'boolean') datos.esperandoPrecioEnvio = legado.esperandoPrecioEnvio
-  if (typeof legado.cerradoEn === 'string') datos.cerradoEn = legado.cerradoEn
-  if (legado.envio && typeof legado.envio === 'object' && 'zona' in legado.envio && 'precio' in legado.envio) {
-    datos.envio = { zona: String((legado.envio as { zona: unknown }).zona), precio: Number((legado.envio as { precio: unknown }).precio) }
-  }
-  if (legado.arreglo && typeof legado.arreglo === 'object' && 'nombre' in legado.arreglo) {
-    const a = legado.arreglo as { nombre: string; precio: number; id?: string }
-    datos.arreglo = { nombre: a.nombre, precio: a.precio, id: a.id }
-  }
-  if (Array.isArray(legado.extras)) datos.extras = legado.extras as PedidoActual['extras']
-  if (typeof legado.casoId === 'string') datos.casoId = legado.casoId
-
-  return crearPedido(clienteId, telefono, datos)
-}
-
 export function transitar(pedido: PedidoActual, nuevoEstado: EstadoPedido): boolean {
   const actual = pedido.estado
   if (!actual) return false

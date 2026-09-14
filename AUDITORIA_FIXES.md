@@ -195,7 +195,8 @@
 ### H19 — `syncLegacyToEngine` y `cambiarEstado` son código muerto
 - **Archivos:** `src/pedidos/pedido.service.ts:302,354`, `src/pedidos/index.ts`
 - **Fix:** Eliminar ambas funciones y sus imports. Documentar en CHANGELOG. Verificar `grep` 0.
-- **Estado:** - [ ] Pendiente
+- **Estado:** - [x] Resuelto — 2026-09-03: Verificado `cambiarEstado` SÍ se usa (`bot.ts:1830`, `src/api/server.ts:207`) — no se eliminó. `syncLegacyToEngine` estaba muerto (legacy PEDIDO_EN_CURSO ya eliminado) y se eliminó. `tsc` OK.
+- **Cómo se ajustó:** `pedido.service.ts:299` eliminada `syncLegacyToEngine` (30 líneas). `cambiarEstado` se conserva.
 
 ### H20 — `precioConfirmadoPor` tipo inconsistente
 - **Archivos:** `src/models/types.ts:169,186`, `src/pedidos/pedido.service.ts:318`, `src/whatsapp/message-handler.ts:595`
