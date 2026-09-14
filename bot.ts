@@ -232,9 +232,9 @@ setInterval(() => {
     eventBus.emit(EventType.BOT_DAILY_ALERT, { telefono: 'system' })
   }
 
-  if (hora === 9 && dia !== ultimoDiaResumenDiario) {
+  if (hora >= 9 && dia !== ultimoDiaResumenDiario) {
     ultimoDiaResumenDiario = dia
-    console.log('[bot] ⏰ Job diario 9am: resumen diario a Telegram')
+    console.log(`[bot] ⏰ Job diario ${hora}:00: resumen diario a Telegram (catch-up)`)
     enviarResumenDiario()
   }
 

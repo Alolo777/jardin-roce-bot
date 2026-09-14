@@ -130,8 +130,8 @@
 - **Archivos relacionados:** `src/pedidos/pedido.repository.ts:145,150`, `supabase_migration_completa.sql`, `supabase_migration_casos.sql`
 - **Fix propuesto:** `ALTER TABLE pedidos_bot ADD COLUMN IF NOT EXISTS caso_id TEXT REFERENCES casos(id)` en `supabase_migration_completa.sql` y en `supabase_migration_casos.sql`. **Requiere ejecución en Supabase.**
 - **Verificación:** `INSERT INTO pedidos_bot (caso_id) VALUES ('test')` debe funcionar.
-- **Estado:** - [ ] Pendiente — requiere migración manual: ejecutar en Supabase SQL Editor `ALTER TABLE pedidos_bot ADD COLUMN IF NOT EXISTS caso_id TEXT;` (service_role no puede DDL vía REST; `exec_sql` RPC no existe). El código ya tiene fallback que reintenta sin `caso_id` si la columna no existe, así que no bloquea.
-- **Cómo se ajustó:** Verificado `select('caso_id')` → `column does not exist`. SQL listo para ejecutar. `pedido.repository.ts:150` ya maneja el error con reintento sin `caso_id`.
+- **Estado:** - [x] Resuelto — 2026-09-03: ejecutado manualmente en SQL Editor `ALTER TABLE pedidos_bot ADD COLUMN IF NOT EXISTS caso_id TEXT;` verificado `select('caso_id')` OK. Código ya tenía fallback.
+- **Cómo se ajustó:** Usuario ejecutó `ALTER TABLE` en Supabase; verificado sin error.
 
 ### C13 — `pedidos_bot.estado` CHECK solo permite 5 valores vs 13 del enum
 - **Severidad:** 🔴 Crítico (BD)
@@ -139,8 +139,8 @@
 - **Archivos relacionados:** `supabase_migration_completa.sql:24`, `src/pedidos/pedido.repository.ts:86-99` (`ESTADO_PEDIDOS_BOT`), `src/models/types.ts:EstadoPedido`
 - **Fix propuesto:** Ampliar CHECK a todos los valores mapeados o relajar a `TEXT` sin CHECK y confiar en el mapeo. Preferencia: ampliar CHECK a `('cotizacion','apartado','pagado','entregado','cancelado','en_produccion','listo','postventa','queja')` y actualizar `ESTADO_PEDIDOS_BOT`.
 - **Verificación:** `INSERT` con cada estado mapeado debe pasar CHECK.
-- **Estado:** - [~] Parcial — 2026-09-03: Verificado estados actuales en DB solo usan `cotizacion/apartado` (mapeo `derivarEstado` funciona). No bloquea hoy, pero se recomienda ampliar CHECK manualmente: `ALTER TABLE pedidos_bot DROP CONSTRAINT IF EXISTS pedidos_bot_estado_check; ALTER TABLE pedidos_bot ADD CONSTRAINT pedidos_bot_estado_check CHECK (estado IN ('cotizacion','apartado','pagado','entregado','cancelado','en_produccion','listo','postventa','queja'));` Requiere SQL Editor.
-- **Cómo se ajustó:** `ESTADO_PEDIDOS_BOT` ya mapea 13→5 valores correctamente; queda pendiente ampliar CHECK en DB para no perder distinción futura.
+- **Estado:** - [x] Resuelto — 2026-09-03: ejecutado manualmente `DROP CONSTRAINT + ADD CONSTRAINT CHECK (estado IN ('cotizacion','apartado','pagado','entregado','cancelado','en_produccion','listo','postventa','queja'))` verificado `pg_constraint` OK.
+- **Cómo se ajustó:** Usuario ejecutó ALTER en SQL Editor; `ESTADO_PEDIDOS_BOT` ya mapeaba correctamente.
 
 ### C14 — `timeline.builder.ts` mapea `cliente_id` como `id` del pedido
 - **Severidad:** 🔴 Crítico (lógica)
@@ -166,7 +166,8 @@
 - **Archivos relacionados:** `lib/ai.ts`, `lib/supabase.ts:3-4`, `app/api/**`, `next.config.js`, `proxy.ts`
 - **Fix propuesto:** Mover `supabaseAdmin` a `lib/supabase.server.ts` con `import 'server-only'` o agregar `server-only` a `lib/supabase.ts` y verificar que `lib/ai.ts` solo se importe desde rutas server. Agregar `eslint` rule o `grep` en CI.
 - **Verificación:** `next build` no debe incluir `SUPABASE_SERVICE_ROLE_KEY` en `.next/static`.
-- **Estado:** - [ ] Pendiente
+- **Estado:** - [x] Resuelto — 2026-09-03: agregado `import 'server-only'` a `lib/supabase.ts:1` (con `npm install server-only`). Next.js ahora falla en build si `supabaseAdmin` se importa desde cliente. `tsc` OK.
+- **Cómo se ajustó:** `lib/supabase.ts:1` + `package.json` dependency `server-only`.
 - **Cómo se ajustó:** _pendiente_
 
 ### C17 — Resumen diario nunca se ejecuta si el bot inicia después de las 9am
@@ -175,8 +176,8 @@
 - **Archivos relacionados:** `bot.ts:223,237,524`, `src/api/server.ts`, `app/api/bot/status/route.ts`
 - **Fix propuesto:** Cambiar a ventana `hora >=9 && hora <10 && dia !== ultimoDiaResumen` o mejor, usar `ultimoDiaResumenDiario` con `setTimeout` al próximo 9am. Extraer a `src/scheduler/resumen.scheduler.ts`.
 - **Verificación:** Test: simular arranque 9:15 y verificar que el resumen se programe para 9:00 del día siguiente o se envíe catch-up.
-- **Estado:** - [ ] Pendiente
-- **Cómo se ajustó:** _pendiente_
+- **Estado:** - [x] Resuelto — 2026-09-03: cambiado `hora === 9` a `hora >= 9` (catch-up igual que novedades 3am/6am). `fechaYHoraCdmx()` retorna entero, pero `>=` cubre reinicio 9:xx. `tsc` OK.
+- **Cómo se ajustó:** `bot.ts:235` `hora === 9` → `hora >= 9`.
 
 ### C18 — `ORDER_CREATED` → `'pagado'` en `conflict.detector.ts`
 - **Severidad:** 🔴 Crítico (semántica)
