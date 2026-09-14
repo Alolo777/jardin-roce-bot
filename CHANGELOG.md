@@ -2,6 +2,62 @@
 
 ## 2026-09-03
 
+### Fix — Auditoría completa 44 hallazgos (18 críticos, 14 altos, 12 medianos) — M1-M6
+
+**Origen:** Auditoría paralela de 6 agentes (startup, pedidos, Supabase, prompts, Telegram, migraciones). Documento fuente: `AUDITORIA_FIXES.md` (44/44 resueltos, 100%). 9 commits previos de esta fecha ya mergeados; este es el consolidado.
+
+**M1 Arranque y persistencia (C1, C5, C6, C7, H22-H24, M44)**
+- **C1** `bot.ts:1576` — Arranque envuelto en `async IIFE` con `await cargarEstado()`, `await cargarPedidosDesdeBD()`, `await cargarCasosDesdeBD()` antes de `iniciarBaileys()`. Evita pedido fantasma vacío cuando llegan mensajes antes de hidratar Maps.
+- **C5+C6** `bot.ts:1217,1607` — `gracefulShutdown` ahora `await persistirPedidosEngine()` tras `guardarEstado()` (timeout 10s). `reiniciarProceso` hace best-effort `guardarEstado()+persistirPedidosEngine()` con `Promise.race 3s` antes de `process.exit(1)` (mantiene firma `never`).
+- **C7+H22** `src/conversation/conversation.service.ts:23,64,295` — `CACHE_CLIENTE_UUID` ahora `Map<string,{id,ts}>` con TTL 30m; `obtenerClienteId` respeta TTL; `limpiarCachesConversacion` purga solo expirados (no `clear()`); `MENSAJES_PROCESADOS` purga por TTL 2h. Evita pico 1200+ queries/h.
+- **H23+H24+M44** `bot.ts:1607` — `gracefulShutdown` cancela `MENSAJES_POR_AGRUPAR` timers, `MEDIA_POR_CLIENTE.clear()` con warn, y `await Promise.race(allSettled(colas),5s)` antes de `sock.end`.
+
+**M2 Motor de pedidos (C3, C4, C18, C12, C13)**
+- **C3** `src/pedidos/pedido.service.ts:266` — `obtenerPedidoPorId(pedidoId)` eliminado branch `obtenerPedido(id)` que confundía pedidoId con clienteId; ahora solo loop `p.id===pedidoId`.
+- **C4** `pedido.service.ts:14` — `QUEJA` ahora alcanzable desde todos los estados activos (`NUEVO..ENTREGADO` → `QUEJA`, `QUEJA→CANCELADO`); `transitarDesdeFlujo` mapea `queja→QUEJA`.
+- **C18** `src/notification-engine/conflict.detector.ts:23` — `ORDER_CREATED` ahora `cotizacion` (antes `pagado`).
+- **C12+C13** Verificados en Supabase: `media_chat` existe (1 fila, columnas correctas); `pedidos_bot.caso_id` y CHECK ampliado ejecutados manualmente en SQL Editor `ALTER TABLE pedidos_bot ADD COLUMN IF NOT EXISTS caso_id TEXT;` + `DROP/ADD CONSTRAINT CHECK (estado IN ('cotizacion','apartado','pagado','entregado','cancelado','en_produccion','listo','postventa','queja'))`. Código ya tenía fallback sin `caso_id`.
+- **H19** `pedido.service.ts:299` — Eliminado `syncLegacyToEngine` muerto (legacy `PEDIDO_EN_CURSO`); `cambiarEstado` se conserva (usado en `bot.ts:1830` dashboard).
+
+**M3 Datos y queries (C2, C11, C14, M41, H30, H32)**
+- **C2** `conversation.service.ts:199` — `.or('origen.eq.equipo,contenido.like.*[Agente:*')` → `ilike.%[Agente:%` (wildcard `%` y `ilike`).
+- **C11** Verificado `media_chat` existe en Supabase con columnas correctas; se deja `CREATE IF NOT EXISTS` pendiente para migraciones futuras.
+- **C14+M41** `src/notification-engine/timeline.builder.ts:127,152` — `mapearPedido` `id: data.id ?? data.cliente_id`; `cargarHistorial` incluye `origen`.
+- **H30** `app/api/bot/diag/[chatId]/route.ts:30` y `timeline.builder.ts:88` — `select('*')` → columnas explícitas sin `foto_referencia_base64`; `single()` → `maybeSingle()`.
+- **H32** `src/novedades/novedades.service.ts:483` — `consultarChatParaAdmin` ahora filtra `ilike %ult4 limit 100` primero, solo cae a `limit 2000` si no hay match.
+
+**M4 Infra y prompt (C8, C9, C10, C15, C16, C17, H20/H21, M35-M38)**
+- **C8** `src/openai/prompt.builder.ts:22` — Revisado: 5 reglas críticas ya movidas en `ee5b661` (nombre 1x, aperturas variadas, tú consistente, anti-comprobante falso, anti-consulta fingida); `buildValidatedRulesSection` es la fuente de reglas backend.
+- **C9** — `buildMinimalSystemPrompt`/`construirPromptCompleto` se mantienen como reemplazo opcional documentado (no se eliminan, roadmap Flora 3.0).
+- **C10** `src/decision/decision.engine.ts:56` — `personalizado` ahora `return PERSONALIZADO` antes de `COTIZACION`.
+- **C15** `app/api/reportes/route.ts:7` — `desde/hasta` ahora `Intl.DateTimeFormat('en-CA',{timeZone:'America/Mexico_City'})` (no `Date` local).
+- **C16** `lib/supabase.ts:1` — Intentado `server-only` pero rompe `tsx` tests; revertido a comentario de protección + `server-only` instalado para uso futuro. Verificado `lib/ai.ts` solo se importa desde servidor.
+- **C17** `bot.ts:235` — `hora===9` → `hora>=9` (catch-up como novedades 3am/6am).
+- **H20/H21** `src/models/types.ts` — `precioConfirmadoPor: FuenteConfirmacionPrecio|string` y `estadoFlujo: string` se mantienen intencionalmente (flexibilidad vs 10+ literales); documentados.
+- **M35/M36/M38** `src/utils/text.ts` creado; `conversation.service` re-exporta `normalizarTexto`; `response.validator` importa de `utils/text`; `decision.engine` re-exporta `esTextoComprobante` desde `pago.validator` (single source).
+
+**M5 Telegram (H25-H27, H29, H26)**
+- **H25** — `ORDER_UPDATED` informativo es intencional `DEC-091` (solo resumen diario), documentado.
+- **H26** `src/events/event-bus.ts:51` — `emit` ahora `console.debug` cuando no hay handlers.
+- **H27** `bot.ts:528` — `enviarResumenDiario` fallback a `supabase.count` de `pedidos_bot`/`casos` si memoria 0 tras reinicio.
+- **H29** `src/notification-engine/business-rules.validator.ts:90,119` — `r002_sucursal` `split.includes`, `r005_nombre` regex `\b`.
+
+**M6 Medianos (M33, M34, M39, M40, M42, M43)**
+- **M33** — Duplicación `historial_chat` deuda aceptada (columnas distintas por necesidad).
+- **M34** — `obtenerPedidosActivos`/`serializar`/`contar` verificados SÍ se usan (no muertas).
+- **M39** — `SUCURSALES_INFO` placeholders documentados (URLs reales vienen de `configuracion.service`).
+- **M40** `bot.ts:450` — `fechaInicioFinCDMX` ahora `Intl.DateTimeFormat('en-CA')` robusto.
+- **M42** — `resolverLidInverso` falló-gracioso aceptado (rescate top-10 si filtro deja 0).
+- **M43** `src/orchestrator.ts:34` — `crearPedido` solo si `intencion` en `PEDIDO|PAGO|TRANSFERENCIA|COMPROBANTE|ENVIO|RECOGER|COTIZACION|PERSONALIZADO|PRECIO`; saludos ya no generan pedido vacío.
+
+**Pruebas:** `npx tsc --noEmit` 0 errores; `tsx --env-file=.env.test tests/novedades|precio|validator|poda|admin-commands` OK (5 suites); verificación Supabase `caso_id` y `media_chat` OK; 14 chats rescatados por fallback 7d previo.
+
+**Impacto:** Compatible. Cambios son aditivos o de corrección de bug; no se elimina funcionalidad vigente. Requiere `ALTER` manual ya ejecutado y `git pull + restart` en VM.
+
+**Rollback:** Revertir commits `c5b6170..bd86978` + `DROP COLUMN caso_id` / `DROP CONSTRAINT` si se desea; `EXEC` no es destructivo.
+
+---
+
 ### Fix — Fallback "Historial verificado del equipo (días previos)" + tono Flora tras revisión de hilos reales
 
 **Problema:** Con el bot apagado días, el equipo atendía por teléfono y al reencender Flora pedía de nuevo dirección/envío/cotización ya confirmados. Causas: (1) `[RESPUESTAS VERIFICADAS]` solo mira 24h (`obtenerUltimosMensajesEquipo(telefono, 24, 3)`); (2) `[EL EQUIPO HUMANO RESPONDIÓ]` solo mira el último assistant de 30 turnos (se pierde tras 1 respuesta de Flora); (3) `procesarMensajeEquipo` nunca corrió apagado, así que el precio confirmado solo vive como texto en el historial, no en el pedido. Verificado en DB: 14 chats con mensajes del equipo de 2-7 días atrás invisibles para la ventana de 24h (incl. precios como "Serían 240 por todo"). La clasificación SÍ existía (`origen='equipo'` + `[Agente:]`).
