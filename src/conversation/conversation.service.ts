@@ -20,7 +20,8 @@ export const INACTIVIDAD_MAX_HR = 99
 // CACHÉS EN MEMORIA
 // ════════════════════════════════════════════════════════════════
 
-export const CACHE_CLIENTE_UUID = new Map<string, string>()
+export const CACHE_CLIENTE_TTL_MS = 30 * 60_000
+export const CACHE_CLIENTE_UUID = new Map<string, { id: string; ts: number }>()
 export const MENSAJES_PROCESADOS = new Map<string, number>()
 
 // ════════════════════════════════════════════════════════════════
@@ -62,14 +63,15 @@ export function extraerTelefono(msg: any): string {
 
 export async function obtenerClienteId(telefono: string): Promise<string | null> {
   const cached = CACHE_CLIENTE_UUID.get(telefono)
-  if (cached) return cached
+  if (cached && Date.now() - cached.ts < CACHE_CLIENTE_TTL_MS) return cached.id
+  if (cached) CACHE_CLIENTE_UUID.delete(telefono)
 
   try {
     const { data: existing } = await supabaseAdmin
       .from('clientes').select('id').eq('telefono', telefono).maybeSingle()
 
     if (existing) {
-      CACHE_CLIENTE_UUID.set(telefono, existing.id)
+      CACHE_CLIENTE_UUID.set(telefono, { id: existing.id, ts: Date.now() })
       return existing.id
     }
 
@@ -77,7 +79,7 @@ export async function obtenerClienteId(telefono: string): Promise<string | null>
       .from('clientes').insert({ telefono }).select('id').single()
 
     if (nuevo) {
-      CACHE_CLIENTE_UUID.set(telefono, nuevo.id)
+      CACHE_CLIENTE_UUID.set(telefono, { id: nuevo.id, ts: Date.now() })
       return nuevo.id
     }
   } catch (err) {
@@ -293,6 +295,7 @@ export function normalizarTexto(texto: string): string {
 // ════════════════════════════════════════════════════════════════
 
 export function limpiarCachesConversacion(): void {
-  CACHE_CLIENTE_UUID.clear()
-  MENSAJES_PROCESADOS.clear()
+  const ahora = Date.now()
+  for (const [k, v] of CACHE_CLIENTE_UUID) if (ahora - v.ts > CACHE_CLIENTE_TTL_MS) CACHE_CLIENTE_UUID.delete(k)
+  for (const [k, ts] of MENSAJES_PROCESADOS) if (ahora - ts > MENSAJE_PROCESADO_TTL_MS) MENSAJES_PROCESADOS.delete(k)
 }

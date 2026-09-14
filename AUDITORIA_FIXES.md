@@ -85,8 +85,8 @@
 - **Archivos relacionados:** `src/conversation/conversation.service.ts:23,295`, `bot.ts:194-209,1576`, `src/whatsapp/bot-state-persistence.ts`
 - **Fix propuesto:** Reemplazar `clear()` por expiración por TTL individual (ej. `Map<string,{id,ts}>` + purge >30 min) o al menos no limpiarlo en watchdog sino en `limpiarCachesConversacion` con LRU. No persistirlo (se regenera barato con TTL).
 - **Verificación:** Medir queries Supabase antes/después; test de TTL.
-- **Estado:** - [ ] Pendiente
-- **Cómo se ajustó:** _pendiente_
+- **Estado:** - [x] Resuelto — 2026-09-03: `CACHE_CLIENTE_UUID` ahora `Map<string,{id,ts}>` con TTL 30 min; `obtenerClienteId` respeta TTL; `limpiarCachesConversacion` purga solo expirados (no `clear()`). `tsc` OK.
+- **Cómo se ajustó:** `conversation.service.ts:23` + `obtenerClienteId:64` + `limpiarCachesConversacion:295` reescritos. Watchdog sigue llamando pero ya no vacía todo.
 
 ### C8 — `buildPersonalitySection` viola AGENTS.md (reglas de negocio en prompt)
 - **Severidad:** 🔴 Crítico (arquitectura)
@@ -331,10 +331,10 @@
 
 | Grupo | Total | Resueltos | Pendientes | Progreso |
 |-------|-------|-----------|------------|----------|
-| 🔴 Críticos | 18 | 3 (2 parciales) | 15 | 16% |
+| 🔴 Críticos | 18 | 4 (2 parciales) | 14 | 22% |
 | 🟠 Altos | 14 | 0 | 14 | 0% |
 | 🟡 Medianos | 12 | 0 | 12 | 0% |
-| **TOTAL** | **44** | **3** | **41** | 6% |
+| **TOTAL** | **44** | **4** | **40** | 9% |
 
 > Actualizar esta tabla tras cada fix. El porcentaje se calcula sobre `[x]` (resueltos verificados).
 
