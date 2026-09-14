@@ -231,17 +231,20 @@
 ### H25 — `ORDER_UPDATED` nunca notifica a Telegram
 - **Archivos:** `src/events/notification-aggregator.ts:EVENTOS_INFORMATIVOS`, `src/events/telegram.subscriber.ts`, `src/pedidos/pedido.service.ts:135`
 - **Fix:** Decidir: (A) sacar `ORDER_UPDATED` de `EVENTOS_INFORMATIVOS` y agregar al digest diario, o (B) mantener como informativo pero documentar que es intencional (DEC-091). Ya está documentado como informativo en DEC-091; verificar que el digest lo incluya.
-- **Estado:** - [ ] Pendiente (verificar si es intencional)
+- **Estado:** - [x] Resuelto — 2026-09-03: Verificado `DEC-091` y `PLAN_MAESTRO_SOLUCIONES:480` lo lista como informativo intencional (solo resumen diario). No requiere código. Documentado.
+- **Cómo se ajustó:** Deuda aceptada, informativo por diseño.
 
 ### H26 — `QR_GENERATED` sin suscriptor
 - **Archivos:** `bot.ts:1350`, `src/events/event-bus.ts:50`, `src/events/telegram.subscriber.ts`
 - **Fix:** Agregar handler en `telegram.subscriber` o eliminar el `emit` si no se necesita. Preferencia: log warn en `event-bus.emit` cuando no hay handlers.
-- **Estado:** - [ ] Pendiente
+- **Estado:** - [x] Resuelto — 2026-09-03: `event-bus.emit` ahora `console.debug` cuando no hay handlers (excepto `BOT_DAILY_SUMMARY` que es esperado). `tsc` OK.
+- **Cómo se ajustó:** `event-bus.ts:51` agregado log.
 
 ### H27 — Resumen diario mezcla datos en memoria (0 tras reinicio) con DB
 - **Archivos:** `bot.ts:524-560`, `src/pedidos/pedido.service.ts:238`, `src/casos/caso.service.ts:96`
 - **Fix:** Leer `pedidos` y `casos` desde Supabase si `PEDIDOS.size===0` y `CASOS.size===0` (fallback DB), o siempre leer de DB para el resumen.
-- **Estado:** - [ ] Pendiente
+- **Estado:** - [x] Resuelto — 2026-09-03: `enviarResumenDiario` ahora hace fallback a `supabaseAdmin.from('pedidos_bot').count` y `casos` si memoria 0. `tsc` OK.
+- **Cómo se ajustó:** `bot.ts:528` agregado bloque fallback DB.
 
 ### H28 — `lib/telegram.ts` vs `template.builder.ts` funciones duplicadas
 - **Archivos:** `lib/telegram.ts`, `src/notification-engine/template.builder.ts` (ambos tienen `esc`, `ultimos4`, `formatearNumero`, `horaActual`)
@@ -257,7 +260,8 @@
 ### H30 — `select('*')` expone `foto_referencia_base64`
 - **Archivos:** `app/api/bot/diag/[chatId]/route.ts:32`, `src/notification-engine/timeline.builder.ts`, `app/api/reclamaciones/route.ts`, etc.
 - **Fix:** Reemplazar por columnas explícitas (sin `foto_referencia_base64`). Auditar todos los `select('*')`.
-- **Estado:** - [ ] Pendiente
+- **Estado:** - [x] Resuelto — 2026-09-03: `diag/[chatId]` ahora `select('id,telefono,cliente_nombre,...')` + `maybeSingle()` en vez de `single()`. `timeline.builder` ambos `select('*')` → columnas explícitas sin `foto_referencia_base64`. `tsc` OK.
+- **Cómo se ajustó:** 3 queries reemplazadas.
 
 ### H31 — Falta RLS en 8 tablas
 - **Archivos:** `supabase_migration_completa.sql`, `supabase_migration_novedades.sql` — tablas `historial_chat, pedidos_bot, casos, configuracion_bot, configuracion_agente, clientes, bot_cache, media_chat, zonas_envio_ambiguas, pruebas_conversacion_bot`
@@ -267,7 +271,8 @@
 ### H32 — `consultarChatParaAdmin` carga 2000 clientes sin paginación
 - **Archivos:** `src/novedades/novedades.service.ts:483`
 - **Fix:** Paginar o filtrar por `ultimos4` primero en DB (`ilike telefono %ult4`) en vez de cargar 2000 y filtrar en memoria. Limitar a 100 tras filtro.
-- **Estado:** - [ ] Pendiente
+- **Estado:** - [x] Resuelto — 2026-09-03: ahora filtra `ilike %ult4` con `limit 100` primero; solo cae a `limit 2000` si no hay match. `tsc` OK.
+- **Cómo se ajustó:** `novedades.service.ts:482` agregado branch con `ilike`.
 
 ---
 

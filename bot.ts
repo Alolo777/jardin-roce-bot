@@ -525,11 +525,21 @@ async function enviarResumenDiario(): Promise<void> {
   try {
     const ventas = await obtenerVentasHoy()
     const clientes = await obtenerClientesAtendidosHoy()
-    const pedidos = contarPedidosPorEstado()
+    let pedidos = contarPedidosPorEstado()
+    let casosActivos = contarCasosActivos()
+    let requierenAtencion = contarCasosRequierenAtencionHumana()
+    // Fallback DB si memoria vacía tras reinicio (evita resumen con 0s a las 9am)
+    if (pedidos.ACTIVOS === 0 && casosActivos === 0) {
+      try {
+        const { count: cPed } = await supabaseAdmin.from('pedidos_bot').select('id', { count: 'exact', head: true }).neq('estado', 'cancelado').neq('estado', 'entregado')
+        const { count: cCas } = await supabaseAdmin.from('casos').select('id', { count: 'exact', head: true }).eq('estado', 'ACTIVO')
+        if (typeof cPed === 'number') pedidos = { ...pedidos, ACTIVOS: cPed }
+        if (typeof cCas === 'number') casosActivos = cCas
+        // requierenAtencion se mantiene 0 en fallback (requiere join de prioridad)
+      } catch {}
+    }
     const esperandoPago = pedidos[EstadoPedido.ESPERANDO_PAGO] ?? 0
     const activos = pedidos.ACTIVOS ?? 0
-    const casosActivos = contarCasosActivos()
-    const requierenAtencion = contarCasosRequierenAtencionHumana()
 
     const fecha = new Date().toLocaleDateString('es-MX', {
       timeZone: 'America/Mexico_City',

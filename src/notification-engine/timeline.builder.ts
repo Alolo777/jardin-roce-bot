@@ -85,7 +85,7 @@ async function buscarPedidoReciente(
   if (clienteId) {
     const result = await supabaseAdmin
       .from('pedidos_bot')
-      .select('*')
+      .select('id, cliente_id, telefono, cliente_nombre, producto, precio_arreglo, total, sucursal, zona_envio, direccion, metodo_pago, estado, estado_flujo, creado_en, actualizado_en, requiere_revision, detalles_especiales')
       .eq('cliente_id', clienteId)
       .order('actualizado_en', { ascending: false })
       .limit(1)
@@ -96,7 +96,7 @@ async function buscarPedidoReciente(
   if (!data) {
     const result = await supabaseAdmin
       .from('pedidos_bot')
-      .select('*')
+      .select('id, cliente_id, telefono, cliente_nombre, producto, precio_arreglo, total, sucursal, zona_envio, direccion, metodo_pago, estado, estado_flujo, creado_en, actualizado_en, requiere_revision, detalles_especiales')
       .eq('telefono', telefono)
       .order('actualizado_en', { ascending: false })
       .limit(1)

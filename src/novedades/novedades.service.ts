@@ -479,8 +479,19 @@ export async function consultarChatParaAdmin(pregunta: string): Promise<Respuest
     const nombres = ult4 ? [] : candidatosNombre(pregunta)
     if (!ult4 && nombres.length === 0) return vacio('')
 
-    // Cargar clientes y resolver número real (cache LID→PN de Baileys)
-    const { data: clientesRows } = await supabaseAdmin.from('clientes').select('id, telefono').limit(2000)
+    // Cargar clientes filtrado por DB si hay últimos 4 dígitos (evita traer 2000)
+    let clientesRows: { id: string; telefono: string }[] | null = null
+    if (ult4) {
+      const { data } = await supabaseAdmin.from('clientes').select('id, telefono').ilike('telefono', `%${ult4}`).limit(100)
+      clientesRows = data as any
+      if (!clientesRows || clientesRows.length === 0) {
+        const { data: d2 } = await supabaseAdmin.from('clientes').select('id, telefono').limit(2000)
+        clientesRows = d2 as any
+      }
+    } else {
+      const { data: d2 } = await supabaseAdmin.from('clientes').select('id, telefono').limit(2000)
+      clientesRows = d2 as any
+    }
     let candidatas: { clienteId: string; stored: string; real: string }[] = []
     for (const c of clientesRows ?? []) {
       const stored = String(c.telefono ?? '').trim()

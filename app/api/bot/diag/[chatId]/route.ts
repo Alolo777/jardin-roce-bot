@@ -27,9 +27,9 @@ export async function GET(
     const { supabaseAdmin } = await import('@/lib/supabase')
     const { data } = await supabaseAdmin
       .from('pedidos_bot')
-      .select('*')
+      .select('id, telefono, cliente_nombre, producto, total, sucursal, zona_envio, direccion, metodo_pago, estado, estado_flujo, creado_en, actualizado_en')
       .eq('cliente_id', chatId)
-      .single()
+      .maybeSingle()
 
     return NextResponse.json({
       clienteId: chatId,

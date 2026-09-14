@@ -48,7 +48,10 @@ class EventBus {
     }
 
     const handlers = this.handlers.get(type)
-    if (!handlers || handlers.size === 0) return
+    if (!handlers || handlers.size === 0) {
+      if (type !== EventType.BOT_DAILY_SUMMARY) console.debug(`[EventBus] sin handlers para ${type}`)
+      return
+    }
 
     const promises: Promise<void>[] = []
     for (const handler of handlers) {
