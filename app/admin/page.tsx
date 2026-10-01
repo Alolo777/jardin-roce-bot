@@ -6,6 +6,14 @@ import QrSection from '@/componets/admin/QrSection'
 
 const FEATURES = [
   {
+    href: '/admin/whatsapp',
+    icon: '💬',
+    title: 'WhatsApp',
+    desc: 'Bandeja del equipo: lee conversaciones y responde manualmente. Al responder, Flora se pausa solo en ese chat.',
+    gradient: 'from-green-400 to-emerald-400',
+    shadow: 'shadow-green-200/40',
+  },
+  {
     href: '/admin/empleados',
     icon: '👥',
     title: 'Empleados',

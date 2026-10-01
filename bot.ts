@@ -75,6 +75,7 @@ import { ejecutarPodaPedidos, obtenerUltimaPodaResumen } from './src/pedidos/pod
 import { evaluarQueja } from './src/validators/queja.validator'
 import { esAdminBot, crearAdminHandler, generarNovedadesDiarias, enviarNovedadesProactivo, construirMensajeNovedades, construirMensajeNovedadesCompleto, obtenerNovedadesDelDia, ejecutarAnalisisProfundo, construirMensajeInteresantes, obtenerAdminsBot } from './src/novedades/index'
 import { enviarTextoANumeros } from './src/whatsapp/notification.service'
+import { iniciarOutboxPoller, detenerOutboxPoller } from './src/whatsapp/outbox-poller'
 
 // ════════════════════════════════════════════════════════════════
 // PAUSA DEL BOT
@@ -1636,6 +1637,7 @@ const messageEntry = createMessageEntry({
     ).catch(() => {})
   }, 30_000).unref?.()
   iniciarPersistenciaPeriodica()
+  iniciarOutboxPoller(() => sock)
   try { await cargarPedidosDesdeBD() } catch {}
   try { await cargarCasosDesdeBD() } catch {}
   refrescarConfiguracion(true).catch(() => {})
@@ -1647,6 +1649,7 @@ const messageEntry = createMessageEntry({
 
 async function gracefulShutdown(signal: string): Promise<void> {
   console.log(`\n⚠️ ${signal} recibido — cerrando graceful...`)
+  detenerOutboxPoller()
   const timer = setTimeout(() => {
     console.warn('[shutdown] Timeout 10s — forzando exit.')
     process.exit(1)
