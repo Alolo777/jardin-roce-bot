@@ -4,6 +4,7 @@ import {
   telefonoADigitos,
   ultimos10,
   resolverTelefonoCanonical,
+  telefonoParaMostrar,
   TOMA_HUMANA_DESCRIPCION,
 } from '@/lib/chat-dashboard'
 
@@ -133,6 +134,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       telefono: cliente.telefono,
+      mostrar: telefonoParaMostrar(cliente.telefono),
       mensajes,
       contacto: {
         nombre: pedido?.cliente_nombre ?? null,

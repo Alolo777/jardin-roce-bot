@@ -8,6 +8,7 @@ type Lado = 'cliente' | 'flora' | 'equipo' | 'sistema'
 
 type Conversacion = {
   telefono: string
+  mostrar: string
   nombre: string | null
   ultimoMensaje: string
   ultimoLado: Lado
@@ -28,6 +29,7 @@ type Mensaje = {
 
 type DetalleChat = {
   telefono: string
+  mostrar: string
   mensajes: Mensaje[]
   contacto: {
     nombre: string | null
@@ -95,8 +97,8 @@ export default function WhatsappPage() {
       if (!res.ok) throw new Error(data.error || 'Error al cargar')
       setConversaciones(data.conversaciones ?? [])
       setErrorLista(null)
-    } catch {
-      setErrorLista('No se pudo cargar la bandeja')
+    } catch (e) {
+      setErrorLista(e instanceof Error && e.message ? e.message : 'No se pudo cargar la bandeja')
     } finally {
       setCargandoLista(false)
     }
@@ -110,8 +112,8 @@ export default function WhatsappPage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Error al cargar')
       setDetalle(data)
-    } catch {
-      setErrorChat('No se pudo cargar la conversación')
+    } catch (e) {
+      setErrorChat(e instanceof Error && e.message ? e.message : 'No se pudo cargar la conversación')
     } finally {
       setCargandoChat(false)
     }
@@ -295,7 +297,7 @@ export default function WhatsappPage() {
                   <span className="flex-1 min-w-0">
                     <span className="flex items-center justify-between gap-2">
                       <span className="font-semibold text-sm text-gray-800 truncate">
-                        {c.nombre ?? c.telefono}
+                        {c.nombre ?? c.mostrar ?? c.telefono}
                         {c.pausado && <span title="Flora pausada en este chat"> ⏸️</span>}
                       </span>
                       <span className="text-[11px] text-gray-400 flex-shrink-0">{haceCuanto(c.ultimaActividad)}</span>
@@ -341,10 +343,10 @@ export default function WhatsappPage() {
                 </span>
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-sm text-gray-800 truncate">
-                    {detalle?.contacto.nombre ?? activa?.nombre ?? telefonoActivo}
+                    {detalle?.contacto.nombre ?? activa?.nombre ?? detalle?.mostrar ?? activa?.mostrar ?? telefonoActivo}
                   </p>
                   <p className="text-[11px] text-gray-400 truncate">
-                    {telefonoActivo}
+                    {detalle?.mostrar ?? activa?.mostrar ?? telefonoActivo}
                     {pausado ? ' · ⏸️ Flora pausada' : ' · Flora activa'}
                   </p>
                 </div>
@@ -478,7 +480,7 @@ export default function WhatsappPage() {
               <div className="space-y-4 text-sm">
                 <div>
                   <p className="font-bold text-gray-800">{detalle.contacto.nombre ?? 'Sin nombre registrado'}</p>
-                  <p className="text-gray-500 text-xs mt-0.5">{detalle.telefono}</p>
+                  <p className="text-gray-500 text-xs mt-0.5">{detalle.mostrar ?? detalle.telefono}</p>
                   <p className={`text-xs font-semibold mt-1 ${pausado ? 'text-amber-600' : 'text-emerald-600'}`}>
                     {pausado ? '⏸️ Flora pausada en este chat' : '🟢 Flora activa en este chat'}
                   </p>

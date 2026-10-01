@@ -76,6 +76,7 @@ import { evaluarQueja } from './src/validators/queja.validator'
 import { esAdminBot, crearAdminHandler, generarNovedadesDiarias, enviarNovedadesProactivo, construirMensajeNovedades, construirMensajeNovedadesCompleto, obtenerNovedadesDelDia, ejecutarAnalisisProfundo, construirMensajeInteresantes, obtenerAdminsBot } from './src/novedades/index'
 import { enviarTextoANumeros } from './src/whatsapp/notification.service'
 import { iniciarOutboxPoller, detenerOutboxPoller } from './src/whatsapp/outbox-poller'
+import { reconciliarLidsHuerfanos } from './src/whatsapp/lid-backfill.service'
 
 // ════════════════════════════════════════════════════════════════
 // PAUSA DEL BOT
@@ -1645,6 +1646,9 @@ const messageEntry = createMessageEntry({
   refrescarInventario(true).catch(() => {})
   setInterval(() => { refrescarInventario().catch(() => {}) }, 5 * 60_000).unref?.()
   try { await iniciarBaileys() } catch (err) { console.error('❌ Error:', err); registrarCrash(); process.exit(1) }
+  // Reconcilia filas legacy de clientes (LIDs → +52...) una vez conectado,
+  // cuando las claves de Baileys ya permiten resolver el mapeo LID→PN.
+  reconciliarLidsHuerfanos().catch(() => {})
 })()
 
 async function gracefulShutdown(signal: string): Promise<void> {

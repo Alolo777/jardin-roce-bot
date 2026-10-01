@@ -117,8 +117,7 @@ async function procesarUno(sock: any, m: OutboxRow): Promise<void> {
 
   const enviadoAntes = new Date().toISOString()
   try {
-    const n = await enviarTextoANumeros(sock, [m.telefono], texto)
-    if (n === 0) throw new Error('Sin entrega: número inválido o sin WhatsApp')
+    await enviarOutbox(sock, m.telefono, texto)
   } catch (err) {
     // Se devuelve a pendiente para reintentar en el próximo ciclo.
     await marcar(m.id, 'pendiente')
@@ -146,6 +145,25 @@ async function procesarUno(sock: any, m: OutboxRow): Promise<void> {
 // Busca en el historial el eco fromMe del mensaje recién enviado.
 // procesarMensajeEquipo lo persiste como `[Agente: <texto>]` con
 // origen='equipo', así que encontrarlo evita guardarlo dos veces.
+// Envía un mensaje del outbox. Las direcciones LID (@lid o dígitos largos)
+// se envían DIRECTO a su JID sin pasar por onWhatsApp, que solo valida
+// números telefónicos reales y las rechazaría (quedarían reintentando).
+async function enviarOutbox(sock: any, destino: string, texto: string): Promise<void> {
+  const d = String(destino ?? '').trim()
+  if (d.includes('@')) {
+    const jid = d.replace(/:\d+$/, '')
+    await sock.sendMessage(jid, { text: texto })
+    return
+  }
+  const digitos = d.replace(/\D/g, '')
+  if (digitos.length > 13) {
+    await sock.sendMessage(`${digitos}@lid`, { text: texto })
+    return
+  }
+  const n = await enviarTextoANumeros(sock, [d], texto)
+  if (n === 0) throw new Error('Sin entrega: número inválido o sin WhatsApp')
+}
+
 async function esperarEcoHistorial(
   telefono: string,
   texto: string,

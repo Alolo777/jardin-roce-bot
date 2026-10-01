@@ -3,6 +3,8 @@ import { supabaseAdmin } from '@/lib/supabase'
 import {
   telefonoADigitos,
   ultimos10,
+  telefonoParaMostrar,
+  esChatGrupal,
   TOMA_HUMANA_DESCRIPCION,
 } from '@/lib/chat-dashboard'
 
@@ -136,6 +138,7 @@ export async function GET(req: NextRequest) {
     for (const id of ids) {
       const telefono = telPorId.get(id)
       if (!telefono) continue
+      if (esChatGrupal(telefono)) continue // artefactos legacy: grupos de WhatsApp
       const e = porCliente.get(id)!
       const d10 = ultimos10(telefono)
       const pedido = pedidoPorDigitos.get(d10) ?? null
@@ -153,6 +156,7 @@ export async function GET(req: NextRequest) {
 
       conversaciones.push({
         telefono,
+        mostrar: telefonoParaMostrar(telefono),
         nombre,
         ultimoMensaje: vistaPrevia(e.ultimo.contenido),
         ultimoLado: clasificarLado(e.ultimo.rol, e.ultimo.origen, e.ultimo.contenido),
