@@ -48,15 +48,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Conversación no encontrada' }, { status: 404 })
     }
 
-    const { data: historial, error } = await supabaseAdmin
+    // OJO: ordenar DESC + limitar trae los más RECIENTES; luego se invierte
+    // para mostrar en orden cronológico. (Con ASC + limit se traían los más
+    // viejos y los mensajes nuevos nunca aparecían en el chat.)
+    const { data: historialDesc, error } = await supabaseAdmin
       .from('historial_chat')
       .select('id, rol, contenido, origen, creado_en')
       .eq('cliente_id', cliente.id)
-      .order('creado_en', { ascending: true })
+      .order('creado_en', { ascending: false })
       .limit(limite)
     if (error) throw error
 
-    const mensajes = (historial ?? []).map((m) => {
+    const mensajes = (historialDesc ?? []).reverse().map((m) => {
       const lado = clasificar(m.rol, m.origen, m.contenido)
       return {
         id: m.id,
