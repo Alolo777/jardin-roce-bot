@@ -18,6 +18,11 @@ import {
 } from './preferences.service'
 import { obtenerNumeroReal } from './contact.service'
 import {
+  telefonoPorLid,
+  registrarMapeoLid,
+  canonicalizarClienteLid,
+} from './lid-mapping'
+import {
   estaRateLimited,
   RATE_AVISADOS,
   RATE_LIMIT_WINDOW_MS,
@@ -115,10 +120,37 @@ export function createMessageEntry(deps: MessageEntryDeps) {
       return
     }
 
+    // Auto-aprendizaje LID: si el chat viene por LID pero el mensaje trae
+    // remitente real (senderPn), se registra el mapeo y se fusiona la fila
+    // legacy para que dashboard y bot compartan la conversación canónica.
+    // Fire-and-forget: jamás bloquea ni altera el flujo del mensaje.
+    if (remoteJid.endsWith('@lid')) {
+      const dReal = String(numeroRealParaIgnorar || '').replace(/\D/g, '')
+      if (/^52\d{10,12}$/.test(dReal)) {
+        const telCanon = `+${dReal}`
+        registrarMapeoLid(remoteJid, telCanon, 'auto')
+          .then(() => canonicalizarClienteLid(remoteJid, telCanon))
+          .catch(() => {})
+      }
+    }
+
     if (msg.key?.fromMe) {
       const esMediaEquipo = msgType === 'image' || msgType === 'document'
       if (esMediaEquipo) marcarFotosDisponibles(remoteJid)
-      if (body || esMediaEquipo) encolarPorCliente(remoteJid, () => procesarMensajeEquipo(remoteJid, msgType, body))
+      if (body || esMediaEquipo) {
+        // Si el chat LID tiene teléfono conocido, el eco se procesa con el
+        // JID del teléfono para caer en la fila canónica (+teléfono) en vez
+        // de partir el historial. Sin mapeo: comportamiento legacy.
+        let jidEquipo = remoteJid
+        if (remoteJid.endsWith('@lid')) {
+          try {
+            const mapeado = await telefonoPorLid(remoteJid)
+            const d = String(mapeado ?? '').replace(/\D/g, '')
+            if (/^52\d{10,12}$/.test(d)) jidEquipo = `${d}@s.whatsapp.net`
+          } catch { /* legado: JID original */ }
+        }
+        encolarPorCliente(jidEquipo, () => procesarMensajeEquipo(jidEquipo, msgType, body))
+      }
       return
     }
 

@@ -94,3 +94,30 @@ END
 $$;
 GRANT SELECT ON historial_chat TO authenticated;
 GRANT SELECT ON mensajes_outbox_equipo TO authenticated;
+
+-- 4. Mapeo LID → teléfono real ----------------------------------------------
+-- WhatsApp identifica algunos chats con LID (ej. 162...@lid) en vez del
+-- número. Esta tabla guarda el par conocido para que el bot y el dashboard
+-- operen siempre sobre la fila canónica (+52...). Se llena sola cuando el
+-- bot resuelve un LID, y acepta filas manuales (origen='manual').
+CREATE TABLE IF NOT EXISTS mapeo_lid_telefono (
+  lid            TEXT PRIMARY KEY,
+  telefono       TEXT NOT NULL,
+  origen         TEXT NOT NULL DEFAULT 'manual',
+  actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE mapeo_lid_telefono ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename = 'mapeo_lid_telefono'
+      AND policyname = 'service_role_all_mapeo_lid'
+  ) THEN
+    CREATE POLICY "service_role_all_mapeo_lid" ON mapeo_lid_telefono
+      FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  END IF;
+END
+$$;

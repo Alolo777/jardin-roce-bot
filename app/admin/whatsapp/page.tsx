@@ -397,6 +397,7 @@ export default function WhatsappPage() {
                     ) : (
                       <div key={m.id} className={`flex ${m.lado === 'cliente' ? 'justify-start' : 'justify-end'}`}>
                         <div
+                          title={m.creadoEn ? new Date(m.creadoEn).toLocaleString('es-MX') : undefined}
                           className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap break-words shadow-sm ${
                             m.lado === 'cliente'
                               ? 'bg-gray-100 text-gray-800 rounded-tl-md'

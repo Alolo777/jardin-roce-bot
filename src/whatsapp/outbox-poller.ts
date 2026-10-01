@@ -15,23 +15,21 @@
 
 import { supabaseAdmin } from '../../lib/supabase'
 import { enviarTextoANumeros } from './notification.service'
-import {
-  obtenerClienteId,
-  agregarAlHistorial,
-} from '../conversation/conversation.service'
+import { agregarAlHistorial } from '../conversation/conversation.service'
 import { OrigenMensaje } from '../models/types'
 import {
   resolverTelefonoCanonical,
   MAX_TEXTO_OUTBOX,
 } from '../../lib/chat-dashboard'
+import { telefonoPorLid } from './lid-mapping'
 
 const POLL_MS = 4_000
 const LIMITE_LOTE = 5
-const ECO_ESPERA_MS = 15_000
-const ECO_INTERVALO_MS = 2_000
+const PODA_DUPLICADOS_MS = 5 * 60_000
 const MAX_ANTIGUEDAD_MS = 24 * 60 * 60_000
 
 let timer: NodeJS.Timeout | null = null
+let timerPoda: NodeJS.Timeout | null = null
 let procesando = false
 
 type OutboxRow = {
@@ -51,6 +49,14 @@ export function iniciarOutboxPoller(getSock: () => any | null): void {
     )
   }, POLL_MS)
   timer.unref?.()
+  if (!timerPoda) {
+    timerPoda = setInterval(() => {
+      podarDuplicadosEquipo().catch((err) =>
+        console.error('[outbox] Error en poda:', err)
+      )
+    }, PODA_DUPLICADOS_MS)
+    timerPoda.unref?.()
+  }
   console.log('[outbox] 📤 Poller de mensajes del equipo iniciado (cada 4s)')
 }
 
@@ -58,6 +64,10 @@ export function detenerOutboxPoller(): void {
   if (timer) {
     clearInterval(timer)
     timer = null
+  }
+  if (timerPoda) {
+    clearInterval(timerPoda)
+    timerPoda = null
   }
 }
 
@@ -115,9 +125,26 @@ async function procesarUno(sock: any, m: OutboxRow): Promise<void> {
     .maybeSingle()
   if (!claim) return
 
-  const enviadoAntes = new Date().toISOString()
+  // Si el destino es un LID con teléfono conocido, operar sobre la fila
+  // canónica (+teléfono): mejor entregabilidad y cero filas partidas.
+  let destinoEnvio = m.telefono
+  let canonico = await resolverTelefonoCanonical(m.telefono)
   try {
-    await enviarOutbox(sock, m.telefono, texto)
+    const d = String(m.telefono ?? '').replace(/\D/g, '')
+    if ((String(m.telefono).includes('@lid') || d.length > 13) && !canonico.startsWith('+')) {
+      const mapeado = await telefonoPorLid(d)
+      if (mapeado) {
+        const soloDigitos = mapeado.replace(/\D/g, '')
+        destinoEnvio = `${soloDigitos}@s.whatsapp.net`
+        canonico = mapeado.startsWith('+') ? mapeado : `+${soloDigitos}`
+      }
+    }
+  } catch {
+    // ante cualquier duda se usa el destino original
+  }
+
+  try {
+    await enviarOutbox(sock, destinoEnvio, texto)
   } catch (err) {
     // Se devuelve a pendiente para reintentar en el próximo ciclo.
     await marcar(m.id, 'pendiente')
@@ -128,23 +155,26 @@ async function procesarUno(sock: any, m: OutboxRow): Promise<void> {
     return
   }
 
-  const eco = await esperarEcoHistorial(m.telefono, texto, enviadoAntes)
-  if (!eco) {
-    const canonico = await resolverTelefonoCanonical(m.telefono)
+  // Guardado DETERMINISTA e inmediato en el historial (no depende del eco
+  // fromMe de Baileys, que no está garantizado). Si el eco también guardara
+  // el mensaje, la poda periódica elimina el duplicado.
+  try {
     await agregarAlHistorial(
       canonico,
       'assistant',
       `[Agente: ${texto}]`,
       OrigenMensaje.EQUIPO
     )
+  } catch (err) {
+    console.error(
+      `[outbox] ⚠️ Enviado pero NO se pudo guardar en historial (${m.id} → ${canonico}):`,
+      err instanceof Error ? err.message : err
+    )
   }
   await marcar(m.id, 'enviado')
   console.log(`[outbox] ✅ Enviado a ${m.telefono} (${texto.length} chars)`)
 }
 
-// Busca en el historial el eco fromMe del mensaje recién enviado.
-// procesarMensajeEquipo lo persiste como `[Agente: <texto>]` con
-// origen='equipo', así que encontrarlo evita guardarlo dos veces.
 // Envía un mensaje del outbox. Las direcciones LID (@lid o dígitos largos)
 // se envían DIRECTO a su JID sin pasar por onWhatsApp, que solo valida
 // números telefónicos reales y las rechazaría (quedarían reintentando).
@@ -164,37 +194,37 @@ async function enviarOutbox(sock: any, destino: string, texto: string): Promise<
   if (n === 0) throw new Error('Sin entrega: número inválido o sin WhatsApp')
 }
 
-async function esperarEcoHistorial(
-  telefono: string,
-  texto: string,
-  desdeIso: string
-): Promise<boolean> {
-  const clienteId = await obtenerClienteId(
-    await resolverTelefonoCanonical(telefono)
-  )
-  if (!clienteId) return false
-  const limite = Date.now() + ECO_ESPERA_MS
-  while (Date.now() < limite) {
-    try {
-      const { data } = await supabaseAdmin
-        .from('historial_chat')
-        .select('contenido, origen')
-        .eq('cliente_id', clienteId)
-        .gte('creado_en', desdeIso)
-        .eq('origen', 'equipo')
-        .limit(10)
-      for (const row of data ?? []) {
-        const limpio = String(row.contenido ?? '')
-          .replace(/^\[Agente:\s*|\]$/g, '')
-          .trim()
-        if (limpio === texto) return true
-      }
-    } catch {
-      // error transitorio de lectura: reintentar hasta agotar la espera
+// Poda de seguridad: si el eco fromMe de Baileys guardó el mismo mensaje
+// del equipo que ya guardó el poller, quedan 2 filas idénticas seguidas.
+// Se conserva la más antigua y se borran las demás. Corre cada 5 min sobre
+// una ventana de 15 min (costo despreciable).
+async function podarDuplicadosEquipo(): Promise<void> {
+  try {
+    const desde = new Date(Date.now() - 15 * 60_000).toISOString()
+    const { data, error } = await supabaseAdmin
+      .from('historial_chat')
+      .select('id, cliente_id, contenido, creado_en')
+      .eq('origen', 'equipo')
+      .gte('creado_en', desde)
+      .order('creado_en', { ascending: true })
+      .limit(500)
+    if (error || !data || data.length < 2) return
+    const vistos = new Map<string, string>()
+    const duplicados: string[] = []
+    for (const row of data) {
+      const clave = `${row.cliente_id}‖${String(row.contenido ?? '').trim()}`
+      if (vistos.has(clave)) duplicados.push(row.id as string)
+      else vistos.set(clave, row.id as string)
     }
-    await new Promise((r) => setTimeout(r, ECO_INTERVALO_MS))
+    if (duplicados.length === 0) return
+    const { error: delError } = await supabaseAdmin
+      .from('historial_chat')
+      .delete()
+      .in('id', duplicados)
+    if (!delError) console.log(`[outbox] 🧹 Poda: ${duplicados.length} mensaje(s) duplicado(s) eliminados`)
+  } catch {
+    // no fatal: se reintenta en el próximo ciclo
   }
-  return false
 }
 
 async function marcar(

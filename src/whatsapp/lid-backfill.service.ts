@@ -16,6 +16,7 @@
 
 import { supabaseAdmin } from '../../lib/supabase'
 import { resolverLidInverso } from './contact.service'
+import { telefonoPorLid, lidADigitos } from './lid-mapping'
 
 function conMas(digitos: string): string {
   return `+${digitos}`
@@ -73,11 +74,19 @@ export async function reconciliarLidsHuerfanos(): Promise<{
       if (clase.tipo === 'canon') {
         objetivo = clase.valor
       } else {
-        const resuelto = await resolverLidInverso(actual)
-        if (!resuelto) continue // sin mapeo en Baileys: se deja como está
-        objetivo = normalizarResuelto(resuelto)
-        if (!objetivo) continue
-        resumen.resueltos++
+        // 1) tabla de mapeo (manual o aprendida) — funciona sin claves Baileys
+        const mapeado = await telefonoPorLid(lidADigitos(actual) || actual)
+        if (mapeado) {
+          objetivo = normalizarResuelto(mapeado)
+          if (objetivo) resumen.resueltos++
+        } else {
+          // 2) claves de Baileys en la VM
+          const resuelto = await resolverLidInverso(actual)
+          if (!resuelto) continue // sin mapeo: se deja como está
+          objetivo = normalizarResuelto(resuelto)
+          if (!objetivo) continue
+          resumen.resueltos++
+        }
       }
       if (!objetivo || objetivo === actual) continue
 
