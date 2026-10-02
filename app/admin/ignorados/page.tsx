@@ -61,10 +61,11 @@ export default function IgnoradosPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-800">🔇 Números Silenciados</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Estos números serán ignorados por Flora. Útil para el repartidor, administradores, etc.
-        </p>
+          <h1 className="text-2xl font-bold text-gray-800">🔇 Números Silenciados</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Estos números serán ignorados por Flora. Útil para el repartidor, administradores, etc.
+            Las pausas por chat de la pestaña WhatsApp se manejan con el botón Reanudar de cada conversación.
+          </p>
       </div>
 
       <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-lg border border-amber-100/80 p-6">
