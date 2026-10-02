@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2026-10-02
+
+### Feat — Pestaña WhatsApp del dashboard (bandeja + chat + responder)
+- Nueva sección `/admin/whatsapp`: bandeja de conversaciones, timeline con divisores por día (Hoy/Ayer/fecha en zona CDMX), composer del equipo y ficha del contacto (pedido + caso).
+- Envío por relay Supabase (`mensajes_outbox_equipo`, nueva migración): el bot en la VM lo recoge cada ~4s y envía por Baileys. Al responder se pausa Flora solo en ese chat (reutiliza `numeros_ignorados`).
+- `message-entry.ts`: los mensajes entrantes se guardan en historial aunque Flora esté pausada (global o por chat) para verse al instante en la bandeja; la respuesta sigue sin generarse y el buffer de agrupamiento queda intacto. Silenciados permanentes conservan el descarte legacy.
+- Correcciones: resolver canónico tolera filas legacy (LID, dígitos sin `+`, variantes 52/521); backfill LID→teléfono al arrancar con fusión de historiales; chat devuelve los mensajes más recientes (antes traía los más viejos).
+- Archivos: `supabase_migration_outbox_whatsapp.sql`, `lib/chat-dashboard.ts`, `src/whatsapp/outbox-poller.ts`, `src/whatsapp/lid-backfill.service.ts`, `src/whatsapp/lid-mapping.ts`, `app/api/chat/*`, `app/admin/whatsapp/page.tsx`. En `bot.ts` solo wiring (poller + backfill); en nav solo links.
+
 ## 2026-09-14
 
 ### Fix — Auditoría profunda (15 hallazgos N1-N15 + Telegram T1-T6 + timezone A1-A2 + diagnóstico producción)

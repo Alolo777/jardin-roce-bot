@@ -66,6 +66,51 @@ function inicial(nombre: string | null, telefono: string): string {
   return d.slice(-2, -1) || '•'
 }
 
+// División del timeline por día (zona America/Mexico_City).
+function diaKeyCdmx(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Mexico_City',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d) // YYYY-MM-DD
+}
+
+function etiquetaDia(key: string): string {
+  const fmt = (f: Date) =>
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Mexico_City',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(f)
+  const ahora = Date.now()
+  if (key === fmt(new Date(ahora))) return 'Hoy'
+  if (key === fmt(new Date(ahora - 24 * 60 * 60_000))) return 'Ayer'
+  const [y, m, dd] = key.split('-').map(Number)
+  const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+  if (!y || !m || !dd) return key
+  return `${dd} de ${meses[m - 1]}${y !== new Date().getFullYear() ? ` de ${y}` : ''}`
+}
+
+type FilaTimeline = { kind: 'dia'; key: string; etiqueta: string } | { kind: 'msg'; m: Mensaje }
+
+function filasTimeline(mensajes: Mensaje[]): FilaTimeline[] {
+  const filas: FilaTimeline[] = []
+  let ultimoDia = ''
+  for (const m of mensajes) {
+    const dia = diaKeyCdmx(m.creadoEn)
+    if (dia && dia !== ultimoDia) {
+      ultimoDia = dia
+      filas.push({ kind: 'dia', key: `dia-${dia}-${m.id}`, etiqueta: etiquetaDia(dia) })
+    }
+    filas.push({ kind: 'msg', m })
+  }
+  return filas
+}
+
 const ESTADO_PEDIDO_LABEL: Record<string, string> = {
   cotizacion: 'Cotización',
   apartado: 'Apartado',
@@ -387,34 +432,40 @@ export default function WhatsappPage() {
                 ) : detalle && detalle.mensajes.length === 0 ? (
                   <div className="text-center text-sm text-gray-400 py-8">Sin mensajes en esta conversación.</div>
                 ) : (
-                  detalle?.mensajes.map((m) =>
-                    m.lado === 'sistema' ? (
-                      <div key={m.id} className="text-center">
+                  detalle && filasTimeline(detalle.mensajes).map((fila) =>
+                    fila.kind === 'dia' ? (
+                      <div key={fila.key} className="flex justify-center py-1.5 sticky top-0">
+                        <span className="text-[11px] font-semibold text-gray-500 bg-gray-100/90 rounded-full px-3 py-1 shadow-sm">
+                          {fila.etiqueta}
+                        </span>
+                      </div>
+                    ) : fila.m.lado === 'sistema' ? (
+                      <div key={fila.m.id} className="text-center">
                         <span className="inline-block text-[11px] text-gray-400 bg-gray-100 rounded-full px-3 py-1 max-w-full truncate">
-                          {m.texto.slice(0, 120)}
+                          {fila.m.texto.slice(0, 120)}
                         </span>
                       </div>
                     ) : (
-                      <div key={m.id} className={`flex ${m.lado === 'cliente' ? 'justify-start' : 'justify-end'}`}>
+                      <div key={fila.m.id} className={`flex ${fila.m.lado === 'cliente' ? 'justify-start' : 'justify-end'}`}>
                         <div
-                          title={m.creadoEn ? new Date(m.creadoEn).toLocaleString('es-MX') : undefined}
+                          title={fila.m.creadoEn ? new Date(fila.m.creadoEn).toLocaleString('es-MX') : undefined}
                           className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap break-words shadow-sm ${
-                            m.lado === 'cliente'
+                            fila.m.lado === 'cliente'
                               ? 'bg-gray-100 text-gray-800 rounded-tl-md'
-                              : m.lado === 'equipo'
+                              : fila.m.lado === 'equipo'
                                 ? 'bg-gradient-to-br from-rose-500 to-pink-500 text-white rounded-tr-md'
                                 : 'bg-emerald-50 text-emerald-900 border border-emerald-100 rounded-tr-md'
                           }`}
                         >
-                          {m.lado === 'equipo' && (
+                          {fila.m.lado === 'equipo' && (
                             <p className="text-[10px] font-bold opacity-80 mb-0.5">Tú · equipo</p>
                           )}
-                          {m.lado === 'flora' && (
+                          {fila.m.lado === 'flora' && (
                             <p className="text-[10px] font-bold opacity-70 mb-0.5">🌸 Flora</p>
                           )}
-                          <p>{m.texto}</p>
-                          <p className={`text-[10px] mt-1 text-right ${m.lado === 'equipo' ? 'opacity-70' : 'text-gray-400'}`}>
-                            {horaCorta(m.creadoEn)}
+                          <p>{fila.m.texto}</p>
+                          <p className={`text-[10px] mt-1 text-right ${fila.m.lado === 'equipo' ? 'opacity-70' : 'text-gray-400'}`}>
+                            {horaCorta(fila.m.creadoEn)}
                           </p>
                         </div>
                       </div>

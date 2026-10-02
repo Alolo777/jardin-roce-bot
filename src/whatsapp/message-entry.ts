@@ -14,8 +14,11 @@ import {
 } from '../conversation/conversation.service'
 import {
   cargarIgnorados,
+  obtenerDescripcionIgnorado,
   MENSAJES_RESCATADOS,
 } from './preferences.service'
+import { agregarAlHistorial } from '../conversation/conversation.service'
+import { TOMA_HUMANA_DESCRIPCION } from '../../lib/chat-dashboard'
 import { obtenerNumeroReal } from './contact.service'
 import {
   telefonoPorLid,
@@ -108,6 +111,23 @@ export function createMessageEntry(deps: MessageEntryDeps) {
     ].filter(Boolean) as string[]
     const variantesMensaje = [...new Set(candidatosIgnorar.flatMap(n => variantesTelefono(jidANumero(n))))]
     if (!msg.key?.fromMe && variantesMensaje.some(n => ignorados.includes(n))) {
+      // Toma humana desde el dashboard: el mensaje SÍ se guarda para que se
+      // vea al instante en la bandeja, pero Flora no responde en este chat.
+      // Los silenciados permanentes conservan el comportamiento legacy
+      // (se descartan sin guardar para no meter ruido a la bandeja).
+      if (msgType === 'chat' && body.trim()) {
+        try {
+          const motivo = await obtenerDescripcionIgnorado(variantesMensaje)
+          if (motivo === TOMA_HUMANA_DESCRIPCION) {
+            const tel = (numeroRealParaIgnorar || jidANumero(remoteJid)).trim()
+            if (tel) {
+              agregarAlHistorial(tel, 'user', body.trim().slice(0, 1000)).catch(() => {})
+              console.log(`[entry] ⏸️ Guardado (toma humana, sin responder): ${tel}`)
+            }
+            return
+          }
+        } catch { /* ante cualquier duda: legado (descartar) */ }
+      }
       console.log(`[entry] 🔇 Número ignorado: ${numeroRealParaIgnorar || remoteJid}`)
       return
     }
@@ -183,7 +203,17 @@ export function createMessageEntry(deps: MessageEntryDeps) {
     if (estaRateLimited(clienteId)) { avisarRateLimitUnaVez(msg, clienteId); return }
 
     verificarSiBotPausado().then(pausado => {
-      if (pausado) { console.log(`[entry] ⏸️ Pausado — ${clienteId} ignorado`); return }
+      if (pausado) {
+        // Pausa global: se guarda para la bandeja (visible al instante) pero
+        // no se encola al buffer de Flora (no hay respuesta). El buffer de
+        // agrupamiento para chats activos queda intacto.
+        if (!msg.key?.fromMe && msgType === 'chat' && body.trim()) {
+          const tel = (numeroRealParaIgnorar || jidANumero(remoteJid)).trim()
+          if (tel) agregarAlHistorial(tel, 'user', body.trim().slice(0, 1000)).catch(() => {})
+        }
+        console.log(`[entry] ⏸️ Pausado — ${clienteId} guardado sin responder`)
+        return
+      }
       encolarMensajeAgrupado(clienteId, msg)
     }).catch(() => encolarMensajeAgrupado(clienteId, msg))
   }
