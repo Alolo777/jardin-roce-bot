@@ -290,18 +290,36 @@ export default function WhatsappPage() {
     return data as never
   }
 
+  // Subida en 2 pasos para no topar el límite de 4.5MB de Vercel:
+  // 1) se pide URL firmada, 2) el navegador sube DIRECTO a Supabase.
   async function subirArchivo(file: File) {
     if (!telefonoActivo || subiendo) return
     setSubiendo(true)
     try {
-      const form = new FormData()
-      form.append('file', file)
-      form.append('telefono', telefonoActivo)
-      const res = await fetch('/api/chat/media/upload', { method: 'POST', body: form })
-      const data: any = res.ok
-        ? await res.json().catch(() => { throw new Error('Subir archivo: respuesta inválida') })
-        : await leerErrorServidor(res, 'Subir archivo')
-      setAdjunto({ path: data.path, mimetype: data.mimetype, nombre: data.nombre, tipo: data.tipo })
+      const firmaRes = await fetch('/api/chat/media/firmar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          telefono: telefonoActivo,
+          mimetype: file.type || 'application/octet-stream',
+          size: file.size,
+          nombre: file.name || 'archivo',
+        }),
+      })
+      const firma: any = firmaRes.ok
+        ? await firmaRes.json().catch(() => { throw new Error('Subir archivo: respuesta inválida') })
+        : await leerErrorServidor(firmaRes, 'Subir archivo')
+
+      const putRes = await fetch(firma.signedUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': firma.mimetype || file.type || 'application/octet-stream' },
+        body: file,
+      })
+      if (!putRes.ok) {
+        throw new Error(`Subir archivo: el almacenamiento rechazó el archivo (HTTP ${putRes.status})`)
+      }
+
+      setAdjunto({ path: firma.path, mimetype: firma.mimetype, nombre: firma.nombre, tipo: firma.tipo })
     } catch (err) {
       alert(err instanceof Error ? err.message : 'No se pudo subir el archivo')
     } finally {

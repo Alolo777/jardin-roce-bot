@@ -173,12 +173,15 @@ async function procesarUno(sock: any, m: OutboxRow): Promise<void> {
       mediaNombre: m.media_nombre ?? undefined,
     })
   } catch (err) {
+    const detalle = err instanceof Error ? err.message : String(err)
+    if (detalle.startsWith('ADJUNTO_NO_ENCONTRADO')) {
+      await marcar(m.id, 'error', 'El archivo ya no existe en el almacenamiento')
+      console.warn(`[outbox] Adjunto perdido ${m.id}, se marca error`)
+      return
+    }
     // Se devuelve a pendiente para reintentar en el próximo ciclo.
     await marcar(m.id, 'pendiente')
-    console.warn(
-      `[outbox] Reintento ${m.id}:`,
-      err instanceof Error ? err.message : err
-    )
+    console.warn(`[outbox] Reintento ${m.id}:`, detalle)
     return
   }
 
@@ -266,7 +269,13 @@ async function enviarOutboxMedia(sock: any, destino: string, carga: CargaOutbox)
   const { data, error } = await supabaseAdmin.storage
     .from(MEDIA_BUCKET)
     .download(carga.mediaPath)
-  if (error || !data) throw new Error('No se pudo descargar el adjunto')
+  if (error || !data) {
+    // Archivo borrado o ruta inválida: error definitivo (no reintentar).
+    if (/not found|does not exist|no existe/i.test(error?.message ?? '')) {
+      throw new Error(`ADJUNTO_NO_ENCONTRADO: ${carga.mediaPath}`)
+    }
+    throw new Error('No se pudo descargar el adjunto')
+  }
   const buf = Buffer.from(await data.arrayBuffer())
   if (buf.length === 0 || buf.length > MAX_BYTES_BOT) {
     throw new Error('Adjunto vacío o excede 12MB')

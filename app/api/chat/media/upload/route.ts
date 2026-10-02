@@ -58,7 +58,15 @@ export async function POST(req: NextRequest) {
     const { error } = await supabaseAdmin.storage
       .from(MEDIA_BUCKET)
       .upload(path, bytes, { contentType: mimeFinal, upsert: false })
-    if (error) throw error
+    if (error) {
+      if (/bucket.*not found|not found.*bucket/i.test(error.message)) {
+        return NextResponse.json(
+          { error: 'Falta crear el almacenamiento: corre la migración SQL en Supabase (sección 5, bucket whatsapp-media).' },
+          { status: 500 }
+        )
+      }
+      throw error
+    }
 
     return NextResponse.json({
       ok: true,
