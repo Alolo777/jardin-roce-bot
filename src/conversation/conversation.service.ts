@@ -88,6 +88,26 @@ export async function obtenerClienteId(telefono: string): Promise<string | null>
   return null
 }
 
+// Resuelve el UUID de `clientes` para columnas que lo exigen como llave
+// foránea (ej. casos.cliente_id en producción): si ya es UUID se devuelve;
+// si es JID/teléfono se busca/crea la fila canónica. Null si no se puede.
+export async function resolverClienteUuid(
+  clienteIdOJid: string,
+  telefono?: string | null
+): Promise<string | null> {
+  const v = String(clienteIdOJid ?? '').trim()
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) {
+    return v
+  }
+  const tel = String(telefono ?? '').trim()
+  if (!tel) return null
+  try {
+    return await obtenerClienteId(tel)
+  } catch {
+    return null
+  }
+}
+
 // ════════════════════════════════════════════════════════════════
 // HISTORIAL DE CONVERSACIONES (Supabase)
 // ════════════════════════════════════════════════════════════════

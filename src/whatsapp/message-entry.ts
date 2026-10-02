@@ -21,7 +21,7 @@ import {
 import { agregarAlHistorial } from '../conversation/conversation.service'
 import { TOMA_HUMANA_DESCRIPCION } from '../../lib/chat-dashboard'
 import { obtenerNumeroReal } from './contact.service'
-import { descargarMediaConMime, persistirMediaEntrante } from './media-inbox.service'
+import { descargarMediaConMime, persistirMediaEntrante, conTimeout, TIMEOUT_DESCARGA_MS } from './media-inbox.service'
 import {
   telefonoPorLid,
   registrarMapeoLid,
@@ -186,7 +186,11 @@ export function createMessageEntry(deps: MessageEntryDeps) {
 
     if (msgType !== 'chat' && TIPOS_MEDIA_NO_SOPORTADOS.has(msgType)) {
       if (msgType === 'image' || msgType === 'document') {
-        const buffer = await descargarMedia(msg, msgType as 'image' | 'document')
+        const buffer = await conTimeout(
+          descargarMedia(msg, msgType as 'image' | 'document'),
+          TIMEOUT_DESCARGA_MS,
+          'descarga imagen/documento'
+        )
         if (buffer) {
           const msgConMedia = msg as any
           msgConMedia._mediaBuffer = mediaToBase64(buffer)
@@ -215,14 +219,17 @@ export function createMessageEntry(deps: MessageEntryDeps) {
       } else if (msgType === 'audio') {
         // Notas de voz: se guardan y muestran al instante en el dashboard.
         // No entran al flujo de visión IA (solo imagen/PDF); acuse simple.
+        // Si la descarga falla, se pide reenvío en vez de mentir el acuse.
         {
           const tel = (numeroRealParaIgnorar || jidANumero(remoteJid)).trim()
-          const media = await descargarMediaConMime(msg)
+          const media = await conTimeout(descargarMediaConMime(msg), TIMEOUT_DESCARGA_MS, 'descarga audio')
           if (tel && media) {
             await persistirMediaEntrante(tel, media).catch(() => {})
+            responderMensaje(msg, '🎤 ¡Recibí tu nota de voz! El equipo la va a escuchar en un momento 🌸').catch(() => {})
+          } else {
+            responderMensaje(msg, '🎤 No pude descargar tu nota de voz 🙏 ¿Me la reenvías porfa?').catch(() => {})
           }
         }
-        responderMensaje(msg, '🎤 ¡Recibí tu nota de voz! El equipo la va a escuchar en un momento 🌸').catch(() => {})
       } else {
         responderMensaje(msg, 'Por ahora solo puedo leer mensajes de *texto* 🌸. ¿Qué necesitas?').catch(() => {})
       }

@@ -1,13 +1,17 @@
 import { supabaseAdmin } from '../../lib/supabase'
 import { Caso, EstadoCaso } from '../models/types'
+import { resolverClienteUuid } from '../conversation/conversation.service'
 
 export async function insertarCaso(caso: Caso): Promise<void> {
   try {
+    // BUGFIX LID: en producción cliente_id es UUID; los chats LID traen JID.
+    // Se resuelve al UUID de la fila canónica (seguro en ambos esquemas).
+    const clienteUuid = await resolverClienteUuid(caso.clienteId, caso.telefono)
     const { error } = await supabaseAdmin
       .from('casos')
       .insert({
         id: caso.id,
-        cliente_id: caso.clienteId,
+        cliente_id: clienteUuid ?? caso.clienteId,
         telefono: caso.telefono,
         tipo: caso.tipo,
         estado: caso.estado,

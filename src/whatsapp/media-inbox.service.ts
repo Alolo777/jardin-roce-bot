@@ -84,6 +84,28 @@ export async function descargarMediaConMime(msg: any): Promise<MediaDescargado |
   }
 }
 
+// promise.race con timeout: downloadContentFromMessage puede colgarse y
+// dejar el mensaje atorado sin logs. Devuelve null al vencer.
+export async function conTimeout<T>(promesa: Promise<T>, ms: number, etiqueta: string): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promesa,
+      new Promise<null>((_, rechazar) => {
+        timer = setTimeout(() => rechazar(new Error(`timeout ${ms}ms`)), ms)
+        timer.unref?.()
+      }),
+    ])
+  } catch (err) {
+    console.warn(`[media-inbox] ⏱️ ${etiqueta}:`, err instanceof Error ? err.message : err)
+    return null
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+export const TIMEOUT_DESCARGA_MS = 25_000
+
 export interface Persistido {
   url: string // path dentro del bucket (sin dominio)
   marcador: string

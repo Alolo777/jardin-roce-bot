@@ -4,7 +4,7 @@
 // (DEC-085). Almacena la intención de la conversación para clasificación.
 
 import { supabaseAdmin } from '../../lib/supabase'
-import { variantesTelefono } from '../conversation/conversation.service'
+import { variantesTelefono, resolverClienteUuid } from '../conversation/conversation.service'
 
 const MAX_POR_CHAT = 2
 
@@ -28,10 +28,11 @@ export async function guardarMediaChat(
   contexto?: string
 ): Promise<void> {
   const utiles = medias.filter(m => m.base64)
+  const clienteUuid = await resolverClienteUuid(clienteId, telefono)
   for (const m of utiles) {
     const tipo = (m.mimetype ?? '').startsWith('image/') ? 'imagen' : 'documento'
     const { error } = await supabaseAdmin.from('media_chat').insert({
-      cliente_id: clienteId,
+      cliente_id: clienteUuid ?? clienteId,
       telefono: telefono || null,
       origen: 'cliente',
       tipo,
@@ -58,10 +59,11 @@ export async function guardarMediaEquipoChat(
   contexto?: string
 ): Promise<void> {
   const utiles = medias.filter(m => m.base64)
+  const clienteUuid = await resolverClienteUuid(clienteId, telefono)
   for (const m of utiles) {
     const tipo = (m.mimetype ?? '').startsWith('image/') ? 'imagen' : 'documento'
     const { error } = await supabaseAdmin.from('media_chat').insert({
-      cliente_id: clienteId,
+      cliente_id: clienteUuid ?? clienteId,
       telefono: telefono || null,
       origen: 'equipo',
       tipo,
