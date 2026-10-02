@@ -1,4 +1,5 @@
 import { isJidGroup } from '@whiskeysockets/baileys'
+import { Buffer } from 'node:buffer'
 import {
   getMessageType,
   getMessageBody,
@@ -20,6 +21,7 @@ import {
 import { agregarAlHistorial } from '../conversation/conversation.service'
 import { TOMA_HUMANA_DESCRIPCION } from '../../lib/chat-dashboard'
 import { obtenerNumeroReal } from './contact.service'
+import { descargarMediaConMime, persistirMediaEntrante } from './media-inbox.service'
 import {
   telefonoPorLid,
   registrarMapeoLid,
@@ -192,7 +194,35 @@ export function createMessageEntry(deps: MessageEntryDeps) {
             ? getContenidoMensaje(msg)?.documentMessage?.mimetype || 'application/octet-stream'
             : 'image/jpeg'
         }
+        // Bandeja del dashboard: persistir al instante (no depende del flujo IA).
+        // Reutiliza el buffer ya descargado arriba (sin segunda descarga).
+        {
+          const tel = (numeroRealParaIgnorar || jidANumero(remoteJid)).trim()
+          const msgConMedia = msg as any
+          if (tel && msgConMedia._mediaBuffer && msgConMedia._mediaMime) {
+            const mimetype = String(msgConMedia._mediaMime)
+            await persistirMediaEntrante(tel, {
+              buffer: Buffer.from(String(msgConMedia._mediaBuffer), 'base64'),
+              mimetype,
+              tipo: mimetype.startsWith('image/') ? 'imagen' : 'documento',
+              nombre: msgType === 'document'
+                ? String(getContenidoMensaje(msg)?.documentMessage?.fileName || 'archivo')
+                : undefined,
+            }, body).catch(() => {})
+          }
+        }
         encolarMensajeAgrupado(clienteId, msg)
+      } else if (msgType === 'audio') {
+        // Notas de voz: se guardan y muestran al instante en el dashboard.
+        // No entran al flujo de visión IA (solo imagen/PDF); acuse simple.
+        {
+          const tel = (numeroRealParaIgnorar || jidANumero(remoteJid)).trim()
+          const media = await descargarMediaConMime(msg)
+          if (tel && media) {
+            await persistirMediaEntrante(tel, media).catch(() => {})
+          }
+        }
+        responderMensaje(msg, '🎤 ¡Recibí tu nota de voz! El equipo la va a escuchar en un momento 🌸').catch(() => {})
       } else {
         responderMensaje(msg, 'Por ahora solo puedo leer mensajes de *texto* 🌸. ¿Qué necesitas?').catch(() => {})
       }

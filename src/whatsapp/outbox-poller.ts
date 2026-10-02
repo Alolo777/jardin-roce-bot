@@ -22,6 +22,13 @@ import {
   MAX_TEXTO_OUTBOX,
 } from '../../lib/chat-dashboard'
 import { telefonoPorLid } from './lid-mapping'
+import {
+  MEDIA_BUCKET,
+  MAX_BYTES_BOT,
+  marcadorMedia,
+  esRutaMediaValida,
+  type TipoOutbox,
+} from '../../lib/chat-media'
 
 const POLL_MS = 4_000
 const LIMITE_LOTE = 5
@@ -39,6 +46,10 @@ type OutboxRow = {
   estado: string
   intentos: number | null
   creado_en: string
+  tipo?: string | null
+  media_path?: string | null
+  media_mimetype?: string | null
+  media_nombre?: string | null
 }
 
 export function iniciarOutboxPoller(getSock: () => any | null): void {
@@ -79,7 +90,7 @@ async function procesarPendientes(getSock: () => any | null): Promise<void> {
     if (!sock?.user) return // desconectado: reintentar en el próximo ciclo
     const { data, error } = await supabaseAdmin
       .from('mensajes_outbox_equipo')
-      .select('id, telefono, texto, estado, intentos, creado_en')
+      .select('id, telefono, texto, estado, intentos, creado_en, tipo, media_path, media_mimetype, media_nombre')
       .eq('estado', 'pendiente')
       .order('creado_en', { ascending: true })
       .limit(LIMITE_LOTE)
@@ -125,6 +136,9 @@ async function procesarUno(sock: any, m: OutboxRow): Promise<void> {
     .maybeSingle()
   if (!claim) return
 
+  const tipo = (m.tipo as TipoOutbox) || 'texto'
+  const caption = texto
+
   // Si el destino es un LID con teléfono conocido, operar sobre la fila
   // canónica (+teléfono): mejor entregabilidad y cero filas partidas.
   let destinoEnvio = m.telefono
@@ -143,8 +157,21 @@ async function procesarUno(sock: any, m: OutboxRow): Promise<void> {
     // ante cualquier duda se usa el destino original
   }
 
+  if (tipo !== 'texto') {
+    if (!m.media_path || !esRutaMediaValida(m.media_path)) {
+      await marcar(m.id, 'error', 'Archivo adjunto inválido o ausente')
+      return
+    }
+  }
+
   try {
-    await enviarOutbox(sock, destinoEnvio, texto)
+    await enviarOutboxMedia(sock, destinoEnvio, {
+      tipo,
+      texto: caption,
+      mediaPath: m.media_path ?? undefined,
+      mediaMimetype: m.media_mimetype ?? undefined,
+      mediaNombre: m.media_nombre ?? undefined,
+    })
   } catch (err) {
     // Se devuelve a pendiente para reintentar en el próximo ciclo.
     await marcar(m.id, 'pendiente')
@@ -159,12 +186,25 @@ async function procesarUno(sock: any, m: OutboxRow): Promise<void> {
   // fromMe de Baileys, que no está garantizado). Si el eco también guardara
   // el mensaje, la poda periódica elimina el duplicado.
   try {
-    await agregarAlHistorial(
-      canonico,
-      'assistant',
-      `[Agente: ${texto}]`,
-      OrigenMensaje.EQUIPO
-    )
+    if (tipo === 'texto') {
+      await agregarAlHistorial(
+        canonico,
+        'assistant',
+        `[Agente: ${caption}]`,
+        OrigenMensaje.EQUIPO
+      )
+    } else {
+      // Prefijo `[Agente: ...]` para que Flora lo reconozca como equipo.
+      const etiqueta =
+        tipo === 'imagen' ? 'envió una foto' : tipo === 'audio' ? 'envió una nota de voz' : 'envió un archivo'
+      await agregarAlHistorial(
+        canonico,
+        'assistant',
+        caption ? `[Agente: ${caption}]` : `[Agente: ${etiqueta}]`,
+        OrigenMensaje.EQUIPO,
+        { mediaTipo: tipo, mediaUrl: m.media_path ?? undefined }
+      )
+    }
   } catch (err) {
     console.error(
       `[outbox] ⚠️ Enviado pero NO se pudo guardar en historial (${m.id} → ${canonico}):`,
@@ -172,26 +212,77 @@ async function procesarUno(sock: any, m: OutboxRow): Promise<void> {
     )
   }
   await marcar(m.id, 'enviado')
-  console.log(`[outbox] ✅ Enviado a ${m.telefono} (${texto.length} chars)`)
+  console.log(`[outbox] ✅ Enviado a ${m.telefono} (${tipo}${caption ? `, ${caption.length} chars` : ''})`)
 }
 
-// Envía un mensaje del outbox. Las direcciones LID (@lid o dígitos largos)
-// se envían DIRECTO a su JID sin pasar por onWhatsApp, que solo valida
-// números telefónicos reales y las rechazaría (quedarían reintentando).
-async function enviarOutbox(sock: any, destino: string, texto: string): Promise<void> {
+// Resuelve el JID de destino. Las direcciones LID (@lid o dígitos largos)
+// van DIRECTO a su JID sin pasar por onWhatsApp, que solo valida números
+// telefónicos reales y las rechazaría. Los teléfonos reales se resuelven
+// con onWhatsApp (tolera variantes MX 52/521).
+async function resolverJidEnvio(sock: any, destino: string): Promise<string> {
   const d = String(destino ?? '').trim()
-  if (d.includes('@')) {
-    const jid = d.replace(/:\d+$/, '')
-    await sock.sendMessage(jid, { text: texto })
-    return
-  }
+  if (d.includes('@')) return d.replace(/:\d+$/, '')
   const digitos = d.replace(/\D/g, '')
-  if (digitos.length > 13) {
-    await sock.sendMessage(`${digitos}@lid`, { text: texto })
+  if (digitos.length > 13) return `${digitos}@lid`
+  if (digitos.length >= 10 && sock?.onWhatsApp) {
+    try {
+      const res = await sock.onWhatsApp(digitos).catch(() => undefined)
+      const contacto = res?.find((r: { exists: boolean; jid: string }) => r.exists && r.jid)
+      if (contacto?.jid) return String(contacto.jid).replace(/@c\.us$/, '@s.whatsapp.net')
+    } catch { /* fallback al JID directo */ }
+  }
+  return `${digitos}@s.whatsapp.net`
+}
+
+export interface CargaOutbox {
+  tipo: TipoOutbox
+  texto: string
+  mediaPath?: string
+  mediaMimetype?: string
+  mediaNombre?: string
+}
+
+// Envía texto o medios del outbox por Baileys.
+async function enviarOutboxMedia(sock: any, destino: string, carga: CargaOutbox): Promise<void> {
+  const d = String(destino ?? '').trim()
+  if (carga.tipo === 'texto') {
+    if (d.includes('@')) {
+      await sock.sendMessage(d.replace(/:\d+$/, ''), { text: carga.texto })
+      return
+    }
+    const digitos = d.replace(/\D/g, '')
+    if (digitos.length > 13) {
+      await sock.sendMessage(`${digitos}@lid`, { text: carga.texto })
+      return
+    }
+    const n = await enviarTextoANumeros(sock, [d], carga.texto)
+    if (n === 0) throw new Error('Sin entrega: número inválido o sin WhatsApp')
     return
   }
-  const n = await enviarTextoANumeros(sock, [d], texto)
-  if (n === 0) throw new Error('Sin entrega: número inválido o sin WhatsApp')
+
+  if (!carga.mediaPath || !esRutaMediaValida(carga.mediaPath)) {
+    throw new Error('Ruta de archivo inválida')
+  }
+  const { data, error } = await supabaseAdmin.storage
+    .from(MEDIA_BUCKET)
+    .download(carga.mediaPath)
+  if (error || !data) throw new Error('No se pudo descargar el adjunto')
+  const buf = Buffer.from(await data.arrayBuffer())
+  if (buf.length === 0 || buf.length > MAX_BYTES_BOT) {
+    throw new Error('Adjunto vacío o excede 12MB')
+  }
+  const jid = await resolverJidEnvio(sock, d)
+  const caption = carga.texto.trim() || undefined
+  const mimetype = String(carga.mediaMimetype || 'application/octet-stream').split(';')[0].trim()
+
+  if (carga.tipo === 'imagen') {
+    await sock.sendMessage(jid, { image: buf, caption, mimetype })
+  } else if (carga.tipo === 'audio') {
+    await sock.sendMessage(jid, { audio: buf, mimetype, ptt: true })
+  } else {
+    const fileName = String(carga.mediaNombre || 'archivo').slice(0, 120) || 'archivo'
+    await sock.sendMessage(jid, { document: buf, mimetype, fileName, caption })
+  }
 }
 
 // Poda de seguridad: si el eco fromMe de Baileys guardó el mismo mensaje
@@ -203,7 +294,7 @@ async function podarDuplicadosEquipo(): Promise<void> {
     const desde = new Date(Date.now() - 15 * 60_000).toISOString()
     const { data, error } = await supabaseAdmin
       .from('historial_chat')
-      .select('id, cliente_id, contenido, creado_en')
+      .select('id, cliente_id, contenido, creado_en, media_url')
       .eq('origen', 'equipo')
       .gte('creado_en', desde)
       .order('creado_en', { ascending: true })
@@ -212,7 +303,8 @@ async function podarDuplicadosEquipo(): Promise<void> {
     const vistos = new Map<string, string>()
     const duplicados: string[] = []
     for (const row of data) {
-      const clave = `${row.cliente_id}‖${String(row.contenido ?? '').trim()}`
+      // La URL distingue dos fotos distintas con el mismo caption.
+      const clave = `${row.cliente_id}‖${String(row.contenido ?? '').trim()}‖${String((row as any).media_url ?? '')}`
       if (vistos.has(clave)) duplicados.push(row.id as string)
       else vistos.set(clave, row.id as string)
     }

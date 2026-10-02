@@ -2,6 +2,12 @@
 
 ## 2026-10-02
 
+### Feat — Medios en la pestaña WhatsApp (fotos, voz, archivos)
+- Ver: fotos, notas de voz y archivos entrantes en el timeline (bucket privado `whatsapp-media` + columnas `media_tipo/media_url` en historial; proxy autenticado `/api/chat/media`).
+- Enviar: adjuntar foto/archivo y grabar nota de voz (hasta 2 min) desde el composer; el bot los envía por Baileys (voz como PTT). Límites: imagen 5MB, audio 8MB, doc 10MB.
+- Recepción: fotos/docs se persisten al instante sin alterar el flujo IA; notas de voz se guardan y Flora acusa recibo (no entran a visión IA).
+- Archivos: `lib/chat-media.ts`, `src/whatsapp/media-inbox.service.ts`, `app/api/chat/media/*`; outbox extendido (tipo/media_*); migración sección 5.
+
 ### Feat — Pestaña WhatsApp del dashboard (bandeja + chat + responder)
 - Nueva sección `/admin/whatsapp`: bandeja de conversaciones, timeline con divisores por día (Hoy/Ayer/fecha en zona CDMX), composer del equipo y ficha del contacto (pedido + caso).
 - Envío por relay Supabase (`mensajes_outbox_equipo`, nueva migración): el bot en la VM lo recoge cada ~4s y envía por Baileys. Al responder se pausa Flora solo en ese chat (reutiliza `numeros_ignorados`).

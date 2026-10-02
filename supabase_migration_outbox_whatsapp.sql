@@ -121,3 +121,54 @@ BEGIN
   END IF;
 END
 $$;
+
+-- 5. Medios del inbox (fotos, notas de voz, archivos) -------------------------
+-- Bucket PRIVADO: el navegador nunca lo toca directo; el dashboard sirve los
+-- bytes vía /api/chat/media (requiere login) y el bot usa service_role.
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('whatsapp-media', 'whatsapp-media', false)
+ON CONFLICT (id) DO NOTHING;
+
+-- Columnas para referenciar el archivo desde el timeline sin ensuciar el
+-- texto que lee Flora (el contenido sigue siendo legible: [Foto], etc.).
+ALTER TABLE historial_chat ADD COLUMN IF NOT EXISTS media_tipo TEXT;
+ALTER TABLE historial_chat ADD COLUMN IF NOT EXISTS media_url TEXT;
+
+-- Outbox: tipo de mensaje + referencia al archivo + caption opcional.
+ALTER TABLE mensajes_outbox_equipo ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'texto';
+ALTER TABLE mensajes_outbox_equipo ADD COLUMN IF NOT EXISTS media_path TEXT;
+ALTER TABLE mensajes_outbox_equipo ADD COLUMN IF NOT EXISTS media_mimetype TEXT;
+ALTER TABLE mensajes_outbox_equipo ADD COLUMN IF NOT EXISTS media_nombre TEXT;
+
+-- El caption (texto) ahora puede ir vacío cuando es un medio.
+DO $$
+DECLARE
+  cname text;
+BEGIN
+  SELECT conname INTO cname FROM pg_constraint
+  WHERE conrelid = 'mensajes_outbox_equipo'::regclass
+    AND contype = 'c'
+    AND pg_get_constraintdef(oid) LIKE '%char_length%texto%';
+  IF cname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE mensajes_outbox_equipo DROP CONSTRAINT %I', cname);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'mensajes_outbox_equipo'::regclass
+      AND conname = 'mensajes_outbox_texto_check'
+  ) THEN
+    ALTER TABLE mensajes_outbox_equipo
+      ADD CONSTRAINT mensajes_outbox_texto_check
+      CHECK (char_length(texto) BETWEEN 0 AND 1000);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'mensajes_outbox_equipo'::regclass
+      AND conname = 'mensajes_outbox_tipo_check'
+  ) THEN
+    ALTER TABLE mensajes_outbox_equipo
+      ADD CONSTRAINT mensajes_outbox_tipo_check
+      CHECK (tipo IN ('texto', 'imagen', 'audio', 'documento'));
+  END IF;
+END
+$$;

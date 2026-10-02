@@ -25,6 +25,14 @@ type Mensaje = {
   lado: Lado
   texto: string
   creadoEn: string
+  media: { tipo: 'imagen' | 'audio' | 'documento'; url: string } | null
+}
+
+type AdjuntoPendiente = {
+  path: string
+  mimetype: string
+  nombre: string
+  tipo: 'imagen' | 'audio' | 'documento'
 }
 
 type DetalleChat = {
@@ -130,6 +138,13 @@ export default function WhatsappPage() {
   const [errorChat, setErrorChat] = useState<string | null>(null)
   const [texto, setTexto] = useState('')
   const [enviando, setEnviando] = useState(false)
+  const [adjunto, setAdjunto] = useState<AdjuntoPendiente | null>(null)
+  const [subiendo, setSubiendo] = useState(false)
+  const [grabando, setGrabando] = useState(false)
+  const [segGrab, setSegGrab] = useState(0)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const grabTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [mutandoPausa, setMutandoPausa] = useState(false)
   const [verContacto, setVerContacto] = useState(false)
   const fondoRef = useRef<HTMLDivElement>(null)
@@ -174,6 +189,18 @@ export default function WhatsappPage() {
 
   const busquedaRef = useRef('')
   useEffect(() => { busquedaRef.current = busqueda }, [busqueda])
+
+  // Detener grabación si se desmonta la pestaña
+  useEffect(() => {
+    return () => {
+      try {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop()
+        }
+      } catch { /* noop */ }
+      if (grabTimerRef.current) clearInterval(grabTimerRef.current)
+    }
+  }, [])
 
   // Búsqueda con debounce (servidor)
   function onBuscar(v: string) {
@@ -220,9 +247,11 @@ export default function WhatsappPage() {
   }, [detalle?.mensajes.length])
 
   function abrirChat(c: Conversacion) {
+    detenerGrabacion()
     setTelefonoActivo(c.telefono)
     setDetalle(null)
     setTexto('')
+    setAdjunto(null)
     setVerContacto(false)
     // Limpieza visual local del badge (el servidor lo recalcula)
     setConversaciones((prev) =>
@@ -230,20 +259,101 @@ export default function WhatsappPage() {
     )
   }
 
+  async function subirArchivo(file: File) {
+    if (!telefonoActivo || subiendo) return
+    setSubiendo(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('telefono', telefonoActivo)
+      const res = await fetch('/api/chat/media/upload', { method: 'POST', body: form })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'No se pudo subir el archivo')
+      setAdjunto({ path: data.path, mimetype: data.mimetype, nombre: data.nombre, tipo: data.tipo })
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'No se pudo subir el archivo')
+    } finally {
+      setSubiendo(false)
+    }
+  }
+
+  function detenerGrabacion() {
+    try {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop()
+      }
+    } catch { /* noop */ }
+  }
+
+  async function toggleGrabar() {
+    if (grabando) {
+      detenerGrabacion()
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mime = ['audio/ogg;codecs=opus', 'audio/webm;codecs=opus'].find(
+        (m) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)
+      ) ?? ''
+      const rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream)
+      const partes: Blob[] = []
+      rec.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) partes.push(e.data)
+      }
+      rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop())
+        setGrabando(false)
+        setSegGrab(0)
+        if (grabTimerRef.current) clearInterval(grabTimerRef.current)
+        const blob = new Blob(partes, { type: rec.mimeType || 'audio/webm' })
+        if (blob.size === 0) return
+        const ext = blob.type.includes('ogg') ? 'ogg' : 'webm'
+        subirArchivo(new File([blob], `nota-de-voz.${ext}`, { type: blob.type }))
+      }
+      mediaRecorderRef.current = rec
+      rec.start()
+      setGrabando(true)
+      const inicio = Date.now()
+      grabTimerRef.current = setInterval(() => {
+        const s = Math.floor((Date.now() - inicio) / 1000)
+        setSegGrab(s)
+        if (s >= 120) detenerGrabacion() // tope 2 min por nota
+      }, 500)
+    } catch {
+      alert('No se pudo acceder al micrófono')
+    }
+  }
+
+  function formatoSeg(s: number): string {
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  }
+
   async function enviar(e?: React.FormEvent) {
     e?.preventDefault()
     const limpio = texto.trim()
-    if (!telefonoActivo || !limpio || enviando) return
+    if (!telefonoActivo || ((!limpio && !adjunto) || enviando || subiendo)) return
     setEnviando(true)
     try {
       const res = await fetch('/api/chat/enviar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telefono: telefonoActivo, texto: limpio.slice(0, 1000) }),
+        body: JSON.stringify({
+          telefono: telefonoActivo,
+          texto: limpio.slice(0, 1000),
+          ...(adjunto
+            ? {
+                tipo: adjunto.tipo,
+                media_path: adjunto.path,
+                media_mimetype: adjunto.mimetype,
+                media_nombre: adjunto.nombre,
+              }
+            : { tipo: 'texto' }),
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'No se pudo enviar')
       setTexto('')
+      setAdjunto(null)
       // El bot lo recoge en ~4s; recargar tras una pausa para verlo en el timeline
       setTimeout(() => {
         cargarChat(telefonoActivo)
@@ -463,7 +573,25 @@ export default function WhatsappPage() {
                           {fila.m.lado === 'flora' && (
                             <p className="text-[10px] font-bold opacity-70 mb-0.5">🌸 Flora</p>
                           )}
-                          <p>{fila.m.texto}</p>
+                          {fila.m.media?.tipo === 'imagen' && (
+                            <a href={fila.m.media.url} target="_blank" rel="noreferrer" className="block mb-1.5">
+                              <img src={fila.m.media.url} alt="Foto" loading="lazy"
+                                className="rounded-xl max-h-64 w-auto object-cover" />
+                            </a>
+                          )}
+                          {fila.m.media?.tipo === 'audio' && (
+                            <audio controls preload="none" src={fila.m.media.url} className="w-56 max-w-full mb-1.5" />
+                          )}
+                          {fila.m.media?.tipo === 'documento' && (
+                            <a href={fila.m.media.url} target="_blank" rel="noreferrer"
+                              className={`flex items-center gap-2 rounded-xl px-3 py-2 mb-1.5 text-xs font-medium ${
+                                fila.m.lado === 'equipo' ? 'bg-white/20 hover:bg-white/30' : 'bg-white hover:bg-gray-50 border border-gray-200'
+                              }`}>
+                              <span className="text-lg">📄</span>
+                              <span className="truncate">Abrir archivo</span>
+                            </a>
+                          )}
+                          {fila.m.texto && <p>{fila.m.texto}</p>}
                           <p className={`text-[10px] mt-1 text-right ${fila.m.lado === 'equipo' ? 'opacity-70' : 'text-gray-400'}`}>
                             {horaCorta(fila.m.creadoEn)}
                           </p>
@@ -488,7 +616,54 @@ export default function WhatsappPage() {
 
               {/* Composer */}
               <form onSubmit={enviar} className="p-3 border-t border-gray-100">
+                {adjunto && (
+                  <div className="flex items-center gap-2 mb-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-xs">
+                    <span className="text-base">{adjunto.tipo === 'imagen' ? '🖼️' : adjunto.tipo === 'audio' ? '🎤' : '📄'}</span>
+                    <span className="flex-1 truncate font-medium text-emerald-800">{adjunto.nombre}</span>
+                    <button type="button" onClick={() => setAdjunto(null)} className="text-emerald-600 hover:text-emerald-800 font-bold">
+                      ✕
+                    </button>
+                  </div>
+                )}
+                {subiendo && (
+                  <div className="mb-2 text-xs text-amber-700 bg-amber-50 rounded-xl px-3 py-2">
+                    ⏳ Subiendo archivo...
+                  </div>
+                )}
                 <div className="flex gap-2 items-end">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,audio/*"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0]
+                      if (f) subirArchivo(f)
+                      e.target.value = ''
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={subiendo || enviando}
+                    title="Adjuntar foto o archivo"
+                    className="flex-shrink-0 w-10 h-10 rounded-2xl border border-gray-200 text-lg hover:bg-gray-50 transition disabled:opacity-40"
+                  >
+                    📎
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleGrabar}
+                    disabled={subiendo || enviando}
+                    title={grabando ? `Detener (${formatoSeg(segGrab)})` : 'Grabar nota de voz'}
+                    className={`flex-shrink-0 h-10 rounded-2xl border text-sm font-semibold px-3 transition disabled:opacity-40 ${
+                      grabando
+                        ? 'bg-rose-500 text-white border-rose-500 animate-pulse'
+                        : 'border-gray-200 text-lg hover:bg-gray-50'
+                    }`}
+                  >
+                    {grabando ? `⏹ ${formatoSeg(segGrab)}` : '🎤'}
+                  </button>
                   <textarea
                     value={texto}
                     onChange={(e) => setTexto(e.target.value.slice(0, 1000))}
@@ -499,12 +674,12 @@ export default function WhatsappPage() {
                       }
                     }}
                     rows={2}
-                    placeholder={pausado ? 'Escribe como equipo (Flora pausada aquí)...' : 'Escribe como equipo (se pausará Flora en este chat)...'}
+                    placeholder={adjunto ? 'Agrega un texto opcional...' : pausado ? 'Escribe como equipo (Flora pausada aquí)...' : 'Escribe como equipo (se pausará Flora en este chat)...'}
                     className="flex-1 border border-gray-200 rounded-2xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-rose-400 outline-none resize-none bg-gray-50/60"
                   />
                   <button
                     type="submit"
-                    disabled={enviando || !texto.trim()}
+                    disabled={enviando || subiendo || (!texto.trim() && !adjunto)}
                     className="flex-shrink-0 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 disabled:opacity-40 text-white font-semibold px-5 py-2.5 rounded-2xl transition shadow-md shadow-rose-200/40"
                   >
                     {enviando ? '...' : 'Enviar ➤'}

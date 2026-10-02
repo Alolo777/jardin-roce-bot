@@ -22,12 +22,18 @@ function clasificarLado(rol: string, origen: string | null, contenido: string): 
   return 'flora'
 }
 
-function vistaPrevia(contenido: string): string {
-  return contenido
+function vistaPrevia(contenido: string, mediaTipo?: string | null): string {
+  const limpio = contenido
     .replace(/^\[Agente:\s*|\]$/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 90)
+  const esMarcadorSolo = /^\[(Foto|Nota de voz[^\]]*|Archivo[^\]]*|Agente[^\]]*)\]$/.test(contenido.trim())
+    || /^(envió (una foto|una nota de voz|un archivo|un documento))$/i.test(limpio)
+  if (mediaTipo === 'imagen') return `📷 ${limpio || 'Foto'}`.slice(0, 90)
+  if (mediaTipo === 'audio') return `🎤 ${limpio || 'Nota de voz'}`.slice(0, 90)
+  if (mediaTipo === 'documento') return `📄 ${limpio || 'Archivo'}`.slice(0, 90)
+  if (esMarcadorSolo && !limpio) return contenido.trim().slice(0, 90)
+  return limpio.slice(0, 90)
 }
 
 export async function GET(req: NextRequest) {
@@ -40,7 +46,7 @@ export async function GET(req: NextRequest) {
     // 1. Últimos mensajes (1 sola query, orden global descendente)
     const { data: recientes, error } = await supabaseAdmin
       .from('historial_chat')
-      .select('cliente_id, rol, contenido, origen, creado_en')
+      .select('cliente_id, rol, contenido, origen, creado_en, media_tipo')
       .order('creado_en', { ascending: false })
       .limit(VENTANA_MENSAJES)
     if (error) throw error
@@ -49,7 +55,7 @@ export async function GET(req: NextRequest) {
     const porCliente = new Map<
       string,
       {
-        ultimo: { rol: string; contenido: string; origen: string | null; creado_en: string }
+        ultimo: { rol: string; contenido: string; origen: string | null; creado_en: string; media_tipo: string | null }
         noLeidos: number
         cerrado: boolean
       }
@@ -63,6 +69,7 @@ export async function GET(req: NextRequest) {
             contenido: m.contenido,
             origen: m.origen,
             creado_en: m.creado_en,
+            media_tipo: (m as any).media_tipo ?? null,
           },
           noLeidos: 0,
           cerrado: false,
@@ -150,7 +157,7 @@ export async function GET(req: NextRequest) {
         const coincide =
           (qDigitos && telefonoADigitos(telefono).includes(qDigitos)) ||
           (qTexto && (nombre ?? '').toLowerCase().includes(qTexto)) ||
-          (qTexto && vistaPrevia(e.ultimo.contenido).toLowerCase().includes(qTexto))
+          (qTexto && vistaPrevia(e.ultimo.contenido, e.ultimo.media_tipo).toLowerCase().includes(qTexto))
         if (!coincide) continue
       }
 
@@ -158,7 +165,7 @@ export async function GET(req: NextRequest) {
         telefono,
         mostrar: telefonoParaMostrar(telefono),
         nombre,
-        ultimoMensaje: vistaPrevia(e.ultimo.contenido),
+        ultimoMensaje: vistaPrevia(e.ultimo.contenido, e.ultimo.media_tipo),
         ultimoLado: clasificarLado(e.ultimo.rol, e.ultimo.origen, e.ultimo.contenido),
         ultimaActividad: e.ultimo.creado_en,
         noLeidos: Math.min(e.noLeidos, 99),

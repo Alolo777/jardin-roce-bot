@@ -53,19 +53,26 @@ export async function GET(req: NextRequest) {
     // viejos y los mensajes nuevos nunca aparecían en el chat.)
     const { data: historialDesc, error } = await supabaseAdmin
       .from('historial_chat')
-      .select('id, rol, contenido, origen, creado_en')
+      .select('id, rol, contenido, origen, creado_en, media_tipo, media_url')
       .eq('cliente_id', cliente.id)
       .order('creado_en', { ascending: false })
       .limit(limite)
     if (error) throw error
 
-    const mensajes = (historialDesc ?? []).reverse().map((m) => {
+    const mensajes = (historialDesc ?? []).reverse().map((m: any) => {
       const lado = clasificar(m.rol, m.origen, m.contenido)
+      const mediaUrl = typeof m.media_url === 'string' && m.media_url ? m.media_url : null
+      const mediaTipo = m.media_tipo === 'imagen' || m.media_tipo === 'audio' || m.media_tipo === 'documento'
+        ? m.media_tipo
+        : null
       return {
         id: m.id,
         lado,
         texto: paraMostrar(lado, m.contenido),
         creadoEn: m.creado_en,
+        media: mediaUrl && mediaTipo
+          ? { tipo: mediaTipo, url: `/api/chat/media?path=${encodeURIComponent(mediaUrl)}` }
+          : null,
       }
     })
 

@@ -163,19 +163,41 @@ export async function agregarAlHistorial(
   telefono: string,
   role: 'user' | 'assistant',
   content: string,
-  origen?: OrigenMensaje | string
+  origen?: OrigenMensaje | string,
+  media?: { mediaTipo?: string | null; mediaUrl?: string | null }
 ): Promise<void> {
   const clienteId = await obtenerClienteId(telefono)
   if (!clienteId) return
 
+  const fila: Record<string, unknown> = {
+    cliente_id: clienteId,
+    rol: role,
+    contenido: content,
+    origen: origen ?? (role === 'user' ? OrigenMensaje.CLIENTE : OrigenMensaje.FLORA),
+  }
+  if (media?.mediaTipo) fila.media_tipo = media.mediaTipo
+  if (media?.mediaUrl) fila.media_url = media.mediaUrl
+
   try {
-    await supabaseAdmin.from('historial_chat').insert({
-      cliente_id: clienteId,
-      rol: role,
-      contenido: content,
-      origen: origen ?? (role === 'user' ? OrigenMensaje.CLIENTE : OrigenMensaje.FLORA),
-    })
+    const { error } = await supabaseAdmin.from('historial_chat').insert(fila)
+    if (error) throw error
   } catch (err) {
+    // Resiliencia ante migración pendiente: si fallan las columnas media_*,
+    // se guarda el texto del marcador para no perder el mensaje.
+    const msg = err instanceof Error ? err.message : String(err)
+    if ((media?.mediaTipo || media?.mediaUrl) && /media_tipo|media_url|column/i.test(msg)) {
+      try {
+        delete fila.media_tipo
+        delete fila.media_url
+        const { error: e2 } = await supabaseAdmin.from('historial_chat').insert(fila)
+        if (e2) throw e2
+        console.warn('[conversation] Historial sin columnas media_* (aplica la migración SQL).')
+        return
+      } catch (err2) {
+        console.error('[conversation] Error guardando historial:', err2)
+        return
+      }
+    }
     console.error('[conversation] Error guardando historial:', err)
   }
 }
