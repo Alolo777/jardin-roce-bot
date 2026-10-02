@@ -12,6 +12,7 @@
 - Enviar: adjuntar foto/archivo y grabar nota de voz (hasta 2 min) desde el composer; el bot los envía por Baileys (voz como PTT). Límites: imagen 5MB, audio 8MB, doc 10MB.
 - Recepción: fotos/docs se persisten al instante sin alterar el flujo IA; notas de voz se guardan y Flora acusa recibo (no entran a visión IA).
 - Archivos: `lib/chat-media.ts`, `src/whatsapp/media-inbox.service.ts`, `app/api/chat/media/*`; outbox extendido (tipo/media_*); migración sección 5.
+- Fix: si el upload a Storage falla (bucket pendiente), se guarda el marcador de texto para no perder el mensaje; UI con errores legibles (sesión expirada vs deploy pendiente).
 
 ### Feat — Pestaña WhatsApp del dashboard (bandeja + chat + responder)
 - Nueva sección `/admin/whatsapp`: bandeja de conversaciones, timeline con divisores por día (Hoy/Ayer/fecha en zona CDMX), composer del equipo y ficha del contacto (pedido + caso).
