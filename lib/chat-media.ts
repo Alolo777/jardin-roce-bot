@@ -94,3 +94,10 @@ export function esRutaMediaValida(path: string): boolean {
   if (path.includes('..') || path.startsWith('/') || path.includes('\\')) return false
   return /^[A-Za-z0-9/_.-]+$/.test(path)
 }
+
+// Limpieza automática del bucket (corre en la VM cada 6h):
+// al alcanzar 900MB, borra enviados más viejos hasta liberar 350MB.
+export const UMBRAL_LIMPIEZA_BYTES = 900 * 1024 * 1024
+export const OBJETIVO_LIBERAR_BYTES = 350 * 1024 * 1024
+// No borrar enviados recientes (protege el contexto de Flora y el timeline).
+export const GRACIA_LIMPIEZA_DIAS = 7

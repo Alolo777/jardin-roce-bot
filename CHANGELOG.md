@@ -2,6 +2,11 @@
 
 ## 2026-10-02
 
+### Feat — Compresión + limpieza automática de medios
+- Fotos se comprimen (máx 1280px, JPEG 72) al recibirse (VM) y al subirse (dashboard): ~80-90% menos peso en ambas direcciones. Audios/docs pasan con topes (8/10MB) — Opus ya es eficiente y la VM no tiene ffmpeg para recomprimir.
+- Limpieza cada 6h en la VM: al llegar a 900MB borra enviados con +7 días hasta liberar 350MB (solo enviados; lo recibido se conserva). UI tolera archivos limpiados.
+- Nueva dependencia `sharp` (estándar para imágenes; fallback a original si falla).
+
 ### Feat — Medios en la pestaña WhatsApp (fotos, voz, archivos)
 - Ver: fotos, notas de voz y archivos entrantes en el timeline (bucket privado `whatsapp-media` + columnas `media_tipo/media_url` en historial; proxy autenticado `/api/chat/media`).
 - Enviar: adjuntar foto/archivo y grabar nota de voz (hasta 2 min) desde el composer; el bot los envía por Baileys (voz como PTT). Límites: imagen 5MB, audio 8MB, doc 10MB.

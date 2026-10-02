@@ -574,13 +574,32 @@ export default function WhatsappPage() {
                             <p className="text-[10px] font-bold opacity-70 mb-0.5">🌸 Flora</p>
                           )}
                           {fila.m.media?.tipo === 'imagen' && (
-                            <a href={fila.m.media.url} target="_blank" rel="noreferrer" className="block mb-1.5">
-                              <img src={fila.m.media.url} alt="Foto" loading="lazy"
-                                className="rounded-xl max-h-64 w-auto object-cover" />
-                            </a>
+                            <>
+                              <a href={fila.m.media.url} target="_blank" rel="noreferrer" className="block mb-1.5"
+                                data-media-ok>
+                                <img src={fila.m.media.url} alt="Foto" loading="lazy"
+                                  className="rounded-xl max-h-64 w-auto object-cover"
+                                  onError={(e) => {
+                                    const link = e.currentTarget.closest('[data-media-ok]')
+                                    if (link) link.classList.add('hidden')
+                                    const fb = e.currentTarget.closest('div')?.querySelector('[data-media-caido]')
+                                    if (fb) fb.classList.remove('hidden')
+                                  }} />
+                              </a>
+                              <span data-media-caido className="hidden text-[11px] opacity-70">🗑️ Foto eliminada por limpieza</span>
+                            </>
                           )}
                           {fila.m.media?.tipo === 'audio' && (
-                            <audio controls preload="none" src={fila.m.media.url} className="w-56 max-w-full mb-1.5" />
+                            <>
+                              <audio controls preload="none" src={fila.m.media.url} className="w-56 max-w-full mb-1.5"
+                                data-media-ok
+                                onError={(e) => {
+                                  e.currentTarget.classList.add('hidden')
+                                  const fb = e.currentTarget.parentElement?.querySelector('[data-media-caido]')
+                                  if (fb) fb.classList.remove('hidden')
+                                }} />
+                              <span data-media-caido className="hidden text-[11px] opacity-70">🗑️ Audio eliminado por limpieza</span>
+                            </>
                           )}
                           {fila.m.media?.tipo === 'documento' && (
                             <a href={fila.m.media.url} target="_blank" rel="noreferrer"

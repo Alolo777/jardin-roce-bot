@@ -9,6 +9,7 @@ import {
   rutaMedia,
   type TipoMediaChat,
 } from '@/lib/chat-media'
+import { comprimirImagen } from '@/lib/comprimir-imagen'
 import { telefonoADigitos } from '@/lib/chat-dashboard'
 
 // Sube un adjunto del equipo (foto, nota de voz, archivo) al bucket privado.
@@ -38,21 +39,33 @@ export async function POST(req: NextRequest) {
     }
 
     const nombreOriginal = String((file as any).name || 'archivo').slice(0, 120)
-    const ext = extensionPara(mimetype, nombreOriginal.split('.').pop() || 'bin')
+    let bytes: Uint8Array = new Uint8Array(await file.arrayBuffer())
+    let mimeFinal = mimetype
+    let ext = extensionPara(mimetype, nombreOriginal.split('.').pop() || 'bin')
+
+    // Comprimir fotos antes de subir (audios/docs pasan tal cual).
+    if (tipoFinal === 'imagen') {
+      const comprimida = await comprimirImagen(bytes, mimetype)
+      if (comprimida) {
+        bytes = comprimida.buffer
+        mimeFinal = comprimida.mimetype
+        ext = 'jpg'
+      }
+    }
+
     const path = rutaMedia(telefonoADigitos(telefono), randomUUID(), ext)
-    const bytes = Buffer.from(await file.arrayBuffer())
 
     const { error } = await supabaseAdmin.storage
       .from(MEDIA_BUCKET)
-      .upload(path, bytes, { contentType: mimetype, upsert: false })
+      .upload(path, bytes, { contentType: mimeFinal, upsert: false })
     if (error) throw error
 
     return NextResponse.json({
       ok: true,
       path,
-      mimetype,
+      mimetype: mimeFinal,
       nombre: nombreOriginal,
-      size: file.size,
+      size: bytes.length,
       tipo: tipoFinal,
     })
   } catch (err) {

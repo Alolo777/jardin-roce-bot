@@ -77,6 +77,7 @@ import { esAdminBot, crearAdminHandler, generarNovedadesDiarias, enviarNovedades
 import { enviarTextoANumeros } from './src/whatsapp/notification.service'
 import { iniciarOutboxPoller, detenerOutboxPoller } from './src/whatsapp/outbox-poller'
 import { reconciliarLidsHuerfanos } from './src/whatsapp/lid-backfill.service'
+import { iniciarLimpiezaStorage, detenerLimpiezaStorage } from './src/whatsapp/storage-cleanup.service'
 
 // ════════════════════════════════════════════════════════════════
 // PAUSA DEL BOT
@@ -1639,6 +1640,7 @@ const messageEntry = createMessageEntry({
   }, 30_000).unref?.()
   iniciarPersistenciaPeriodica()
   iniciarOutboxPoller(() => sock)
+  iniciarLimpiezaStorage()
   try { await cargarPedidosDesdeBD() } catch {}
   try { await cargarCasosDesdeBD() } catch {}
   refrescarConfiguracion(true).catch(() => {})
@@ -1654,6 +1656,7 @@ const messageEntry = createMessageEntry({
 async function gracefulShutdown(signal: string): Promise<void> {
   console.log(`\n⚠️ ${signal} recibido — cerrando graceful...`)
   detenerOutboxPoller()
+  detenerLimpiezaStorage()
   const timer = setTimeout(() => {
     console.warn('[shutdown] Timeout 10s — forzando exit.')
     process.exit(1)

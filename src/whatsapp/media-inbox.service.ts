@@ -24,6 +24,7 @@ import {
   type TipoMediaChat,
 } from '../../lib/chat-media'
 import { getContenidoMensaje } from './message-utils'
+import { comprimirImagen } from '../../lib/comprimir-imagen'
 
 export interface MediaDescargado {
   buffer: Buffer
@@ -98,12 +99,27 @@ export async function persistirMediaEntrante(
   caption?: string
 ): Promise<Persistido | null> {
   try {
+    // Comprimir fotos para cuidar el almacenamiento (audios/docs pasan tal cual).
+    let buffer = media.buffer
+    let mimetype = media.mimetype
+    let ext = extensionPara(media.mimetype)
+    if (media.tipo === 'imagen') {
+      const comprimida = await comprimirImagen(media.buffer, media.mimetype)
+      if (comprimida) {
+        console.log(
+          `[media-inbox] 🗜️ Foto ${Math.round(media.buffer.length / 1024)}KB → ${Math.round(comprimida.buffer.length / 1024)}KB`
+        )
+        buffer = comprimida.buffer
+        mimetype = comprimida.mimetype
+        ext = 'jpg'
+      }
+    }
     const digitos = String(telefonoCanon ?? '').replace(/\D/g, '')
-    const path = rutaMedia(digitos, randomUUID(), extensionPara(media.mimetype))
+    const path = rutaMedia(digitos, randomUUID(), ext)
     const { error: upError } = await supabaseAdmin.storage
       .from(MEDIA_BUCKET)
-      .upload(path, media.buffer, {
-        contentType: media.mimetype.split(';')[0].trim() || 'application/octet-stream',
+      .upload(path, buffer, {
+        contentType: mimetype.split(';')[0].trim() || 'application/octet-stream',
         upsert: false,
       })
     if (upError) throw upError
@@ -115,7 +131,7 @@ export async function persistirMediaEntrante(
       mediaUrl: path,
     })
     console.log(`[media-inbox] ✅ ${media.tipo} guardado: ${path}`)
-    return { url: path, marcador, tipo: media.tipo, mimetype: media.mimetype }
+    return { url: path, marcador, tipo: media.tipo, mimetype }
   } catch (err) {
     console.error('[media-inbox] Error persistiendo:', err instanceof Error ? err.message : err)
     return null
