@@ -12,13 +12,13 @@ import {
   obtenerMensajeId,
   marcarMensajeProcesado,
   variantesTelefono,
+  agregarAlHistorial,
 } from '../conversation/conversation.service'
 import {
   cargarIgnorados,
   obtenerDescripcionIgnorado,
   MENSAJES_RESCATADOS,
 } from './preferences.service'
-import { agregarAlHistorial } from '../conversation/conversation.service'
 import { TOMA_HUMANA_DESCRIPCION } from '../../lib/chat-dashboard'
 import { obtenerNumeroReal } from './contact.service'
 import { descargarMediaConMime, persistirMediaEntrante, conTimeout, TIMEOUT_DESCARGA_MS } from './media-inbox.service'
@@ -75,6 +75,18 @@ export function createMessageEntry(deps: MessageEntryDeps) {
     RATE_AVISADOS.add(id)
     responderMensaje(msg, 'Voy un poquito rápido 🌸 Dame un momento. ¿Va?').catch(() => {})
     setTimeout(() => RATE_AVISADOS.delete(id), RATE_LIMIT_WINDOW_MS)
+  }
+
+  // Responde por WhatsApp Y lo guarda en el historial para que la bandeja
+  // del dashboard muestre todo lo que el cliente recibió. Los envíos del
+  // bot por sock no generan eco fromMe, así que no hay riesgo de duplicado
+  // (las respuestas del flujo IA ya se guardan en message-handler).
+  async function responderYGuardar(msg: any, telefono: string, texto: string): Promise<void> {
+    try {
+      await responderMensaje(msg, texto)
+    } catch { /* el envío ya loguea su propio error */ }
+    const tel = String(telefono ?? '').trim()
+    if (tel) agregarAlHistorial(tel, 'assistant', texto).catch(() => {})
   }
 
   async function procesarMensajeEntrante(msg: any): Promise<void> {
@@ -136,7 +148,7 @@ export function createMessageEntry(deps: MessageEntryDeps) {
               await persistirMediaEntrante(tel, media, body).catch(() => {})
               console.log(`[entry] ⏸️ Medio guardado (toma humana): ${tel} ${media.tipo}`)
               if (msgType === 'audio') {
-                responderMensaje(msg, '🎤 ¡Recibí tu nota de voz! El equipo la va a escuchar en un momento 🌸').catch(() => {})
+                await responderYGuardar(msg, tel, '🎤 ¡Recibí tu nota de voz! El equipo la va a escuchar en un momento 🌸')
               }
             }
             return
@@ -238,13 +250,15 @@ export function createMessageEntry(deps: MessageEntryDeps) {
           const media = await conTimeout(descargarMediaConMime(msg), TIMEOUT_DESCARGA_MS, 'descarga audio')
           if (tel && media) {
             await persistirMediaEntrante(tel, media).catch(() => {})
-            responderMensaje(msg, '🎤 ¡Recibí tu nota de voz! El equipo la va a escuchar en un momento 🌸').catch(() => {})
+            await responderYGuardar(msg, tel, '🎤 ¡Recibí tu nota de voz! El equipo la va a escuchar en un momento 🌸')
           } else {
-            responderMensaje(msg, '🎤 No pude descargar tu nota de voz 🙏 ¿Me la reenvías porfa?').catch(() => {})
+            const tel2 = (numeroRealParaIgnorar || jidANumero(remoteJid)).trim()
+            await responderYGuardar(msg, tel2, '🎤 No pude descargar tu nota de voz 🙏 ¿Me la reenvías porfa?')
           }
         }
       } else {
-        responderMensaje(msg, 'Por ahora solo puedo leer mensajes de *texto* 🌸. ¿Qué necesitas?').catch(() => {})
+        const tel3 = (numeroRealParaIgnorar || jidANumero(remoteJid)).trim()
+        await responderYGuardar(msg, tel3, 'Por ahora solo puedo leer mensajes de *texto* 🌸. ¿Qué necesitas?')
       }
       return
     }
