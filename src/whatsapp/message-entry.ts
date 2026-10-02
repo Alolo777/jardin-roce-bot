@@ -117,19 +117,32 @@ export function createMessageEntry(deps: MessageEntryDeps) {
       // vea al instante en la bandeja, pero Flora no responde en este chat.
       // Los silenciados permanentes conservan el comportamiento legacy
       // (se descartan sin guardar para no meter ruido a la bandeja).
-      if (msgType === 'chat' && body.trim()) {
-        try {
-          const motivo = await obtenerDescripcionIgnorado(variantesMensaje)
-          if (motivo === TOMA_HUMANA_DESCRIPCION) {
-            const tel = (numeroRealParaIgnorar || jidANumero(remoteJid)).trim()
+      // Incluye fotos, voz y archivos: antes se descartaban aquí sin llegar
+      // al código que los persiste (el filtro solo dejaba pasar texto).
+      try {
+        const motivo = await obtenerDescripcionIgnorado(variantesMensaje)
+        if (motivo === TOMA_HUMANA_DESCRIPCION) {
+          const tel = (numeroRealParaIgnorar || jidANumero(remoteJid)).trim()
+          if (msgType === 'chat' && body.trim()) {
             if (tel) {
               agregarAlHistorial(tel, 'user', body.trim().slice(0, 1000)).catch(() => {})
               console.log(`[entry] ⏸️ Guardado (toma humana, sin responder): ${tel}`)
             }
             return
           }
-        } catch { /* ante cualquier duda: legado (descartar) */ }
-      }
+          if (tel && (msgType === 'image' || msgType === 'document' || msgType === 'audio')) {
+            const media = await conTimeout(descargarMediaConMime(msg), TIMEOUT_DESCARGA_MS, 'descarga media (pausa)')
+            if (media) {
+              await persistirMediaEntrante(tel, media, body).catch(() => {})
+              console.log(`[entry] ⏸️ Medio guardado (toma humana): ${tel} ${media.tipo}`)
+              if (msgType === 'audio') {
+                responderMensaje(msg, '🎤 ¡Recibí tu nota de voz! El equipo la va a escuchar en un momento 🌸').catch(() => {})
+              }
+            }
+            return
+          }
+        }
+      } catch { /* ante cualquier duda: legado (descartar) */ }
       console.log(`[entry] 🔇 Número ignorado: ${numeroRealParaIgnorar || remoteJid}`)
       return
     }
