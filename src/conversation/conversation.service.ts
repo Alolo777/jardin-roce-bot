@@ -5,6 +5,7 @@ import { supabaseAdmin } from '../../lib/supabase'
 import type { MensajeChat } from '../../lib/ai'
 import { OrigenMensaje } from '../models/types'
 import type { ConversationState } from '../models/types'
+import { esValorLid, telefonoPorLid } from '../whatsapp/lid-mapping'
 
 // ════════════════════════════════════════════════════════════════
 // CONSTANTES
@@ -186,8 +187,21 @@ export async function agregarAlHistorial(
   origen?: OrigenMensaje | string,
   media?: { mediaTipo?: string | null; mediaUrl?: string | null }
 ): Promise<void> {
-  const clienteId = await obtenerClienteId(telefono)
-  if (!clienteId) return
+  // Blindaje anti-partición: si llega un LID con teléfono conocido en la
+  // tabla de mapeo, se guarda directo en la fila canónica (+teléfono) para
+  // no resucitar filas legacy. Solo aplica a valores LID (1 query extra).
+  let telefonoEfectivo = telefono
+  if (esValorLid(telefono)) {
+    try {
+      const mapeado = await telefonoPorLid(telefono)
+      if (mapeado) telefonoEfectivo = mapeado
+    } catch { /* se usa el valor original */ }
+  }
+  const clienteId = await obtenerClienteId(telefonoEfectivo)
+  if (!clienteId) {
+    console.error('[conversation] Sin clienteId para guardar historial:', telefonoEfectivo)
+    return
+  }
 
   const fila: Record<string, unknown> = {
     cliente_id: clienteId,
