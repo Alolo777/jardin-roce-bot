@@ -289,7 +289,18 @@ async function enviarOutboxMedia(sock: any, destino: string, carga: CargaOutbox)
   if (carga.tipo === 'imagen') {
     await sock.sendMessage(jid, { image: buf, caption, mimetype })
   } else if (carga.tipo === 'audio') {
-    await sock.sendMessage(jid, { audio: buf, mimetype, ptt: true })
+    // WhatsApp exige Ogg Opus con mimetype exacto + duración para PTT.
+    const mimeVoz = 'audio/ogg; codecs=opus'
+    let segundos: number | undefined
+    try {
+      const { parseBuffer } = await import('music-metadata')
+      const meta = await parseBuffer(buf, { mimeType: 'audio/ogg' } as any, { duration: true } as any)
+      const d = Number((meta as any)?.format?.duration)
+      if (Number.isFinite(d) && d > 0) segundos = Math.max(1, Math.round(d))
+    } catch {
+      // sin duración: Baileys intentará calcularla solo
+    }
+    await sock.sendMessage(jid, { audio: buf, mimetype: mimeVoz, ptt: true, ...(segundos ? { seconds: segundos } : {}) })
   } else {
     const fileName = String(carga.mediaNombre || 'archivo').slice(0, 120) || 'archivo'
     await sock.sendMessage(jid, { document: buf, mimetype, fileName, caption })
