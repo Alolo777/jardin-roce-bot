@@ -153,7 +153,13 @@ export default function WhatsappPage() {
   const cargarLista = useCallback(async (q: string) => {
     try {
       const res = await fetch(`/api/chat/conversaciones${q ? `?q=${encodeURIComponent(q)}` : ''}`, { cache: 'no-store' })
-      const data = await res.json()
+      const data: any = await res.json().catch(() => {
+        throw new Error(
+          res.status === 404
+            ? 'La bandeja aún no existe en el servidor: espera el deploy de Vercel y recarga.'
+            : 'Sesión expirada o servidor no disponible: sal y vuelve a entrar.'
+        )
+      })
       if (!res.ok) throw new Error(data.error || 'Error al cargar')
       setConversaciones(data.conversaciones ?? [])
       setErrorLista(null)
@@ -169,7 +175,13 @@ export default function WhatsappPage() {
     setErrorChat(null)
     try {
       const res = await fetch(`/api/chat/mensajes?telefono=${encodeURIComponent(telefono)}`, { cache: 'no-store' })
-      const data = await res.json()
+      const data: any = await res.json().catch(() => {
+        throw new Error(
+          res.status === 404
+            ? 'El chat aún no existe en el servidor: espera el deploy de Vercel y recarga.'
+            : 'Sesión expirada o servidor no disponible: sal y vuelve a entrar.'
+        )
+      })
       if (!res.ok) throw new Error(data.error || 'Error al cargar')
       setDetalle(data)
     } catch (e) {
@@ -259,6 +271,25 @@ export default function WhatsappPage() {
     )
   }
 
+  async function leerErrorServidor(res: Response, accion: string): Promise<never> {
+    // El proxy devuelve JSON; si llega HTML es redirección al login (sesión
+    // expirada) o ruta inexistente (deploy de Vercel aún sin la nueva versión).
+    const ct = res.headers.get('content-type') || ''
+    if (!ct.includes('application/json')) {
+      if (res.status === 404) {
+        throw new Error(
+          `${accion}: el servidor aún no tiene esta función. Espera a que Vercel termine el deploy (Deployments → Ready) y recarga.`
+        )
+      }
+      throw new Error(
+        `${accion}: respuesta inesperada (HTTP ${res.status}). Si dice login, tu sesión expiró: sal y vuelve a entrar.`
+      )
+    }
+    const data = await res.json().catch(() => ({} as any))
+    if (!res.ok) throw new Error((data as any).error || `${accion}: error ${res.status}`)
+    return data as never
+  }
+
   async function subirArchivo(file: File) {
     if (!telefonoActivo || subiendo) return
     setSubiendo(true)
@@ -267,8 +298,9 @@ export default function WhatsappPage() {
       form.append('file', file)
       form.append('telefono', telefonoActivo)
       const res = await fetch('/api/chat/media/upload', { method: 'POST', body: form })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'No se pudo subir el archivo')
+      const data: any = res.ok
+        ? await res.json().catch(() => { throw new Error('Subir archivo: respuesta inválida') })
+        : await leerErrorServidor(res, 'Subir archivo')
       setAdjunto({ path: data.path, mimetype: data.mimetype, nombre: data.nombre, tipo: data.tipo })
     } catch (err) {
       alert(err instanceof Error ? err.message : 'No se pudo subir el archivo')
@@ -350,7 +382,9 @@ export default function WhatsappPage() {
             : { tipo: 'texto' }),
         }),
       })
-      const data = await res.json()
+      const data: any = res.ok
+        ? await res.json().catch(() => { throw new Error('Enviar: respuesta inválida') })
+        : await leerErrorServidor(res, 'Enviar')
       if (!res.ok) throw new Error(data.error || 'No se pudo enviar')
       setTexto('')
       setAdjunto(null)

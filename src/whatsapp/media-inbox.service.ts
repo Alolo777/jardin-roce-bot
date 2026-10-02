@@ -98,12 +98,12 @@ export async function persistirMediaEntrante(
   media: MediaDescargado,
   caption?: string
 ): Promise<Persistido | null> {
-  try {
-    // Comprimir fotos para cuidar el almacenamiento (audios/docs pasan tal cual).
-    let buffer = media.buffer
-    let mimetype = media.mimetype
-    let ext = extensionPara(media.mimetype)
-    if (media.tipo === 'imagen') {
+  // Comprimir fotos para cuidar el almacenamiento (audios/docs pasan tal cual).
+  let buffer = media.buffer
+  let mimetype = media.mimetype
+  let ext = extensionPara(media.mimetype)
+  if (media.tipo === 'imagen') {
+    try {
       const comprimida = await comprimirImagen(media.buffer, media.mimetype)
       if (comprimida) {
         console.log(
@@ -113,7 +113,15 @@ export async function persistirMediaEntrante(
         mimetype = comprimida.mimetype
         ext = 'jpg'
       }
-    }
+    } catch { /* se sube la original */ }
+  }
+
+  const cap = String(caption ?? '').trim().slice(0, 200)
+  const marcador = cap || marcadorMedia(media.tipo, media.nombre, media.duracionSeg)
+
+  // Si el upload falla (ej. bucket aún no creado), se guarda el marcador de
+  // texto para no perder el mensaje en la bandeja.
+  try {
     const digitos = String(telefonoCanon ?? '').replace(/\D/g, '')
     const path = rutaMedia(digitos, randomUUID(), ext)
     const { error: upError } = await supabaseAdmin.storage
@@ -124,8 +132,6 @@ export async function persistirMediaEntrante(
       })
     if (upError) throw upError
 
-    const cap = String(caption ?? '').trim().slice(0, 200)
-    const marcador = cap || marcadorMedia(media.tipo, media.nombre, media.duracionSeg)
     await agregarAlHistorial(telefonoCanon, 'user', marcador, OrigenMensaje.CLIENTE, {
       mediaTipo: media.tipo,
       mediaUrl: path,
@@ -133,7 +139,10 @@ export async function persistirMediaEntrante(
     console.log(`[media-inbox] ✅ ${media.tipo} guardado: ${path}`)
     return { url: path, marcador, tipo: media.tipo, mimetype }
   } catch (err) {
-    console.error('[media-inbox] Error persistiendo:', err instanceof Error ? err.message : err)
-    return null
+    console.error('[media-inbox] Error subiendo (se guarda solo marcador):', err instanceof Error ? err.message : err)
+    try {
+      await agregarAlHistorial(telefonoCanon, 'user', marcador, OrigenMensaje.CLIENTE)
+    } catch { /* último recurso: no fatal */ }
+    return { url: '', marcador, tipo: media.tipo, mimetype }
   }
 }
