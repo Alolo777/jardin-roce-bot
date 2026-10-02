@@ -144,8 +144,15 @@ export default function WhatsappPage() {
   const [grabando, setGrabando] = useState(false)
   const [segGrab, setSegGrab] = useState(0)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const opusRecRef = useRef<any>(null)
   const grabTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Pre-cargar el codificador Ogg Opus para no romper la cadena del gesto
+  // del clic (los navegadores exigen gesto de usuario para el micrófono).
+  useEffect(() => {
+    import('opus-recorder').catch(() => {})
+  }, [])
   const [mutandoPausa, setMutandoPausa] = useState(false)
   const [verContacto, setVerContacto] = useState(false)
   const fondoRef = useRef<HTMLDivElement>(null)
@@ -206,6 +213,10 @@ export default function WhatsappPage() {
   // Detener grabación si se desmonta la pestaña
   useEffect(() => {
     return () => {
+      try {
+        if (opusRecRef.current) opusRecRef.current.stop()
+      } catch { /* noop */ }
+      opusRecRef.current = null
       try {
         if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
           mediaRecorderRef.current.stop()
@@ -331,16 +342,67 @@ export default function WhatsappPage() {
 
   function detenerGrabacion() {
     try {
+      if (opusRecRef.current) opusRecRef.current.stop()
+    } catch { /* noop */ }
+    opusRecRef.current = null
+    try {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop()
       }
     } catch { /* noop */ }
   }
 
+  function iniciarTimerGrab() {
+    if (grabTimerRef.current) clearInterval(grabTimerRef.current)
+    const inicio = Date.now()
+    grabTimerRef.current = setInterval(() => {
+      const s = Math.floor((Date.now() - inicio) / 1000)
+      setSegGrab(s)
+      if (s >= 120) detenerGrabacion() // tope 2 min por nota
+    }, 500)
+  }
+
+  function finalizarGrabacion() {
+    setGrabando(false)
+    setSegGrab(0)
+    if (grabTimerRef.current) clearInterval(grabTimerRef.current)
+  }
+
+  // Graba Ogg Opus real (único formato que WhatsApp acepta como nota de voz).
+  // Si falla, usa MediaRecorder del navegador como respaldo.
   async function toggleGrabar() {
     if (grabando) {
       detenerGrabacion()
       return
+    }
+    try {
+      const mod: any = await import('opus-recorder')
+      const Recorder = mod.default ?? mod.Recorder ?? mod
+      if (typeof Recorder !== 'function') throw new Error('sin codificador')
+      const rec = new Recorder({
+        encoderPath: '/opus/encoderWorker.min.js',
+        encoderSampleRate: 48000,
+        numberOfChannels: 1,
+        streamPages: false,
+      })
+      const partes: ArrayBuffer[] = []
+      rec.ondataavailable = (data: ArrayBuffer) => {
+        if (data && data.byteLength) partes.push(data)
+      }
+      rec.onstop = () => {
+        finalizarGrabacion()
+        if (partes.length === 0) return
+        const blob = new Blob(partes, { type: 'audio/ogg' })
+        subirArchivo(new File([blob], 'nota-de-voz.ogg', { type: 'audio/ogg' }))
+      }
+      opusRecRef.current = rec
+      await rec.start()
+      setGrabando(true)
+      iniciarTimerGrab()
+      return
+    } catch {
+      opusRecRef.current = null
+      // Respaldo con el grabador nativo (puede no llegar como nota de voz).
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -354,9 +416,7 @@ export default function WhatsappPage() {
       }
       rec.onstop = () => {
         stream.getTracks().forEach((t) => t.stop())
-        setGrabando(false)
-        setSegGrab(0)
-        if (grabTimerRef.current) clearInterval(grabTimerRef.current)
+        finalizarGrabacion()
         const blob = new Blob(partes, { type: rec.mimeType || 'audio/webm' })
         if (blob.size === 0) return
         const ext = blob.type.includes('ogg') ? 'ogg' : 'webm'
@@ -365,12 +425,7 @@ export default function WhatsappPage() {
       mediaRecorderRef.current = rec
       rec.start()
       setGrabando(true)
-      const inicio = Date.now()
-      grabTimerRef.current = setInterval(() => {
-        const s = Math.floor((Date.now() - inicio) / 1000)
-        setSegGrab(s)
-        if (s >= 120) detenerGrabacion() // tope 2 min por nota
-      }, 500)
+      iniciarTimerGrab()
     } catch {
       alert('No se pudo acceder al micrófono')
     }
