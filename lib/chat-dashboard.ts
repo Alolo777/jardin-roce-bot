@@ -9,6 +9,7 @@
 
 import { supabaseAdmin } from './supabase'
 import { variantesTelefono } from '../src/conversation/conversation.service'
+import { telefonoPorLid } from '../src/whatsapp/lid-mapping'
 
 // Descripción que identifica en `numeros_ignorados` las pausas creadas
 // desde el dashboard (toma humana por chat). El bot ya filtra esos
@@ -24,6 +25,59 @@ export function telefonoADigitos(telefono: string): string {
 
 export function ultimos10(telefono: string): string {
   return telefonoADigitos(telefono).slice(-10)
+}
+
+// Candidatos para buscar la pausa de un chat en `numeros_ignorados`.
+// Un mismo chat puede estar registrado con dígitos distintos (LID legacy,
+// variantes 52/521, canónico +...): se expanden variantes y se cruza con la
+// tabla de mapeo LID→teléfono en ambas direcciones. Sin esto, pausar y
+// reanudar no se encuentran entre sí.
+export async function candidatosPausa(telefono: string): Promise<string[]> {
+  const set = new Set<string>()
+  const agregar = (d: string) => {
+    const limpio = telefonoADigitos(d)
+    if (!limpio) return
+    set.add(limpio)
+    for (const v of variantesTelefono(limpio)) set.add(v)
+  }
+  agregar(telefono)
+  try {
+    const canon = await resolverTelefonoCanonical(telefono)
+    agregar(canon)
+    const mapeado = await telefonoPorLid(telefonoADigitos(telefono))
+    if (mapeado) agregar(mapeado)
+    const { data: maps } = await supabaseAdmin
+      .from('mapeo_lid_telefono')
+      .select('lid, telefono')
+    for (const m of (maps ?? []) as any[]) {
+      const telMap = telefonoADigitos(String(m.telefono ?? ''))
+      if (telMap && set.has(telMap)) agregar(String(m.lid ?? ''))
+    }
+  } catch {
+    // best effort: al menos van las variantes directas
+  }
+  return [...set]
+}
+
+export async function estadoPausa(
+  telefono: string
+): Promise<{ pausado: boolean; pausaPropia: boolean }> {
+  const cands = await candidatosPausa(telefono)
+  if (cands.length === 0) return { pausado: false, pausaPropia: false }
+  try {
+    const { data } = await supabaseAdmin
+      .from('numeros_ignorados')
+      .select('numero, descripcion')
+      .in('numero', cands)
+    const filas = data ?? []
+    if (filas.length === 0) return { pausado: false, pausaPropia: false }
+    return {
+      pausado: true,
+      pausaPropia: filas.some((f: any) => f.descripcion === TOMA_HUMANA_DESCRIPCION),
+    }
+  } catch {
+    return { pausado: false, pausaPropia: false }
+  }
 }
 
 // Resuelve el valor EXACTO guardado en `clientes.telefono` para un

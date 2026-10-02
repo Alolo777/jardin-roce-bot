@@ -44,11 +44,12 @@ export async function POST(req: NextRequest) {
 
     const canonico = await resolverTelefonoCanonical(telefonoParam)
 
-    // 1. Pausa por chat (idempotente; no pisa silenciados permanentes)
+    // 1. Pausa por chat con el formato estable del canónico (idempotente;
+    // no pisa silenciados permanentes). Reanudar la encuentra por variantes.
     await supabaseAdmin
       .from('numeros_ignorados')
       .upsert(
-        { numero: digitos, descripcion: TOMA_HUMANA_DESCRIPCION },
+        { numero: telefonoADigitos(canonico), descripcion: TOMA_HUMANA_DESCRIPCION },
         { onConflict: 'numero', ignoreDuplicates: true }
       )
 

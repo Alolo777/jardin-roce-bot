@@ -124,6 +124,21 @@ export function createMessageEntry(deps: MessageEntryDeps) {
       msg.participant,
     ].filter(Boolean) as string[]
     const variantesMensaje = [...new Set(candidatosIgnorar.flatMap(n => variantesTelefono(jidANumero(n))))]
+    // Expansión por mapeo LID→teléfono (caché 10 min): una pausa guardada en
+    // un formato encuentra mensajes que llegan en otro (y viceversa).
+    try {
+      const extra: string[] = []
+      for (const v of variantesMensaje) {
+        const tel = await telefonoPorLid(v)
+        if (tel) {
+          const d = tel.replace(/\D/g, '')
+          extra.push(d, ...variantesTelefono(d))
+        }
+      }
+      for (const x of extra) {
+        if (!variantesMensaje.includes(x)) variantesMensaje.push(x)
+      }
+    } catch { /* best effort */ }
     if (!msg.key?.fromMe && variantesMensaje.some(n => ignorados.includes(n))) {
       // Toma humana desde el dashboard: el mensaje SÍ se guarda para que se
       // vea al instante en la bandeja, pero Flora no responde en este chat.

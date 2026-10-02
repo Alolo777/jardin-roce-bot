@@ -7,6 +7,7 @@ import {
   esChatGrupal,
   TOMA_HUMANA_DESCRIPCION,
 } from '@/lib/chat-dashboard'
+import { variantesTelefono } from '@/src/conversation/conversation.service'
 
 export const dynamic = 'force-dynamic'
 
@@ -127,17 +128,48 @@ export async function GET(req: NextRequest) {
       // tabla opcional
     }
 
-    // 6. Silenciados (pausa por chat + permanentes)
-    const pausaPorDigitos = new Map<string, string | null>()
+    // 6. Silenciados (pausa por chat + permanentes). La coincidencia usa
+    // variantes + mapeo LID para que ningún formato quede huérfano.
+    const ignoradosLista: Array<{ numero: string; descripcion: string | null }> = []
+    const mapeoLista: Array<{ lid: string; telefono: string }> = []
     try {
       const { data: ignorados } = await supabaseAdmin
         .from('numeros_ignorados')
         .select('numero, descripcion')
       for (const n of ignorados ?? []) {
-        pausaPorDigitos.set(ultimos10(n.numero ?? ''), n.descripcion ?? null)
+        ignoradosLista.push({ numero: String(n.numero ?? ''), descripcion: n.descripcion ?? null })
+      }
+      const { data: maps } = await supabaseAdmin
+        .from('mapeo_lid_telefono')
+        .select('lid, telefono')
+      for (const m of (maps ?? []) as any[]) {
+        mapeoLista.push({ lid: String(m.lid ?? ''), telefono: String(m.telefono ?? '') })
       }
     } catch {
-      // tabla opcional
+      // tablas opcionales
+    }
+    function pausaDe(telefono: string): { pausado: boolean; propia: boolean } {
+      const set = new Set<string>()
+      const agregar = (v: string) => {
+        const d = telefonoADigitos(v)
+        if (!d) return
+        set.add(d)
+        for (const x of variantesTelefono(d)) set.add(x)
+      }
+      agregar(telefono)
+      for (const m of mapeoLista) {
+        if (set.has(telefonoADigitos(m.telefono))) agregar(m.lid)
+        if (set.has(telefonoADigitos(m.lid))) agregar(m.telefono)
+      }
+      let pausado = false
+      let propia = false
+      for (const n of ignoradosLista) {
+        if (set.has(telefonoADigitos(n.numero))) {
+          pausado = true
+          if (n.descripcion === TOMA_HUMANA_DESCRIPCION) propia = true
+        }
+      }
+      return { pausado, propia }
     }
 
     // 7. Armar respuesta + filtro de búsqueda
@@ -150,7 +182,7 @@ export async function GET(req: NextRequest) {
       const d10 = ultimos10(telefono)
       const pedido = pedidoPorDigitos.get(d10) ?? null
       const caso = casoPorDigitos.get(d10) ?? null
-      const descripcionPausa = pausaPorDigitos.get(d10)
+      const pausa = pausaDe(telefono)
       const nombre = pedido?.cliente_nombre ?? null
 
       if (q) {
@@ -169,8 +201,8 @@ export async function GET(req: NextRequest) {
         ultimoLado: clasificarLado(e.ultimo.rol, e.ultimo.origen, e.ultimo.contenido),
         ultimaActividad: e.ultimo.creado_en,
         noLeidos: Math.min(e.noLeidos, 99),
-        pausado: descripcionPausa !== undefined,
-        pausaPropia: descripcionPausa === TOMA_HUMANA_DESCRIPCION,
+        pausado: pausa.pausado,
+        pausaPropia: pausa.propia,
         pedido: pedido
           ? {
               producto: pedido.producto ?? null,

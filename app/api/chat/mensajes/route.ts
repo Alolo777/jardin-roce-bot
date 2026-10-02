@@ -5,7 +5,7 @@ import {
   ultimos10,
   resolverTelefonoCanonical,
   telefonoParaMostrar,
-  TOMA_HUMANA_DESCRIPCION,
+  estadoPausa,
 } from '@/lib/chat-dashboard'
 
 export const dynamic = 'force-dynamic'
@@ -107,12 +107,9 @@ export async function GET(req: NextRequest) {
       // tabla opcional o columna telefono inexistente en instalaciones viejas
     }
     try {
-      const { data } = await supabaseAdmin
-        .from('numeros_ignorados')
-        .select('numero, descripcion')
-      const fila = (data ?? []).find((n) => ultimos10(n.numero ?? '') === d10)
-      pausado = Boolean(fila)
-      pausaPropia = fila?.descripcion === TOMA_HUMANA_DESCRIPCION
+      const estado = await estadoPausa(cliente.telefono)
+      pausado = estado.pausado
+      pausaPropia = estado.pausaPropia
     } catch {
       // tabla opcional
     }
