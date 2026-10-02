@@ -138,6 +138,7 @@ export default function WhatsappPage() {
   const [errorChat, setErrorChat] = useState<string | null>(null)
   const [texto, setTexto] = useState('')
   const [enviando, setEnviando] = useState(false)
+  const [errorOculto, setErrorOculto] = useState<string | null>(null)
   const [adjunto, setAdjunto] = useState<AdjuntoPendiente | null>(null)
   const [subiendo, setSubiendo] = useState(false)
   const [grabando, setGrabando] = useState(false)
@@ -264,6 +265,7 @@ export default function WhatsappPage() {
     setDetalle(null)
     setTexto('')
     setAdjunto(null)
+    setErrorOculto(null)
     setVerContacto(false)
     // Limpieza visual local del badge (el servidor lo recalcula)
     setConversaciones((prev) =>
@@ -679,9 +681,19 @@ export default function WhatsappPage() {
                   ⏳ {detalle.outbox.pendientes} mensaje(s) en camino (el bot los envía en segundos)...
                 </div>
               )}
-              {detalle?.outbox.ultimoError && (
-                <div className="px-4 py-1.5 text-[11px] text-rose-700 bg-rose-50 border-t border-rose-100 truncate">
-                  ⚠️ No se pudo enviar: “{detalle.outbox.ultimoError.texto.slice(0, 60)}” ({detalle.outbox.ultimoError.detalle ?? 'error de entrega'}). Reescríbelo para reintentar.
+              {detalle?.outbox.ultimoError && errorOculto !== detalle.outbox.ultimoError.fecha && (
+                <div className="px-4 py-1.5 text-[11px] text-rose-700 bg-rose-50 border-t border-rose-100 flex items-center gap-2">
+                  <span className="flex-1 truncate">
+                    ⚠️ No se pudo enviar{detalle.outbox.ultimoError.texto ? ` “${detalle.outbox.ultimoError.texto.slice(0, 60)}”` : ''} ({detalle.outbox.ultimoError.detalle ?? 'error de entrega'}). Vuelve a intentarlo.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setErrorOculto(detalle.outbox.ultimoError!.fecha)}
+                    className="font-bold hover:text-rose-900"
+                    title="Ocultar"
+                  >
+                    ✕
+                  </button>
                 </div>
               )}
 

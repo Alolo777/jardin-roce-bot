@@ -117,7 +117,10 @@ async function procesarUno(sock: any, m: OutboxRow): Promise<void> {
     await marcar(m.id, 'error', 'Vencido: más de 24h en cola, ya no se envía')
     return
   }
-  if (!texto) {
+  // El texto vacío solo es error en mensajes de texto: en medios es el
+  // caption opcional (el archivo va en media_path).
+  const tipo = (m.tipo as TipoOutbox) || 'texto'
+  if (!texto && tipo === 'texto') {
     await marcar(m.id, 'error', 'Texto vacío')
     return
   }
@@ -136,7 +139,6 @@ async function procesarUno(sock: any, m: OutboxRow): Promise<void> {
     .maybeSingle()
   if (!claim) return
 
-  const tipo = (m.tipo as TipoOutbox) || 'texto'
   const caption = texto
 
   // Si el destino es un LID con teléfono conocido, operar sobre la fila

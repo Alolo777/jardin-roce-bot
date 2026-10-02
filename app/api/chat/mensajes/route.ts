@@ -117,25 +117,36 @@ export async function GET(req: NextRequest) {
       // tabla opcional
     }
 
-    // Estado del outbox para este chat (pendientes + último error visible en el composer)
+    // Estado del outbox para este chat (pendientes + último error RELEVANTE).
+    // Para no naggear con fallos viejos: solo errores de las últimas 2h y
+    // posteriores al último envío exitoso. Más un ✕ local en la UI.
     let outboxPendientes = 0
     let outboxUltimoError: { texto: string; detalle: string | null; fecha: string } | null = null
     try {
       const { data } = await supabaseAdmin
         .from('mensajes_outbox_equipo')
-        .select('estado, texto, error_detalle, actualizado_en')
+        .select('estado, texto, error_detalle, creado_en, actualizado_en')
         .eq('telefono', canonico)
         .order('creado_en', { ascending: false })
         .limit(10)
-      outboxPendientes = (data ?? []).filter((o) =>
+      const filas = data ?? []
+      outboxPendientes = filas.filter((o) =>
         ['pendiente', 'enviando'].includes(o.estado)
       ).length
-      const ultimoError = (data ?? []).find((o) => o.estado === 'error')
+      const ultimoExito = filas.find((o) => o.estado === 'enviado')
+      const ultimoError = filas.find((o) => o.estado === 'error')
       if (ultimoError) {
-        outboxUltimoError = {
-          texto: ultimoError.texto,
-          detalle: ultimoError.error_detalle,
-          fecha: ultimoError.actualizado_en,
+        const esReciente =
+          Date.now() - new Date(ultimoError.creado_en).getTime() < 2 * 60 * 60_000
+        const esPosteriorAlExito =
+          !ultimoExito ||
+          new Date(ultimoError.creado_en).getTime() > new Date(ultimoExito.creado_en).getTime()
+        if (esReciente && esPosteriorAlExito) {
+          outboxUltimoError = {
+            texto: ultimoError.texto,
+            detalle: ultimoError.error_detalle,
+            fecha: ultimoError.actualizado_en,
+          }
         }
       }
     } catch {
