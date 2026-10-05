@@ -113,6 +113,46 @@ export interface Persistido {
   mimetype: string
 }
 
+// Sube un buffer al bucket y devuelve su path (o null si falla).
+// Comprime fotos; audios/docs pasan tal cual (con sus topes).
+export async function subirMediaAStorage(
+  buffer: Buffer,
+  mimetype: string,
+  telefonoCanon: string
+): Promise<{ path: string; mimetype: string } | null> {
+  let buf = buffer
+  let mime = mimetype
+  let ext = extensionPara(mimetype)
+  if (mime.split(';')[0].trim().toLowerCase().startsWith('image/')) {
+    try {
+      const comprimida = await comprimirImagen(buffer, mimetype)
+      if (comprimida) {
+        console.log(
+          `[media-inbox] 🗜️ Foto ${Math.round(buffer.length / 1024)}KB → ${Math.round(comprimida.buffer.length / 1024)}KB`
+        )
+        buf = comprimida.buffer
+        mime = comprimida.mimetype
+        ext = 'jpg'
+      }
+    } catch { /* se sube la original */ }
+  }
+  try {
+    const digitos = String(telefonoCanon ?? '').replace(/\D/g, '')
+    const path = rutaMedia(digitos, randomUUID(), ext)
+    const { error: upError } = await supabaseAdmin.storage
+      .from(MEDIA_BUCKET)
+      .upload(path, buf, {
+        contentType: mime.split(';')[0].trim() || 'application/octet-stream',
+        upsert: false,
+      })
+    if (upError) throw upError
+    return { path, mimetype: mime }
+  } catch (err) {
+    console.error('[media-inbox] Error subiendo:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
 // Sube el medio a Storage y registra el marcador en el historial.
 // telefonoCanon: formato +teléfono (o el valor ya resuelto de la fila).
 export async function persistirMediaEntrante(
@@ -120,51 +160,27 @@ export async function persistirMediaEntrante(
   media: MediaDescargado,
   caption?: string
 ): Promise<Persistido | null> {
-  // Comprimir fotos para cuidar el almacenamiento (audios/docs pasan tal cual).
-  let buffer = media.buffer
-  let mimetype = media.mimetype
-  let ext = extensionPara(media.mimetype)
-  if (media.tipo === 'imagen') {
-    try {
-      const comprimida = await comprimirImagen(media.buffer, media.mimetype)
-      if (comprimida) {
-        console.log(
-          `[media-inbox] 🗜️ Foto ${Math.round(media.buffer.length / 1024)}KB → ${Math.round(comprimida.buffer.length / 1024)}KB`
-        )
-        buffer = comprimida.buffer
-        mimetype = comprimida.mimetype
-        ext = 'jpg'
-      }
-    } catch { /* se sube la original */ }
-  }
-
   const cap = String(caption ?? '').trim().slice(0, 200)
   const marcador = cap || marcadorMedia(media.tipo, media.nombre, media.duracionSeg)
 
   // Si el upload falla (ej. bucket aún no creado), se guarda el marcador de
   // texto para no perder el mensaje en la bandeja.
-  try {
-    const digitos = String(telefonoCanon ?? '').replace(/\D/g, '')
-    const path = rutaMedia(digitos, randomUUID(), ext)
-    const { error: upError } = await supabaseAdmin.storage
-      .from(MEDIA_BUCKET)
-      .upload(path, buffer, {
-        contentType: mimetype.split(';')[0].trim() || 'application/octet-stream',
-        upsert: false,
-      })
-    if (upError) throw upError
-
-    await agregarAlHistorial(telefonoCanon, 'user', marcador, OrigenMensaje.CLIENTE, {
-      mediaTipo: media.tipo,
-      mediaUrl: path,
-    })
-    console.log(`[media-inbox] ✅ ${media.tipo} guardado: ${path}`)
-    return { url: path, marcador, tipo: media.tipo, mimetype }
-  } catch (err) {
-    console.error('[media-inbox] Error subiendo (se guarda solo marcador):', err instanceof Error ? err.message : err)
+  const subido = await subirMediaAStorage(media.buffer, media.mimetype, telefonoCanon)
+  if (subido) {
     try {
-      await agregarAlHistorial(telefonoCanon, 'user', marcador, OrigenMensaje.CLIENTE)
-    } catch { /* último recurso: no fatal */ }
-    return { url: '', marcador, tipo: media.tipo, mimetype }
+      await agregarAlHistorial(telefonoCanon, 'user', marcador, OrigenMensaje.CLIENTE, {
+        mediaTipo: media.tipo,
+        mediaUrl: subido.path,
+      })
+      console.log(`[media-inbox] ✅ ${media.tipo} guardado: ${subido.path}`)
+      return { url: subido.path, marcador, tipo: media.tipo, mimetype: subido.mimetype }
+    } catch (err) {
+      console.error('[media-inbox] Error guardando marcador:', err instanceof Error ? err.message : err)
+      return { url: subido.path, marcador, tipo: media.tipo, mimetype: subido.mimetype }
+    }
   }
+  try {
+    await agregarAlHistorial(telefonoCanon, 'user', marcador, OrigenMensaje.CLIENTE)
+  } catch { /* último recurso: no fatal */ }
+  return { url: '', marcador, tipo: media.tipo, mimetype: media.mimetype }
 }

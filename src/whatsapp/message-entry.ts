@@ -21,7 +21,7 @@ import {
 } from './preferences.service'
 import { TOMA_HUMANA_DESCRIPCION } from '../../lib/chat-dashboard'
 import { obtenerNumeroReal } from './contact.service'
-import { descargarMediaConMime, persistirMediaEntrante, conTimeout, TIMEOUT_DESCARGA_MS } from './media-inbox.service'
+import { descargarMediaConMime, persistirMediaEntrante, subirMediaAStorage, conTimeout, TIMEOUT_DESCARGA_MS } from './media-inbox.service'
 import {
   telefonoPorLid,
   registrarMapeoLid,
@@ -38,7 +38,7 @@ export interface MessageEntryDeps {
   marcarFotosDisponibles: (clienteId: string) => void
   encolarPorCliente: (id: string, tarea: () => Promise<void>) => void
   encolarMensajeAgrupado: (clienteId: string, msg: any) => void
-  procesarMensajeEquipo: (remoteJid: string, msgType: string, body: string) => Promise<void>
+  procesarMensajeEquipo: (remoteJid: string, msgType: string, body: string, media?: { tipo: 'imagen' | 'audio' | 'documento'; url: string }) => Promise<void>
   verificarSiBotPausado: () => Promise<boolean>
   mediaToBase64: (media: Buffer | Uint8Array | ArrayBuffer) => string
   TIPOS_MEDIA_NO_SOPORTADOS: Set<string>
@@ -197,8 +197,8 @@ export function createMessageEntry(deps: MessageEntryDeps) {
     }
 
     if (msg.key?.fromMe) {
-      const esMediaEquipo = msgType === 'image' || msgType === 'document'
-      if (esMediaEquipo) marcarFotosDisponibles(remoteJid)
+      const esMediaEquipo = msgType === 'image' || msgType === 'document' || msgType === 'audio'
+      if (msgType === 'image' || msgType === 'document') marcarFotosDisponibles(remoteJid)
       if (body || esMediaEquipo) {
         // Si el chat LID tiene teléfono conocido, el eco se procesa con el
         // JID del teléfono para caer en la fila canónica (+teléfono) en vez
@@ -211,7 +211,20 @@ export function createMessageEntry(deps: MessageEntryDeps) {
             if (/^52\d{10,12}$/.test(d)) jidEquipo = `${d}@s.whatsapp.net`
           } catch { /* legado: JID original */ }
         }
-        encolarPorCliente(jidEquipo, () => procesarMensajeEquipo(jidEquipo, msgType, body))
+        // Medios del equipo (teléfono principal): se suben a Storage para que
+        // se vean en el panel web; el texto/caption lo registra el handler.
+        let mediaAdjunta: { tipo: 'imagen' | 'audio' | 'documento'; url: string } | undefined
+        if (msgType === 'image' || msgType === 'document' || msgType === 'audio') {
+          try {
+            const descargado = await conTimeout(descargarMediaConMime(msg), TIMEOUT_DESCARGA_MS, 'descarga media equipo')
+            if (descargado) {
+              const digitos = jidANumero(jidEquipo).replace(/\D/g, '')
+              const subido = await subirMediaAStorage(descargado.buffer, descargado.mimetype, digitos)
+              if (subido) mediaAdjunta = { tipo: descargado.tipo, url: subido.path }
+            }
+          } catch { /* sigue sin adjunto (legado) */ }
+        }
+        encolarPorCliente(jidEquipo, () => procesarMensajeEquipo(jidEquipo, msgType, body, mediaAdjunta))
       }
       return
     }

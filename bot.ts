@@ -1010,27 +1010,35 @@ function esMensajeFotosDisponiblesEquipo(texto: string): boolean {
   return /\b(esos?|estos?|ramitos?|ramos?|arreglos?)\b.*\b(disponibles?|tenemos|hay)\b|\b(disponibles?|tenemos|hay)\b.*\b(esos?|estos?|ramitos?|ramos?|arreglos?)\b/i.test(texto)
 }
 
-export async function procesarMensajeEquipo(remoteJid: string, msgType: string, body: string): Promise<void> {
+export async function procesarMensajeEquipo(
+  remoteJid: string,
+  msgType: string,
+  body: string,
+  media?: { tipo: 'imagen' | 'audio' | 'documento'; url: string }
+): Promise<void> {
   const telefonoDestino = remoteJid.replace(/@[^\s]*/g, '').trim()
   if (!telefonoDestino) return
   const num = telefonoDestino.startsWith('52') ? `+${telefonoDestino}` : telefonoDestino
   if (msgType === 'image' || msgType === 'document') marcarFotosDisponibles(remoteJid)
   const texto = (body ?? '').trim()
+  const mediaCols = media?.url ? { mediaTipo: media.tipo, mediaUrl: media.url } : undefined
 
-  // El equipo envió solo multimedia (foto/documento sin texto): se registra como
-  // intervención verificada para que la IA sepa que el equipo ya respondió con
-  // una imagen/documento, sin modificar el estado del pedido.
+  // El equipo envió solo multimedia (foto/documento/audio sin texto): se registra
+  // como intervención verificada para que la IA sepa que el equipo ya respondió,
+  // sin modificar el estado del pedido.
   if (!texto) {
-    if (msgType === 'image' || msgType === 'document') {
-      const textoMedia = msgType === 'document' ? 'envió un documento' : 'envió una foto'
+    if (msgType === 'image' || msgType === 'document' || msgType === 'audio' || media) {
+      const textoMedia = media
+        ? media.tipo === 'imagen' ? 'envió una foto' : media.tipo === 'audio' ? 'envió una nota de voz' : 'envió un documento'
+        : msgType === 'document' ? 'envió un documento' : msgType === 'audio' ? 'envió una nota de voz' : 'envió una foto'
       registrarIntervencionHumana(remoteJid, textoMedia)
-      await agregarAlHistorial(num, 'assistant', `[Agente: ${textoMedia}]`, OrigenMensaje.EQUIPO)
+      await agregarAlHistorial(num, 'assistant', `[Agente: ${textoMedia}]`, OrigenMensaje.EQUIPO, mediaCols)
     }
     return
   }
 
   registrarIntervencionHumana(remoteJid, texto)
-  await agregarAlHistorial(num, 'assistant', `[Agente: ${texto}]`, OrigenMensaje.EQUIPO)
+  await agregarAlHistorial(num, 'assistant', `[Agente: ${texto}]`, OrigenMensaje.EQUIPO, mediaCols)
   if (esMensajeFotosDisponiblesEquipo(texto)) marcarFotosDisponibles(remoteJid)
   const precioAgente = extraerPrecioRespuesta(texto)
   if (precioAgente) {
